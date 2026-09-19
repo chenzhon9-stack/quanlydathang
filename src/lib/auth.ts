@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { MOCK_USERS } from "@/mocks/data";
 import type { UserContext, AccessScope, Role } from "@/types";
 import { normalizeRole, permissionsForRole } from "@/lib/permissions";
@@ -8,6 +9,9 @@ import { SHEETS } from "@/lib/sheets/constants";
 /**
  * Stateless session token — bắt buộc trên Vercel serverless.
  * Token = vh1.<base64url JSON { user, exp }>
+ *
+ * Login: ưu tiên sheet User → fallback mock.
+ * Password: plain text (V21 legacy) hoặc SHA-256 / MD5 hex.
  */
 
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
@@ -39,9 +43,10 @@ type TokenPayload = {
 
 function pick(row: Record<string, string>, keys: string[]): string {
   for (const k of keys) {
-    if (row[k] != null && String(row[k]).trim() !== "") return String(row[k]).trim();
+    if (row[k] != null && String(row[k]).trim() !== "")
+      return String(row[k]).trim();
     const found = Object.keys(row).find(
-      (h) => h.toLowerCase() === k.toLowerCase()
+      (h) => h.toLowerCase().replace(/\s/g, "") === k.toLowerCase().replace(/\s/g, "")
     );
     if (found && row[found] != null && String(row[found]).trim() !== "")
       return String(row[found]).trim();
@@ -49,65 +54,168 @@ function pick(row: Record<string, string>, keys: string[]): string {
   return "";
 }
 
+/** V21 verifyUserManual — TrangThai + HoatDong */
+function checkUserStatus(row: Record<string, string>): { ok: boolean; reason?: string } {
+  const trangThai = pick(row, ["TrangThai", "Status", "Trạng thái"]) || "Approved";
+  const tt = trangThai.trim();
+  if (tt === "Pending")
+    return { ok: false, reason: "Tài khoản đang chờ admin duyệt." };
+  if (tt === "Rejected")
+    return { ok: false, reason: "Tài khoản đã bị từ chối." };
+  if (tt === "Locked" || tt.toLowerCase() === "locked")
+    return { ok: false, reason: "Tài khoản đang bị khóa." };
+
+  const active = pick(row, ["HoatDong", "Active", "IsActive", "Hoạt động"]).toLowerCase();
+  if (["false", "0", "no", "không", "khoa", "khóa"].includes(active)) {
+    return { ok: false, reason: "Tài khoản chưa kích hoạt hoặc đã bị khóa." };
+  }
+  return { ok: true };
+}
+
 function isActiveUser(row: Record<string, string>): boolean {
-  const hoatDong = pick(row, ["HoatDong", "Active", "IsActive"]).toLowerCase();
-  const trangThai = pick(row, ["TrangThai", "Status"]).toLowerCase();
-  if (hoatDong === "false" || hoatDong === "0" || hoatDong === "không")
-    return false;
-  if (
-    trangThai.includes("khóa") ||
-    trangThai.includes("khoa") ||
-    trangThai === "inactive" ||
-    trangThai === "disabled"
-  )
-    return false;
-  return true;
+  return checkUserStatus(row).ok;
+}
+
+/**
+ * V21 _hashPassword_(email, plain):
+ * SHA-256( email_lower + ":" + plain + ":" + salt )
+ * salt = SECRET_SALT | SALT | SPREADSHEET_ID (Script Properties)
+ */
+function getAuthSalt(): string {
+  return (
+    process.env.SECRET_SALT ||
+    process.env.GOOGLE_AUTH_SALT ||
+    process.env.SALT ||
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
+    ""
+  );
+}
+
+/** Giống Utilities.computeDigest SHA_256 → hex lowercase từng byte */
+function hashPasswordV21(email: string, plain: string, salt?: string): string {
+  const e = String(email || "").toLowerCase().trim();
+  const p = String(plain || "");
+  const s = salt ?? getAuthSalt();
+  const raw = `${e}:${p}:${s}`;
+  return createHash("sha256").update(raw, "utf8").digest("hex");
+}
+
+function passwordMatches(
+  sheetPass: string,
+  email: string,
+  input: string
+): boolean {
+  if (!sheetPass) return false;
+  const stored = sheetPass.trim();
+  const plain = String(input);
+
+  // 1) V21 canonical hash
+  const hashed = hashPasswordV21(email, plain);
+  if (stored === hashed || stored.toLowerCase() === hashed) return true;
+
+  // 2) Thử salt = spreadsheet id tường minh (nếu env khác)
+  const ssid = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "";
+  if (ssid && getAuthSalt() !== ssid) {
+    const h2 = hashPasswordV21(email, plain, ssid);
+    if (stored === h2 || stored.toLowerCase() === h2) return true;
+  }
+
+  // 3) Legacy plain (chỉ khi sheet chưa migrate hash)
+  if (stored === plain || stored === plain.trim()) return true;
+
+  return false;
 }
 
 function userFromSheetRow(row: Record<string, string>): UserContext | null {
-  const email = pick(row, ["Email", "email"]).toLowerCase();
-  if (!email) return null;
-  const role = normalizeRole(pick(row, ["Role", "VaiTro", "role"]));
+  const email = pick(row, ["Email", "email", "E-mail"]).toLowerCase();
+  if (!email || !email.includes("@")) return null;
+  const role = normalizeRole(pick(row, ["Role", "VaiTro", "Vai trò", "role"]));
   return {
     email,
     role,
-    quanly: pick(row, ["Quanly", "QuanLy", "quanly"]) || "",
-    hoTen: pick(row, ["HoTen", "Ho_Ten", "Name", "Ten"]) || email,
+    quanly: pick(row, ["Quanly", "QuanLy", "Quản lý", "quanly"]) || "",
+    hoTen:
+      pick(row, ["HoTen", "Ho_Ten", "Name", "Ten", "Họ tên", "Ho Va Ten"]) ||
+      email,
     permissions: permissionsForRole(role),
   };
+}
+
+async function findUserRow(
+  emailLc: string
+): Promise<{ row: Record<string, string>; sheet: string } | null> {
+  // Thử tab User / Users
+  const candidates = [SHEETS.USER, "Users", "USER", "TaiKhoan"];
+  for (const name of candidates) {
+    try {
+      const rows = await readSheetAsObjects(name, {});
+      if (!rows.length) continue;
+      console.info(
+        `[Auth] sheet="${name}" rows=${rows.length} headers=${Object.keys(rows[0] || {}).slice(0, 8).join("|")}`
+      );
+      const row = rows.find(
+        (r) => pick(r, ["Email", "email", "E-mail"]).toLowerCase() === emailLc
+      );
+      if (row) return { row, sheet: name };
+    } catch (e) {
+      console.info(`[Auth] skip sheet ${name}:`, (e as Error)?.message || e);
+    }
+  }
+  return null;
 }
 
 async function loginFromSheet(
   email: string,
   password: string
-): Promise<UserContext | null> {
-  if (!isSheetsConfigured()) return null;
+): Promise<{ user: UserContext | null; reason?: string }> {
+  if (!isSheetsConfigured()) {
+    return { user: null, reason: "SHEETS_NOT_CONFIGURED" };
+  }
   try {
-    const rows = await readSheetAsObjects(SHEETS.USER, {});
-    const emailLc = email.toLowerCase();
-    const row = rows.find(
-      (r) => pick(r, ["Email", "email"]).toLowerCase() === emailLc
-    );
-    if (!row) {
-      console.info("[Auth] User sheet: email not found", emailLc);
-      return null;
+    const found = await findUserRow(email.toLowerCase());
+    if (!found) {
+      console.info("[Auth] email not on User sheet:", email);
+      return { user: null, reason: "USER_NOT_FOUND_ON_SHEET" };
     }
-    if (!isActiveUser(row)) {
-      console.info("[Auth] User inactive", emailLc);
-      return null;
+    const { row, sheet } = found;
+    const status = checkUserStatus(row);
+    if (!status.ok) {
+      console.info("[Auth] user blocked", email, status.reason, "sheet=", sheet);
+      return { user: null, reason: "USER_INACTIVE" };
     }
-    const sheetPass = pick(row, ["Password", "MatKhau", "password"]);
-    // V21 legacy: so sánh plain text (GAS webapp)
-    if (sheetPass !== password) {
-      console.info("[Auth] Password mismatch for sheet user", emailLc);
-      return null;
+    const sheetPass = pick(row, [
+      "Password",
+      "MatKhau",
+      "Mật khẩu",
+      "password",
+      "Pass",
+      "MK",
+    ]);
+    if (!sheetPass) {
+      console.info("[Auth] empty password cell", email);
+      return { user: null, reason: "PASSWORD_EMPTY_ON_SHEET" };
+    }
+    if (!passwordMatches(sheetPass, email, password)) {
+      console.info(
+        "[Auth] password mismatch",
+        email,
+        "sheetPassLen=",
+        sheetPass.length,
+        "v21hashPrefix=",
+        hashPasswordV21(email, password).slice(0, 8),
+        "saltLen=",
+        getAuthSalt().length
+      );
+      return { user: null, reason: "PASSWORD_MISMATCH" };
     }
     const user = userFromSheetRow(row);
-    if (user) console.info("[Auth] Sheet login OK", user.email, user.role);
-    return user;
+    if (user) {
+      console.info("[Auth] Sheet login OK", user.email, user.role, "from", sheet);
+    }
+    return { user };
   } catch (e) {
     console.error("[Auth] User sheet read failed", e);
-    return null;
+    return { user: null, reason: "SHEET_READ_ERROR" };
   }
 }
 
@@ -117,14 +225,21 @@ function loginFromMock(
 ): UserContext | null {
   const record = MOCK_USERS[email.toLowerCase()];
   if (!record || record.password !== password) return null;
-  // rebuild permissions từ matrix (đồng bộ STEP 6)
   const role = record.user.role;
   return {
     ...record.user,
-    permissions:
-      role === "ADMIN" ? ["*"] : permissionsForRole(role as Role),
+    permissions: role === "ADMIN" ? ["*"] : permissionsForRole(role as Role),
   };
 }
+
+export type LoginFailReason =
+  | "SHEETS_NOT_CONFIGURED"
+  | "USER_NOT_FOUND_ON_SHEET"
+  | "USER_INACTIVE"
+  | "PASSWORD_EMPTY_ON_SHEET"
+  | "PASSWORD_MISMATCH"
+  | "SHEET_READ_ERROR"
+  | "MOCK_MISS";
 
 export async function login(
   email: string,
@@ -133,10 +248,24 @@ export async function login(
   const emailLc = String(email).toLowerCase().trim();
   const pass = String(password);
 
-  // 1) Sheet User (ưu tiên)
-  let user = await loginFromSheet(emailLc, pass);
-  // 2) Fallback mock (dev / khi sheet không có user)
-  if (!user) user = loginFromMock(emailLc, pass);
+  // 1) Sheet User
+  const sheetResult = await loginFromSheet(emailLc, pass);
+  let user = sheetResult.user;
+
+  // 2) Fallback mock (dev accounts)
+  if (!user) {
+    user = loginFromMock(emailLc, pass);
+    if (user) {
+      console.info("[Auth] Mock login OK", user.email);
+    } else {
+      console.info(
+        "[Auth] Login failed",
+        emailLc,
+        "sheetReason=",
+        sheetResult.reason || "none"
+      );
+    }
+  }
   if (!user) return null;
 
   const exp = Date.now() + TOKEN_TTL_MS;
@@ -158,7 +287,6 @@ export function getCurrentUser(token: string | null): UserContext | null {
   if (!payload?.user?.email || !payload.exp) return null;
   if (payload.exp < Date.now()) return null;
 
-  // Refresh permissions from matrix (role in token may be stale matrix)
   const role = payload.user.role;
   if (role === "ADMIN") {
     payload.user.permissions = ["*"];
@@ -183,7 +311,6 @@ export function resolveScope(user: UserContext): AccessScope {
     return {
       role: user.role,
       scopeType: "OWN_CUSTOMER",
-      // accountCustomerId resolve sau khi có mapping
     };
   }
   return {
@@ -200,4 +327,42 @@ export function hasPermission(user: UserContext, permission: string): boolean {
 
 export function isAdmin(user: UserContext): boolean {
   return user.role === ("ADMIN" as Role);
+}
+
+/** List users from sheet (Admin) — no passwords */
+export async function listUsersFromSheet(): Promise<
+  Array<{
+    email: string;
+    hoTen: string;
+    role: string;
+    quanly: string;
+    active: boolean;
+  }>
+> {
+  if (!isSheetsConfigured()) return [];
+  try {
+    const rows = await readSheetAsObjects(SHEETS.USER, {});
+    return rows
+      .map((row) => {
+        const u = userFromSheetRow(row);
+        if (!u) return null;
+        return {
+          email: u.email,
+          hoTen: u.hoTen,
+          role: u.role,
+          quanly: u.quanly,
+          active: isActiveUser(row),
+        };
+      })
+      .filter(Boolean) as Array<{
+      email: string;
+      hoTen: string;
+      role: string;
+      quanly: string;
+      active: boolean;
+    }>;
+  } catch (e) {
+    console.error("[Auth] listUsersFromSheet", e);
+    return [];
+  }
 }
