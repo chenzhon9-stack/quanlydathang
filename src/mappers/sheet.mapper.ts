@@ -133,6 +133,8 @@ export function mapDetailRow(row: Record<string, string>): OrderDetail {
       return v ? num(v) : undefined;
     })(),
     transportTypeId: pick(row, ["MaHTVT", "HTVT"]) || undefined,
+    transportTypeName: pick(row, ["TenHTVT"]) || undefined,
+    isDuyenHa: pick(row, ["IsDuyenHa"]).toLowerCase() === "true" || pick(row, ["IsDuyenHa"]) === "1",
     phanLoai: pl,
   };
 }
@@ -146,15 +148,15 @@ export function mapDeliveryRow(row: Record<string, string>): Delivery {
     customerName:
       pick(row, ["TenKh", "TenKH", "TenKhachHang", "customerName"]) ||
       undefined,
-    customerDetail: pick(row, ["ChiTietKH", "customerDetail"]) || undefined,
+    customerDetail: pick(row, ["ChitietKh", "ChiTietKH", "customerDetail"]) || undefined,
     plannedQty: num(pick(row, ["KHgiao", "SoLuongKH", "SLKH", "SoLuong", "plannedQty"])),
     actualQty: (() => {
       const v = pick(row, ["ThucGiao", "SLGiao", "actualQty"]);
       return v ? num(v) : undefined;
     })(),
     deliveryDate:
-      pick(row, ["Ngaygiao", "NgayGiao", "NgayGiaoHang", "deliveryDate"]) || undefined,
-    note: pick(row, ["GhiChu", "note"]) || undefined,
+      normalizeSheetDate(pick(row, ["Ngaygiao", "NgayGiao", "NgayGiaoHang", "deliveryDate"])) || undefined,
+    note: pick(row, ["Ghichu", "GhiChu", "note"]) || undefined,
     deleted:
       pick(row, ["Xoa", "Deleted", "IsDeleted"]).toLowerCase() === "true" ||
       pick(row, ["Xoa", "Deleted"]) === "1",
@@ -179,8 +181,8 @@ export function mapPlanRow(row: Record<string, string>): ProductionPlan {
       .split(/[,;|]/)
       .map((s) => s.trim())
       .filter(Boolean),
-    fromDate: pick(row, ["TuNgay", "FromDate", "fromDate"]),
-    toDate: pick(row, ["DenNgay", "ToDate", "toDate"]),
+    fromDate: normalizeSheetDate(pick(row, ["TuNgay", "FromDate", "fromDate"])),
+    toDate: normalizeSheetDate(pick(row, ["DenNgay", "ToDate", "toDate"])),
     plannedQuantity: num(
       pick(row, ["SoLuongKeHoach", "KeHoach", "SanLuongKH", "plannedQuantity"])
     ),
@@ -212,7 +214,7 @@ export function mapPayableRow(row: Record<string, string>): Payable {
 
   return {
     id: pick(row, ["ID_CN", "IdCN", "id"]),
-    date: pick(row, ["NgayCT", "Ngay", "NgayPS", "date"]),
+    date: normalizeSheetDate(pick(row, ["NgayCT", "Ngay", "NgayPS", "date"])),
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName"]) || undefined,

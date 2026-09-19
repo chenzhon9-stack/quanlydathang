@@ -243,7 +243,13 @@ export default function OrdersPage() {
               </div>
             ))}
             {orders.length === 0 && !err && (
-              <div className="text-center py-12 text-slate-400 text-sm">Không có đơn hàng</div>
+              <div className="text-center py-12 text-slate-500 text-sm space-y-2">
+                <p>Không có đơn hàng (API trả 0 dòng).</p>
+                <p className="text-xs text-slate-400">
+                  Nếu vừa nối Sheet: kiểm tra log Vercel hoặc gọi{" "}
+                  <code className="bg-slate-100 px-1 rounded">/api/v1/debug/sheets</code>
+                </p>
+              </div>
             )}
           </div>
 
@@ -304,7 +310,13 @@ export default function OrdersPage() {
               </table>
             </div>
             {orders.length === 0 && !err && (
-              <div className="text-center py-12 text-slate-400 text-sm">Không có đơn hàng</div>
+              <div className="text-center py-12 text-slate-500 text-sm space-y-2">
+                <p>Không có đơn hàng (API trả 0 dòng).</p>
+                <p className="text-xs text-slate-400">
+                  Nếu vừa nối Sheet: kiểm tra log Vercel hoặc gọi{" "}
+                  <code className="bg-slate-100 px-1 rounded">/api/v1/debug/sheets</code>
+                </p>
+              </div>
             )}
           </div>
         </>

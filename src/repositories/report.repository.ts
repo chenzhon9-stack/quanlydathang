@@ -1,6 +1,7 @@
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS as SheetName } from "@/lib/sheets/constants";
+import { yearOfDate } from "@/lib/sheets/date";
 import {
   mapDetailRow,
   mapDeliveryRow,
@@ -67,15 +68,22 @@ export class ReportRepository {
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.plans, { year });
-      return rows
-        .map(mapPlanRow)
-        .filter((p) => p.id)
-        .filter(
-          (p) =>
-            p.fromDate.startsWith(String(year)) ||
-            p.toDate.startsWith(String(year)) ||
-            !p.fromDate
+      let plans = rows.map(mapPlanRow).filter((p) => p.id);
+      console.info(
+        `[ReportRepository] KHSANLUONG raw=${rows.length} mapped=${plans.length} sample=${plans[0]?.id || "-"}`
+      );
+      const byYear = plans.filter((p) => {
+        const y1 = yearOfDate(p.fromDate);
+        const y2 = yearOfDate(p.toDate);
+        return y1 === year || y2 === year || y1 === null;
+      });
+      if (byYear.length === 0 && plans.length > 0) {
+        console.warn(
+          `[ReportRepository] plans year=${year} match=0 total=${plans.length} → all`
         );
+        return plans;
+      }
+      return byYear;
     } catch (e) {
       console.error("[ReportRepository] getPlans failed, fallback mock", e);
       return getPlansByYear(year);
@@ -89,10 +97,22 @@ export class ReportRepository {
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.payables, { year });
-      return rows
-        .map(mapPayableRow)
-        .filter((p) => p.id)
-        .filter((p) => !p.date || p.date.startsWith(String(year)));
+      let payables = rows.map(mapPayableRow).filter((p) => p.id);
+      console.info(
+        `[ReportRepository] NCC_CongNo raw=${rows.length} mapped=${payables.length} sample=${payables[0]?.id || "-"}`
+      );
+      const byYear = payables.filter((p) => {
+        if (!p.date) return true;
+        const y = yearOfDate(p.date);
+        return y === null || y === year;
+      });
+      if (byYear.length === 0 && payables.length > 0) {
+        console.warn(
+          `[ReportRepository] payables year=${year} match=0 total=${payables.length} → all`
+        );
+        return payables;
+      }
+      return byYear;
     } catch (e) {
       console.error("[ReportRepository] getPayables failed, fallback mock", e);
       return getPayablesByYear(year);
@@ -105,10 +125,13 @@ export class ReportRepository {
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.opening, { year });
-      return rows
-        .map(mapOpeningRow)
-        .filter((o) => o.id)
-        .filter((o) => o.year === year || !o.year);
+      let opening = rows.map(mapOpeningRow).filter((o) => o.id);
+      console.info(
+        `[ReportRepository] NCC_DuDauNam raw=${rows.length} mapped=${opening.length}`
+      );
+      const byYear = opening.filter((o) => !o.year || o.year === year);
+      if (byYear.length === 0 && opening.length > 0) return opening;
+      return byYear;
     } catch (e) {
       console.error("[ReportRepository] getOpening failed, fallback mock", e);
       return getOpeningByYear(year);

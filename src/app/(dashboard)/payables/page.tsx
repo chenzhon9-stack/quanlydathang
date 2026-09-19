@@ -20,7 +20,7 @@ export default function PayablesPage() {
     const token = localStorage.getItem("token");
     if (!token) return;
     setLoading(true);
-    fetch(`/api/v1/reports/payables?year=${year}`, {
+    fetch(`/api/v1/finance/payables?year=${year}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -42,7 +42,7 @@ export default function PayablesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Công nợ NCC</h2>
-          <p className="text-xs text-slate-500">Tổng hợp theo nhà cung cấp</p>
+          <p className="text-xs text-slate-500">Sheet NCC_CongNo + NCC_DuDauNam · /api/v1/finance/payables</p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <select
