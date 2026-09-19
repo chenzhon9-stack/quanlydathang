@@ -54,3 +54,11 @@ Demo login: `admin@viethai.local` / `Admin@123`
 API → Auth → ReportService → ReportRepository → Mapper → GoogleSheetsDAL → Sheets
                                          ↘ mock (nếu thiếu env)
 ```
+
+
+## Order read (Phase B)
+
+- `GET /api/v1/orders` đọc sheet tab **`DonHang`** khi có Service Account env.
+- Mapper: `MaDon`, `NgayDatHang`, `MaNCC`, `TenNCC`, `LanGui`, `TrangThaiDon`, `TongSoChitiet`, `ChitietHuy`, `FileDonhang`, `ChoGuiMail`, `timeGuimail`, `GuiLaimail`, `User`.
+- Tab sheet khác tên → sửa `SHEET_ORDERS` trong `src/repositories/order.repository.ts`.
+- Lỗi đọc / thiếu env → fallback mock (app không sập).

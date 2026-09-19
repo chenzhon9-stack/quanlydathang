@@ -1,4 +1,6 @@
 import type {
+  Order,
+  OrderStatus,
   OrderDetail,
   Delivery,
   ProductionPlan,
@@ -19,6 +21,59 @@ function pick(row: Record<string, string>, keys: string[]): string {
     if (row[k] !== undefined && row[k] !== "") return row[k];
   }
   return "";
+}
+
+
+
+/** Map DonHang row → Order (skill Schema: MaDon, NgayDatHang, MaNCC, …) */
+export function mapOrderRow(row: Record<string, string>): Order {
+  const statusRaw = pick(row, [
+    "TrangThaiDon",
+    "TrangThai",
+    "STATUS",
+    "status",
+  ]);
+  const statusMap: Record<string, OrderStatus> = {
+    "Khởi tạo": "NEW",
+    "Mới tạo": "NEW",
+    "Đang xử lý": "PROCESSING",
+    "Đã gửi": "PROCESSING",
+    "Hoàn thành": "DONE",
+    "Hủy đơn": "CANCEL",
+    "Hủy": "CANCEL",
+    NEW: "NEW",
+    PROCESSING: "PROCESSING",
+    DONE: "DONE",
+    CANCEL: "CANCEL",
+  };
+
+  const boolish = (v: string) => {
+    const s = v.toLowerCase();
+    return s === "true" || s === "1" || s === "yes" || s === "x";
+  };
+
+  return {
+    orderId: pick(row, ["MaDon", "Ma_Don", "orderId", "MADON"]),
+    orderDate: pick(row, ["NgayDatHang", "NgayDat", "orderDate", "NGAYDATHANG"]),
+    supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId", "MANCC"]),
+    supplierName:
+      pick(row, ["TenNCC", "Ten_NCC", "supplierName", "TENNCC"]) || undefined,
+    sendCount: num(pick(row, ["LanGui", "SoLanGui", "sendCount"])),
+    status: statusMap[statusRaw] || (statusRaw as OrderStatus) || "NEW",
+    detailCount: num(
+      pick(row, ["TongSoChitiet", "SoChiTiet", "detailCount", "TongCT"])
+    ),
+    cancelledDetailCount: num(
+      pick(row, ["ChitietHuy", "SoCTHuy", "cancelledDetailCount"])
+    ),
+    orderFile:
+      pick(row, ["FileDonhang", "FilePDF", "orderFile", "PDF"]) || undefined,
+    pendingMail: boolish(pick(row, ["ChoGuiMail", "pendingMail", "ChoGui"])),
+    mailSentAt:
+      pick(row, ["timeGuimail", "TimeGuiMail", "mailSentAt"]) || undefined,
+    resendMail: boolish(pick(row, ["GuiLaimail", "GuiLaiMail", "resendMail"])),
+    createdBy: pick(row, ["User", "NguoiTao", "Email", "createdBy", "USER"]),
+  };
 }
 
 /** Map DonHang_Chitiet row → OrderDetail (receiving report) */
