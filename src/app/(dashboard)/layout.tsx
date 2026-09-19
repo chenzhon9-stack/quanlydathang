@@ -40,11 +40,14 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <Sidebar user={user} onLogout={logout} />
+    <div className="h-screen bg-slate-50 flex overflow-hidden">
+      {/* Sidebar cố định — không scroll theo content */}
+      <div className="hidden md:flex md:flex-col md:w-56 lg:w-60 md:shrink-0 md:h-screen md:sticky md:top-0 border-r border-slate-200 bg-white">
+        <Sidebar user={user} onLogout={logout} />
+      </div>
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-        <header className="md:hidden sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        <header className="md:hidden sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shrink-0">
           <div>
             <h1 className="text-base font-bold text-slate-800 leading-tight">
               Quản lý Đặt hàng
@@ -61,7 +64,10 @@ export default function DashboardLayout({
           </button>
         </header>
 
-        <main className="flex-1 p-3 md:p-5 lg:p-6 pb-20 md:pb-6">{children}</main>
+        {/* Chỉ vùng data scroll */}
+        <main className="flex-1 overflow-y-auto p-3 md:p-5 lg:p-6 pb-20 md:pb-6">
+          {children}
+        </main>
       </div>
 
       <MobileNav />

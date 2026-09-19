@@ -60,7 +60,7 @@ export function Sidebar({
   );
 
   return (
-    <aside className="hidden md:flex md:flex-col md:w-56 lg:w-64 bg-slate-900 text-white min-h-screen shrink-0">
+    <aside className="flex flex-col w-full h-full bg-white">
       <div className="px-4 py-5 border-b border-slate-700">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-lg bg-blue-500 flex items-center justify-center font-bold text-sm">
@@ -73,7 +73,7 @@ export function Sidebar({
         </div>
       </div>
 
-      <nav className="flex-1 py-3 px-2 space-y-0.5">
+      <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {visible.map((item) => {
           const active =
             item.href === "/reports/receiving"

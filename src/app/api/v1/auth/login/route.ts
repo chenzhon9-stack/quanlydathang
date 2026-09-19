@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = login(String(email).toLowerCase(), String(password));
+    const result = await login(String(email).toLowerCase(), String(password));
     if (!result) {
       return jsonResponse(
         error("AUTH_INVALID", "Email hoặc mật khẩu không đúng"),

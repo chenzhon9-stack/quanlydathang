@@ -26,9 +26,11 @@ function applyFilters(
   if (filter.orderId) out = out.filter((d) => d.orderId === filter.orderId);
   if (filter.supplierId)
     out = out.filter((d) => d.supplierId === filter.supplierId);
-  return out.sort((a, b) =>
-    (b.orderDate || "").localeCompare(a.orderDate || "")
-  );
+  return out.sort((a, b) => {
+    const d = (b.orderDate || "").localeCompare(a.orderDate || "");
+    if (d !== 0) return d;
+    return (b.detailId || "").localeCompare(a.detailId || "");
+  });
 }
 
 export class DetailRepository {

@@ -24,9 +24,11 @@ function applyFilters(
   if (filter.detailId) out = out.filter((d) => d.detailId === filter.detailId);
   if (filter.customerId)
     out = out.filter((d) => d.customerId === filter.customerId);
-  return out.sort((a, b) =>
-    (b.deliveryDate || "").localeCompare(a.deliveryDate || "")
-  );
+  return out.sort((a, b) => {
+    const d = (b.deliveryDate || "").localeCompare(a.deliveryDate || "");
+    if (d !== 0) return d;
+    return (b.deliveryId || "").localeCompare(a.deliveryId || "");
+  });
 }
 
 export class DeliveryRepository {

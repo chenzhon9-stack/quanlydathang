@@ -22,7 +22,11 @@ function applyFilters(
     out = out.filter((o) => o.status === filter.status);
   if (filter.supplierId)
     out = out.filter((o) => o.supplierId === filter.supplierId);
-  return out.sort((a, b) => (b.orderDate || "").localeCompare(a.orderDate || ""));
+  return out.sort((a, b) => {
+    const d = (b.orderDate || "").localeCompare(a.orderDate || "");
+    if (d !== 0) return d;
+    return (b.orderId || "").localeCompare(a.orderId || "");
+  });
 }
 
 export class OrderRepository {

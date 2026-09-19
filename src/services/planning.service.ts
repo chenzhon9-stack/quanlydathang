@@ -27,6 +27,11 @@ export class PlanningService {
 
     const year = filter.year ?? new Date().getFullYear();
     let plans = await ReportRepository.getPlans(year);
+    plans = plans.sort((a, b) => {
+      const d = (b.fromDate || "").localeCompare(a.fromDate || "");
+      if (d !== 0) return d;
+      return (b.id || "").localeCompare(a.id || "");
+    });
 
     if (filter.supplierId) {
       plans = plans.filter((p: ProductionPlan) => p.supplierId === filter.supplierId);
