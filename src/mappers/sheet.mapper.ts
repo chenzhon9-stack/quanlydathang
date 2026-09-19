@@ -9,6 +9,7 @@ import type {
   DetailStatus,
   PhanLoaiHH,
 } from "@/types";
+import { normalizeSheetDate } from "@/lib/sheets/date";
 
 function num(v: string | undefined): number {
   if (!v) return 0;
@@ -54,7 +55,9 @@ export function mapOrderRow(row: Record<string, string>): Order {
 
   return {
     orderId: pick(row, ["MaDon", "Ma_Don", "orderId", "MADON"]),
-    orderDate: pick(row, ["NgayDatHang", "NgayDat", "orderDate", "NGAYDATHANG"]),
+    orderDate: normalizeSheetDate(
+      pick(row, ["NgayDatHang", "NgayDat", "orderDate", "NGAYDATHANG"])
+    ),
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId", "MANCC"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName", "TENNCC"]) || undefined,
@@ -113,7 +116,7 @@ export function mapDetailRow(row: Record<string, string>): OrderDetail {
   return {
     detailId: pick(row, ["ID_Chitiet", "IdChitiet", "ID_CT", "detailId"]),
     orderId: pick(row, ["MaDon", "Ma_Don", "orderId"]),
-    orderDate: pick(row, ["NgayDatHang", "NgayDat", "orderDate"]),
+    orderDate: normalizeSheetDate(pick(row, ["NgayDatHang", "NgayDat", "orderDate"])),
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId"]),
     vehicleId: pick(row, ["MaXe", "BienSo", "vehicleId"]),
     productId: pick(row, ["MaHH", "Ma_HH", "productId"]),
@@ -124,7 +127,7 @@ export function mapDetailRow(row: Record<string, string>): OrderDetail {
     note: pick(row, ["Ghichu", "GhiChu", "note"]) || undefined,
     status: statusMap[statusRaw] || (statusRaw as DetailStatus) || "NEW",
     receivedDate:
-      pick(row, ["NgayNhanHang", "NgayNhan", "receivedDate"]) || undefined,
+      normalizeSheetDate(pick(row, ["NgayNhanHang", "NgayNhan", "receivedDate"])) || undefined,
     actualReceived: (() => {
       const v = pick(row, ["ThucNhan", "SLNhan", "actualReceived"]);
       return v ? num(v) : undefined;

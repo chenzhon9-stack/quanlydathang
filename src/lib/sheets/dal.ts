@@ -30,8 +30,9 @@ export async function readSheetAsObjects(
     headers.forEach((h, i) => {
       if (!h) return;
       const cell = row[i];
-      obj[h] =
-        cell === null || cell === undefined ? "" : String(cell).trim();
+      if (cell === null || cell === undefined) obj[h] = "";
+      else if (typeof cell === "number") obj[h] = String(cell);
+      else obj[h] = String(cell).trim();
     });
     return obj;
   });
