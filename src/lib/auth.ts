@@ -71,7 +71,7 @@ function userFromSheetRow(row: Record<string, string>): UserContext | null {
   return {
     email,
     role,
-    quanly: pick(row, ["Quanly", "QuanLy", "quanly"]) || undefined,
+    quanly: pick(row, ["Quanly", "QuanLy", "quanly"]) || "",
     hoTen: pick(row, ["HoTen", "Ho_Ten", "Name", "Ten"]) || email,
     permissions: permissionsForRole(role),
   };
