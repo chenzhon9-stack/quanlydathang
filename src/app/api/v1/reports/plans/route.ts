@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
     };
 
     const scope = resolveScope(user);
-    const result = ReportService.getPlans(filter, user, scope);
+    const result = await ReportService.getPlans(filter, user, scope);
     return jsonResponse(success(result.data, result.meta));
   } catch (e: unknown) {
     const err = e as { code?: string; message?: string };

@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ReportSubNav } from "@/components/ReportSubNav";
 
-export default function ReceivingReportPage() {
+export default function ThucGiaoReportPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [meta, setMeta] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -14,7 +13,7 @@ export default function ReceivingReportPage() {
     const token = localStorage.getItem("token");
     if (!token) return;
     setLoading(true);
-    fetch(`/api/v1/reports/receiving?year=${year}&pageSize=100`, {
+    fetch(`/api/v1/reports/deliveries?year=${year}&pageSize=100`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -32,7 +31,7 @@ export default function ReceivingReportPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Báo cáo</h2>
-          <p className="text-xs text-slate-500">Thực nhận · {meta?.total ?? 0} dòng</p>
+          <p className="text-xs text-slate-500">Thực giao · {meta?.total ?? 0} dòng</p>
         </div>
         <div className="flex gap-2 items-center">
           <select
@@ -44,16 +43,10 @@ export default function ReceivingReportPage() {
             <option value={2025}>2025</option>
           </select>
           <button
-            onClick={() => alert("[Mock] Xuất CSV — exportDynamicReportCsv()")}
+            onClick={() => alert("[Mock] Xuất CSV")}
             className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 text-white"
           >
             Xuất CSV
-          </button>
-          <button
-            onClick={() => alert("[Mock] Tùy chỉnh cột — openColumnCustomizer()")}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
-          >
-            Tùy chỉnh cột
           </button>
         </div>
       </div>
@@ -68,27 +61,25 @@ export default function ReceivingReportPage() {
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wide">
-                  <th className="px-3 py-2.5 text-left font-semibold">Mã CT</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Đơn</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Hàng hóa</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Mã GH</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Chi tiết</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Khách hàng</th>
                   <th className="px-3 py-2.5 text-right font-semibold">KH</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Thực nhận</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">Ngày nhận</th>
-                  <th className="px-3 py-2.5 text-left font-semibold">TT</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Thực giao</th>
+                  <th className="px-3 py-2.5 text-left font-semibold">Ngày giao</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.detailId} className="border-t border-slate-100 hover:bg-slate-50">
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{r.detailId}</td>
-                    <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{r.orderId}</td>
-                    <td className="px-3 py-2.5 font-medium">{r.productName || r.productId}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">{r.quantity?.toFixed(2)}</td>
+                  <tr key={r.deliveryId} className="border-t border-slate-100 hover:bg-slate-50">
+                    <td className="px-3 py-2.5 font-mono text-xs">{r.deliveryId}</td>
+                    <td className="px-3 py-2.5 text-blue-700 text-xs font-mono">{r.detailId}</td>
+                    <td className="px-3 py-2.5 font-medium">{r.customerName || r.customerId}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{r.plannedQty?.toFixed(2)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
-                      {r.actualReceived?.toFixed(2) ?? "—"}
+                      {r.actualQty?.toFixed(2) ?? "—"}
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-slate-600">{r.receivedDate || "—"}</td>
-                    <td className="px-3 py-2.5"><StatusBadge status={r.status} /></td>
+                    <td className="px-3 py-2.5 text-xs text-slate-600">{r.deliveryDate || "—"}</td>
                   </tr>
                 ))}
               </tbody>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { VolumeCompareChart } from "@/components/VolumeCompareChart";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -45,17 +46,43 @@ export default function DashboardPage() {
   }, []);
 
   const cards = [
-    { title: "Thực nhận", value: stats.receiving, href: "/reports/receiving", color: "bg-blue-500", desc: "Chi tiết đã nhận hàng" },
-    { title: "Thực giao", value: stats.deliveries, href: "/deliveries", color: "bg-emerald-500", desc: "Lượt giao hàng" },
-    { title: "Kế hoạch SL", value: stats.plans, href: "/plans", color: "bg-violet-500", desc: "Kế hoạch sản lượng" },
-    { title: "Công nợ NCC", value: stats.payables, href: "/reports/receiving", color: "bg-amber-500", desc: "Nhà cung cấp" },
+    {
+      title: "Thực nhận",
+      value: stats.receiving,
+      href: "/reports/receiving",
+      color: "bg-blue-500",
+      desc: "Chi tiết đã nhận hàng",
+    },
+    {
+      title: "Thực giao",
+      value: stats.deliveries,
+      href: "/deliveries",
+      color: "bg-emerald-500",
+      desc: "Lượt giao hàng",
+    },
+    {
+      title: "Kế hoạch SL",
+      value: stats.plans,
+      href: "/plans",
+      color: "bg-violet-500",
+      desc: "Kế hoạch sản lượng",
+    },
+    {
+      title: "Công nợ NCC",
+      value: stats.payables,
+      href: "/payables",
+      color: "bg-amber-500",
+      desc: "Nhà cung cấp",
+    },
   ];
 
   return (
     <div className="space-y-5 max-w-5xl">
       <div>
         <h2 className="text-xl font-bold text-slate-800">Tổng quan</h2>
-        <p className="text-xs text-slate-500">Dữ liệu mock năm 2026 · Light theme</p>
+        <p className="text-xs text-slate-500">
+          Dashboard · biểu đồ YTD / MOM theo Bao–Rời–Khác
+        </p>
       </div>
 
       {loading ? (
@@ -68,7 +95,9 @@ export default function DashboardPage() {
               href={c.href}
               className="bg-white rounded-2xl border border-slate-200 p-4 md:p-5 shadow-sm hover:shadow-md transition"
             >
-              <div className={`w-10 h-10 rounded-xl ${c.color} mb-3 flex items-center justify-center text-white text-sm font-bold`}>
+              <div
+                className={`w-10 h-10 rounded-xl ${c.color} mb-3 flex items-center justify-center text-white text-sm font-bold`}
+              >
                 {c.value}
               </div>
               <div className="text-sm font-semibold text-slate-800">{c.title}</div>
@@ -78,9 +107,13 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="p-4 bg-sky-50 border border-sky-100 rounded-xl text-xs text-sky-800 leading-relaxed">
-        <strong>Giai đoạn mock.</strong> UI: sidebar desktop · card mobile (Đơn/Chi tiết/Giao/KH) · bảng desktop · nút hành động theo V21.
-        Nút hiện tại là mock (alert). Bước tiếp: nối Service Account + API thật.
+      {/* Biểu đồ so sánh sản lượng — skill §11 / D51–D53 */}
+      <VolumeCompareChart />
+
+      <div className="p-3.5 bg-sky-50 border border-sky-100 rounded-xl text-xs text-sky-800 leading-relaxed">
+        <strong>Biểu đồ phase 1 (CSS bar).</strong> Dữ liệu mock theo PhanLoaiHH.
+        Khi Sheet ổn định sẽ aggregate server-side từ Thực nhận / Thực giao.
+        Đổi chế độ: YTD vs năm trước · Tháng này vs tháng trước · bật/tắt Bao–Rời–Khác.
       </div>
     </div>
   );

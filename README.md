@@ -1,47 +1,56 @@
 # Quản lý Đặt hàng (quanlydathang)
 
-Hệ thống Web Order – Next.js / Vercel + Google Sheets (Data Store).
+Next.js / Vercel + Google Sheets (Data Store). Kiến trúc V21 → Strangler.
 
-**Giai đoạn hiện tại:** Mock data + Dashboard / Báo cáo read-only (mobile-first, light theme)
+## Phase hiện tại
+
+- UI: sidebar desktop, card mobile (Đơn / Chi tiết / Giao / KH), bảng desktop
+- Auth mock
+- **Report read**: Google Sheets nếu có env Service Account; không thì fallback mock
+
+## Env (bắt buộc để đọc Sheet thật)
+
+Tạo `.env.local` (local) hoặc Environment Variables trên Vercel:
+
+```env
+GOOGLE_SHEETS_SPREADSHEET_ID=1Kt7Yem2kZQQyEvF6iVHA9PQ-yCwu9R71OEg7nMNS_EQ
+GOOGLE_SHEETS_SPREADSHEET_ID_2025=1_euuscjEAJ274S-8Ce1--irgDDBWaVUtKBuuW4jGmyk
+GOOGLE_SERVICE_ACCOUNT_EMAIL=quanlydathang-sheets@viethai-quanlydathang.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+```
+
+- `GOOGLE_PRIVATE_KEY`: copy từ file JSON Service Account, giữ `\n`.
+- Spreadsheet phải **share Editor** cho email Service Account.
+- Scope API hiện tại: **readonly**.
+
+### Tên tab Sheet (có thể sửa trong `src/repositories/report.repository.ts`)
+
+| Key | Tên tab mặc định |
+|-----|------------------|
+| details | DonHang_Chitiet |
+| deliveries | Chitiet_Giaohang |
+| plans | KHSANLUONG |
+| payables | NCC_CongNo |
+| opening | NCC_DuDauNam |
 
 ## Chạy local
 
 ```bash
-cd quanlydathang
 npm install
 npm run dev
 ```
 
-Mở http://localhost:3000
-
-### Tài khoản demo
-
-| Email | Mật khẩu | Role |
-|-------|----------|------|
-| admin@viethai.local | Admin@123 | ADMIN |
-| purchase@viethai.local | Purchase@123 | PURCHASE |
-| manager@viethai.local | Manager@123 | MANAGER |
+Demo login: `admin@viethai.local` / `Admin@123`
 
 ## Deploy Vercel
 
-1. Tạo repo GitHub `quanlydathang`
-2. Trong thư mục project:
+1. Push GitHub
+2. Vercel → Project → Settings → Environment Variables (4 biến trên)
+3. Redeploy
 
-```bash
-git init
-git add .
-git commit -m "Initial: Dashboard + Report mock theo kiến trúc V21"
-git branch -M main
-git remote add origin https://github.com/<user>/quanlydathang.git
-git push -u origin main
+## Kiến trúc
+
 ```
-
-3. Vercel → New Project → chọn repo → Deploy
-
-## UI
-
-- Light theme, mobile-first
-- Bottom nav: Tổng quan · Đơn · Chi tiết · Giao · Kế hoạch
-- Card layout cho Đơn / Chi tiết / Giao / Kế hoạch
-- Bảng cho báo cáo
-- Màu badge theo trạng thái
+API → Auth → ReportService → ReportRepository → Mapper → GoogleSheetsDAL → Sheets
+                                         ↘ mock (nếu thiếu env)
+```

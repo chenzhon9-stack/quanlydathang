@@ -3,13 +3,46 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const NAV = [
+/** Tab visibility = UI projection of Permission Matrix (skill 7.9) */
+const NAV: Array<{
+  href: string;
+  label: string;
+  icon: string;
+  roles?: string[]; // empty = all
+}> = [
   { href: "/dashboard", label: "Tổng quan", icon: "📊" },
-  { href: "/orders", label: "Đơn hàng", icon: "📋" },
-  { href: "/details", label: "Chi tiết xe", icon: "🚚" },
+  {
+    href: "/orders",
+    label: "Đơn hàng",
+    icon: "📋",
+    roles: ["ADMIN", "PURCHASE", "DISPATCHER"],
+  },
+  {
+    href: "/details",
+    label: "Chi tiết xe",
+    icon: "🚚",
+    roles: ["ADMIN", "PURCHASE", "DISPATCHER"],
+  },
   { href: "/deliveries", label: "Giao hàng", icon: "📦" },
-  { href: "/plans", label: "Kế hoạch SL", icon: "📈" },
+  {
+    href: "/plans",
+    label: "Kế hoạch SL",
+    icon: "📈",
+    roles: ["ADMIN", "MANAGER"],
+  },
   { href: "/reports/receiving", label: "Báo cáo", icon: "📑" },
+  {
+    href: "/payables",
+    label: "Công nợ NCC",
+    icon: "💰",
+    roles: ["ADMIN", "MANAGER", "PURCHASE", "ACCOUNTANT"],
+  },
+  {
+    href: "/users",
+    label: "Tài khoản",
+    icon: "👤",
+    roles: ["ADMIN"],
+  },
 ];
 
 export function Sidebar({
@@ -20,6 +53,11 @@ export function Sidebar({
   onLogout: () => void;
 }) {
   const pathname = usePathname();
+  const role = user.role?.toUpperCase() || "";
+
+  const visible = NAV.filter(
+    (item) => !item.roles || item.roles.includes(role) || role === "ADMIN"
+  );
 
   return (
     <aside className="hidden md:flex md:flex-col md:w-56 lg:w-64 bg-slate-900 text-white min-h-screen shrink-0">
@@ -36,9 +74,11 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 py-3 px-2 space-y-0.5">
-        {NAV.map((item) => {
+        {visible.map((item) => {
           const active =
-            pathname === item.href || pathname.startsWith(item.href + "/");
+            item.href === "/reports/receiving"
+              ? pathname.startsWith("/reports")
+              : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}

@@ -3,15 +3,12 @@ import type {
   PaginatedResult,
   AccessScope,
   UserContext,
+  OrderDetail,
+  Delivery,
+  ProductionPlan,
 } from "@/types";
-import {
-  getDetailsByYear,
-  getDeliveriesByYear,
-  getPlansByYear,
-  getPayablesByYear,
-  getOpeningByYear,
-} from "@/mocks/data";
 import { hasPermission } from "@/lib/auth";
+import { ReportRepository } from "@/repositories/report.repository";
 
 function applyPagination<T>(
   items: T[],
@@ -33,7 +30,7 @@ function applyPagination<T>(
 }
 
 export class ReportService {
-  static getReceiving(
+  static async getReceiving(
     filter: ReportFilter,
     user: UserContext,
     _scope: AccessScope
@@ -49,8 +46,10 @@ export class ReportService {
     }
 
     const year = filter.year ?? new Date().getFullYear();
-    let details = getDetailsByYear(year).filter(
-      (d) =>
+    let details = await ReportRepository.getDetails(year);
+
+    details = details.filter(
+      (d: OrderDetail) =>
         d.status === "RECEIVED" ||
         d.status === "DELIVERING" ||
         d.status === "DONE"
@@ -78,7 +77,7 @@ export class ReportService {
     return applyPagination(details, filter.page, filter.pageSize);
   }
 
-  static getDeliveries(
+  static async getDeliveries(
     filter: ReportFilter,
     user: UserContext,
     _scope: AccessScope
@@ -94,7 +93,8 @@ export class ReportService {
     }
 
     const year = filter.year ?? new Date().getFullYear();
-    let deliveries = getDeliveriesByYear(year).filter((d) => !d.deleted);
+    let deliveries = await ReportRepository.getDeliveries(year);
+    deliveries = deliveries.filter((d: Delivery) => !d.deleted);
 
     if (filter.fromDate) {
       deliveries = deliveries.filter(
@@ -113,7 +113,7 @@ export class ReportService {
     return applyPagination(deliveries, filter.page, filter.pageSize);
   }
 
-  static getPlans(
+  static async getPlans(
     filter: ReportFilter,
     user: UserContext,
     _scope: AccessScope
@@ -130,16 +130,18 @@ export class ReportService {
     }
 
     const year = filter.year ?? new Date().getFullYear();
-    let plans = getPlansByYear(year);
+    let plans = await ReportRepository.getPlans(year);
 
     if (filter.supplierId) {
-      plans = plans.filter((p) => p.supplierId === filter.supplierId);
+      plans = plans.filter(
+        (p: ProductionPlan) => p.supplierId === filter.supplierId
+      );
     }
 
     return applyPagination(plans, filter.page, filter.pageSize);
   }
 
-  static getPayables(
+  static async getPayables(
     filter: ReportFilter,
     user: UserContext,
     _scope: AccessScope
@@ -155,8 +157,12 @@ export class ReportService {
     }
 
     const year = filter.year ?? new Date().getFullYear();
-    let payables = getPayablesByYear(year).filter((p) => p.active);
-    const openings = getOpeningByYear(year);
+    const [payablesAll, openings] = await Promise.all([
+      ReportRepository.getPayables(year),
+      ReportRepository.getOpening(year),
+    ]);
+
+    let payables = payablesAll.filter((p) => p.active);
 
     if (filter.supplierId) {
       payables = payables.filter((p) => p.supplierId === filter.supplierId);
@@ -195,6 +201,7 @@ export class ReportService {
       meta: {
         year,
         generatedAt: new Date().toISOString(),
+        source: "sheets-or-mock",
       },
     };
   }
