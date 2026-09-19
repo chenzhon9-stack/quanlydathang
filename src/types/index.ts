@@ -5,7 +5,8 @@ export type Role =
   | "DISPATCHER"
   | "SALES"
   | "VIEWER"
-  | "ACCOUNTANT";
+  | "ACCOUNTANT"
+  | "ACCOUNT";
 
 export type ScopeType = "OWNER" | "MANAGEMENT" | "OWN_CUSTOMER" | "ALL";
 
