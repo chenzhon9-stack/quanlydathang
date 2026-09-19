@@ -79,6 +79,7 @@ export function mapOrderRow(row: Record<string, string>): Order {
 /** Map DonHang_Chitiet row → OrderDetail (receiving report) */
 export function mapDetailRow(row: Record<string, string>): OrderDetail {
   const statusRaw = pick(row, [
+    "TrangThaiXe",
     "TrangThai",
     "TrangThaiCT",
     "STATUS_CT",
@@ -118,9 +119,9 @@ export function mapDetailRow(row: Record<string, string>): OrderDetail {
     productId: pick(row, ["MaHH", "Ma_HH", "productId"]),
     productName: pick(row, ["TenHH", "TenHangHoa", "productName"]) || undefined,
     quantity: num(pick(row, ["SoLuong", "SL", "quantity"])),
-    regionId: pick(row, ["Makv", "MaKV", "KhuVuc", "regionId"]),
-    warehouse: pick(row, ["Kho", "warehouse"]) || undefined,
-    note: pick(row, ["GhiChu", "note"]) || undefined,
+    regionId: pick(row, ["Khuvuc", "Makv", "MaKV", "KhuVuc", "regionId"]),
+    warehouse: pick(row, ["KhoXuat", "Kho", "warehouse"]) || undefined,
+    note: pick(row, ["Ghichu", "GhiChu", "note"]) || undefined,
     status: statusMap[statusRaw] || (statusRaw as DetailStatus) || "NEW",
     receivedDate:
       pick(row, ["NgayNhanHang", "NgayNhan", "receivedDate"]) || undefined,
@@ -143,13 +144,13 @@ export function mapDeliveryRow(row: Record<string, string>): Delivery {
       pick(row, ["TenKh", "TenKH", "TenKhachHang", "customerName"]) ||
       undefined,
     customerDetail: pick(row, ["ChiTietKH", "customerDetail"]) || undefined,
-    plannedQty: num(pick(row, ["SoLuongKH", "SLKH", "SoLuong", "plannedQty"])),
+    plannedQty: num(pick(row, ["KHgiao", "SoLuongKH", "SLKH", "SoLuong", "plannedQty"])),
     actualQty: (() => {
       const v = pick(row, ["ThucGiao", "SLGiao", "actualQty"]);
       return v ? num(v) : undefined;
     })(),
     deliveryDate:
-      pick(row, ["NgayGiao", "NgayGiaoHang", "deliveryDate"]) || undefined,
+      pick(row, ["Ngaygiao", "NgayGiao", "NgayGiaoHang", "deliveryDate"]) || undefined,
     note: pick(row, ["GhiChu", "note"]) || undefined,
     deleted:
       pick(row, ["Xoa", "Deleted", "IsDeleted"]).toLowerCase() === "true" ||
@@ -162,6 +163,7 @@ export function mapPlanRow(row: Record<string, string>): ProductionPlan {
   return {
     id: pick(row, ["ID_KeHoach", "IdKeHoach", "MaKH", "id"]),
     programName: pick(row, [
+      "Tenchuongtrinh",
       "TenChuongTrinh",
       "ChuongTrinh",
       "TenKH",
@@ -177,10 +179,10 @@ export function mapPlanRow(row: Record<string, string>): ProductionPlan {
     fromDate: pick(row, ["TuNgay", "FromDate", "fromDate"]),
     toDate: pick(row, ["DenNgay", "ToDate", "toDate"]),
     plannedQuantity: num(
-      pick(row, ["KeHoach", "SanLuongKH", "plannedQuantity"])
+      pick(row, ["SoLuongKeHoach", "KeHoach", "SanLuongKH", "plannedQuantity"])
     ),
     actualQuantity: num(
-      pick(row, ["ThucHien", "SanLuongTH", "actualQuantity"])
+      pick(row, ["ThucTe", "ThucHien", "SanLuongTH", "actualQuantity"])
     ),
     status: pick(row, ["TrangThai", "Status", "status"]) || "Đang thực hiện",
     note: pick(row, ["GhiChu", "note"]) || undefined,
@@ -207,7 +209,7 @@ export function mapPayableRow(row: Record<string, string>): Payable {
 
   return {
     id: pick(row, ["ID_CN", "IdCN", "id"]),
-    date: pick(row, ["Ngay", "NgayPS", "date"]),
+    date: pick(row, ["NgayCT", "Ngay", "NgayPS", "date"]),
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName"]) || undefined,
@@ -217,7 +219,7 @@ export function mapPayableRow(row: Record<string, string>): Payable {
     regionId: pick(row, ["Makv", "regionId"]) || undefined,
     detailId: pick(row, ["ID_Chitiet", "detailId"]) || undefined,
     documentNo: pick(row, ["SoChungTu", "documentNo"]) || undefined,
-    description: pick(row, ["MoTa", "GhiChu", "description"]) || undefined,
+    description: pick(row, ["DienGiai", "MoTa", "GhiChu", "description"]) || undefined,
     createdBy: pick(row, ["User", "NguoiTao", "createdBy"]) || "",
     createdAt: pick(row, ["CreatedAt", "NgayTao", "createdAt"]) || "",
     active:
@@ -234,7 +236,7 @@ export function mapOpeningRow(row: Record<string, string>): OpeningBalance {
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName"]) || undefined,
-    openingAmount: num(pick(row, ["SoTien", "DuDau", "openingAmount"])),
+    openingAmount: num(pick(row, ["SoDuDau", "SoTien", "DuDau", "openingAmount"])),
     note: pick(row, ["GhiChu", "note"]) || undefined,
     closedBy: pick(row, ["NguoiChot", "closedBy"]) || undefined,
     closedAt: pick(row, ["NgayChot", "closedAt"]) || undefined,

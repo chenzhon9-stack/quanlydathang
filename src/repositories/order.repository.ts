@@ -1,11 +1,9 @@
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
+import { SHEETS } from "@/lib/sheets/constants";
 import { mapOrderRow } from "@/mappers/sheet.mapper";
 import { getOrdersByYear } from "@/mocks/data";
 import type { Order } from "@/types";
-
-/** Tên tab — chỉnh nếu workbook dùng tên khác */
-const SHEET_ORDERS = "DonHang";
 
 function applyFilters(
   rows: Order[],
@@ -17,25 +15,17 @@ function applyFilters(
   }
 ): Order[] {
   let out = rows;
-  if (filter.fromDate) {
-    out = out.filter((o) => o.orderDate >= filter.fromDate!);
-  }
-  if (filter.toDate) {
-    out = out.filter((o) => o.orderDate <= filter.toDate!);
-  }
-  if (filter.status && filter.status !== "ALL") {
+  if (filter.fromDate) out = out.filter((o) => o.orderDate >= filter.fromDate!);
+  if (filter.toDate) out = out.filter((o) => o.orderDate <= filter.toDate!);
+  if (filter.status && filter.status !== "ALL")
     out = out.filter((o) => o.status === filter.status);
-  }
-  if (filter.supplierId) {
+  if (filter.supplierId)
     out = out.filter((o) => o.supplierId === filter.supplierId);
-  }
-  // newest first
   return out.sort((a, b) => b.orderDate.localeCompare(a.orderDate));
 }
 
 /**
- * OrderRepository — skill D64
- * Có env Service Account → đọc sheet DonHang; lỗi / thiếu env → mock.
+ * OrderRepository — đọc tab DonHang (STANDARD_HEADERS V21)
  */
 export class OrderRepository {
   static async findMany(filter: {
@@ -48,30 +38,22 @@ export class OrderRepository {
     const year = filter.year ?? new Date().getFullYear();
 
     if (!isSheetsConfigured()) {
-      console.info("[OrderRepository] Sheets not configured → mock orders");
+      console.info("[OrderRepository] Sheets not configured → mock");
       return applyFilters(getOrdersByYear(year), filter);
     }
 
     try {
-      const rows = await readSheetAsObjects(SHEET_ORDERS, { year });
-      let orders = rows
-        .map(mapOrderRow)
-        .filter((o) => o.orderId);
-
-      // Lọc theo năm trên NgayDatHang nếu không có spreadsheet riêng theo năm
+      const rows = await readSheetAsObjects(SHEETS.DH, { year });
+      let orders = rows.map(mapOrderRow).filter((o) => o.orderId);
       orders = orders.filter(
         (o) => !o.orderDate || o.orderDate.startsWith(String(year))
       );
-
       console.info(
-        `[OrderRepository] DonHang rows mapped: ${orders.length} (year=${year})`
+        `[OrderRepository] ${SHEETS.DH} mapped=${orders.length} year=${year}`
       );
       return applyFilters(orders, filter);
     } catch (e) {
-      console.error(
-        "[OrderRepository] read DonHang failed → fallback mock",
-        e
-      );
+      console.error("[OrderRepository] DonHang failed → mock", e);
       return applyFilters(getOrdersByYear(year), filter);
     }
   }

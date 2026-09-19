@@ -1,5 +1,6 @@
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
+import { SHEETS as SheetName } from "@/lib/sheets/constants";
 import {
   mapDetailRow,
   mapDeliveryRow,
@@ -22,13 +23,12 @@ import type {
   OpeningBalance,
 } from "@/types";
 
-/** Sheet names — adjust if your workbook uses different tab names */
 const SHEETS = {
-  details: "DonHang_Chitiet",
-  deliveries: "Chitiet_Giaohang",
-  plans: "KHSANLUONG",
-  payables: "NCC_CongNo",
-  opening: "NCC_DuDauNam",
+  details: SheetName.CT,
+  deliveries: SheetName.GH,
+  plans: SheetName.KHSL,
+  payables: SheetName.CN,
+  opening: SheetName.DD,
 };
 
 export class ReportRepository {
