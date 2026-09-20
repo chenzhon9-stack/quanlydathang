@@ -1,5 +1,9 @@
 import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
+import {
+  filterBySupplierIds,
+  resolveAllowedSupplierIds,
+} from "@/lib/scope";
 import { OrderRepository } from "@/repositories/order.repository";
 
 export interface OrderListFilter {
@@ -21,8 +25,7 @@ export interface OrderListResult {
 }
 
 /**
- * OrderService — skill STEP 5 / D61–D63
- * Controller không filter scope thủ công; Service + AccessScope áp dụng.
+ * OrderService — STEP 5 + AccessScope MANAGEMENT (V21 Quanly `;`)
  */
 export class OrderService {
   static async listOrders(
@@ -31,8 +34,10 @@ export class OrderService {
     scope: AccessScope
   ): Promise<OrderListResult> {
     if (!hasPermission(user, "ORDER_VIEW") && !hasPermission(user, "*")) {
-      // ADMIN has *; PURCHASE/DISPATCHER have ORDER_VIEW
-      throw { code: "PERMISSION_DENIED", message: "Không có quyền xem đơn hàng" };
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Không có quyền xem đơn hàng",
+      };
     }
 
     let orders = await OrderRepository.findMany({
@@ -43,11 +48,19 @@ export class OrderService {
       supplierId: filter.supplierId,
     });
 
-    // D58 — scope ở backend
+    // OWNER: DonHang.User
     if (scope.scopeType === "OWNER" && scope.ownerEmail) {
-      orders = orders.filter((o) => o.createdBy === scope.ownerEmail);
+      const em = scope.ownerEmail.toLowerCase();
+      orders = orders.filter(
+        (o) => (o.createdBy || "").toLowerCase() === em
+      );
     }
-    // MANAGEMENT / ALL: phase này chưa filter theo quanly NCC (cần master)
+
+    // MANAGEMENT: intersection User.Quanly ∩ NCC.Quanly
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      orders = filterBySupplierIds(orders, allowed);
+    }
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
@@ -71,7 +84,10 @@ export class OrderService {
     year?: number
   ): Promise<Order> {
     if (!hasPermission(user, "ORDER_VIEW") && !hasPermission(user, "*")) {
-      throw { code: "PERMISSION_DENIED", message: "Không có quyền xem đơn hàng" };
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Không có quyền xem đơn hàng",
+      };
     }
 
     const order = await OrderRepository.findById(maDon, year);
@@ -82,9 +98,26 @@ export class OrderService {
     if (
       scope.scopeType === "OWNER" &&
       scope.ownerEmail &&
-      order.createdBy !== scope.ownerEmail
+      (order.createdBy || "").toLowerCase() !== scope.ownerEmail.toLowerCase()
     ) {
-      throw { code: "SCOPE_DENIED", message: "Không thuộc phạm vi dữ liệu của bạn" };
+      throw {
+        code: "SCOPE_DENIED",
+        message: "Không thuộc phạm vi dữ liệu của bạn",
+      };
+    }
+
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      if (
+        allowed &&
+        order.supplierId &&
+        !allowed.has(order.supplierId)
+      ) {
+        throw {
+          code: "SCOPE_DENIED",
+          message: "NCC không thuộc nhóm quản lý của bạn",
+        };
+      }
     }
 
     return order;

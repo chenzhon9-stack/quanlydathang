@@ -8,6 +8,7 @@ import type {
   ProductionPlan,
 } from "@/types";
 import { hasPermission } from "@/lib/auth";
+import { filterBySupplierIds, resolveAllowedSupplierIds } from "@/lib/scope";
 import { ReportRepository } from "@/repositories/report.repository";
 
 function applyPagination<T>(
@@ -144,7 +145,7 @@ export class ReportService {
   static async getPayables(
     filter: ReportFilter,
     user: UserContext,
-    _scope: AccessScope
+    scope: AccessScope
   ) {
     if (
       !hasPermission(user, "REPORT_VIEW") &&
@@ -168,7 +169,14 @@ export class ReportService {
       payables = payables.filter((p) => p.supplierId === filter.supplierId);
     }
 
-    const summary = openings.map((o) => {
+    let openingsScoped = openings;
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      payables = filterBySupplierIds(payables, allowed);
+      openingsScoped = filterBySupplierIds(openings, allowed);
+    }
+
+    const summary = openingsScoped.map((o) => {
       const related = payables.filter((p) => p.supplierId === o.supplierId);
       const paid = related
         .filter(

@@ -13,7 +13,10 @@ Next.js / Vercel + Google Sheets (Data Store). Kiến trúc V21 → Strangler.
 Tạo `.env.local` (local) hoặc Environment Variables trên Vercel:
 
 ```env
-
+GOOGLE_SHEETS_SPREADSHEET_ID=1Kt7Yem2kZQQyEvF6iVHA9PQ-yCwu9R71OEg7nMNS_EQ
+GOOGLE_SHEETS_SPREADSHEET_ID_2025=1_euuscjEAJ274S-8Ce1--irgDDBWaVUtKBuuW4jGmyk
+GOOGLE_SERVICE_ACCOUNT_EMAIL=quanlydathang-sheets@viethai-quanlydathang.iam.gserviceaccount.com
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 ```
 
 - `GOOGLE_PRIVATE_KEY`: copy từ file JSON Service Account, giữ `\n`.

@@ -1,5 +1,6 @@
 import type { AccessScope, ProductionPlan, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
+import { filterBySupplierIds, resolveAllowedSupplierIds } from "@/lib/scope";
 import { ReportRepository } from "@/repositories/report.repository";
 
 export class PlanningService {
@@ -11,7 +12,7 @@ export class PlanningService {
       pageSize?: number;
     },
     user: UserContext,
-    _scope: AccessScope
+    scope: AccessScope
   ) {
     if (
       !hasPermission(user, "PLAN_VIEW") &&
@@ -35,6 +36,11 @@ export class PlanningService {
 
     if (filter.supplierId) {
       plans = plans.filter((p: ProductionPlan) => p.supplierId === filter.supplierId);
+    }
+
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      plans = filterBySupplierIds(plans, allowed);
     }
 
     const page = Math.max(1, filter.page ?? 1);
