@@ -60,11 +60,14 @@ export interface OrderDetail {
   orderId: string;
   orderDate: string;
   supplierId: string;
+  supplierName?: string;
   vehicleId: string;
+  vehiclePlate?: string;
   productId: string;
   productName?: string;
   quantity: number;
   regionId: string;
+  regionName?: string;
   warehouse?: string;
   note?: string;
   status: DetailStatus;

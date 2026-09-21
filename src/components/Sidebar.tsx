@@ -38,6 +38,12 @@ const NAV: Array<{
     roles: ["ADMIN", "MANAGER", "PURCHASE", "ACCOUNTANT"],
   },
   {
+    href: "/masters",
+    label: "Danh mục",
+    icon: "📚",
+    roles: ["ADMIN", "MANAGER", "PURCHASE"],
+  },
+  {
     href: "/users",
     label: "Tài khoản",
     icon: "👤",

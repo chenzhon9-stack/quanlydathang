@@ -102,3 +102,50 @@ export function filterBySupplierIds<T extends { supplierId?: string }>(
   if (!allowed) return items;
   return items.filter((x) => x.supplierId && allowed.has(x.supplierId));
 }
+
+
+/** SALES/MANAGEMENT: KH thuộc nhóm Quanly (V21 _allowedCustomers) */
+export async function resolveAllowedCustomerIds(
+  scope: AccessScope
+): Promise<Set<string> | null> {
+  if (scope.scopeType === "ALL") return null;
+  if (scope.scopeType === "OWNER") return null;
+
+  const parsed = parseManagementGroups(scope.quanly);
+  if (parsed.isAll) return null;
+  if (!parsed.groups.length) return new Set();
+
+  if (!isSheetsConfigured()) return null;
+
+  try {
+    const rows = await readSheetAsObjects(SHEETS.KH, {});
+    const allowed = new Set<string>();
+    for (const r of rows) {
+      const ma = String(r.MaKh || r.MaKH || "").trim();
+      if (!ma) continue;
+      const hd = r.HoatDong;
+      if (hd !== undefined && hd !== null && hd !== "") {
+        const s = String(hd).toLowerCase();
+        if (["false", "0", "no", "không", "khoa", "khóa"].includes(s)) continue;
+      }
+      if (hasGroupIntersection(parsed.groups, r.Quanly || r.QuanLy || "")) {
+        allowed.add(ma);
+      }
+    }
+    console.info(
+      `[Scope] CUSTOMER groups=${parsed.groups.join("|")} allowedKH=${allowed.size}`
+    );
+    return allowed;
+  } catch (e) {
+    console.error("[Scope] load KH failed", e);
+    return new Set();
+  }
+}
+
+export function filterByCustomerIds<T extends { customerId?: string }>(
+  items: T[],
+  allowed: Set<string> | null
+): T[] {
+  if (!allowed) return items;
+  return items.filter((x) => x.customerId && allowed.has(x.customerId));
+}

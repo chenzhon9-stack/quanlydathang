@@ -2,6 +2,7 @@ import type { AccessScope, ProductionPlan, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import { filterBySupplierIds, resolveAllowedSupplierIds } from "@/lib/scope";
 import { ReportRepository } from "@/repositories/report.repository";
+import { MasterRepository } from "@/repositories/master.repository";
 
 export class PlanningService {
   static async listPlans(
@@ -42,6 +43,12 @@ export class PlanningService {
       const allowed = await resolveAllowedSupplierIds(scope);
       plans = filterBySupplierIds(plans, allowed);
     }
+
+    const nccMap = await MasterRepository.nccNames();
+    plans = plans.map((p) => ({
+      ...p,
+      supplierName: p.supplierName || nccMap[p.supplierId] || p.supplierId,
+    }));
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));

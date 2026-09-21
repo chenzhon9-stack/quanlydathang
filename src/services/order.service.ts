@@ -5,6 +5,7 @@ import {
   resolveAllowedSupplierIds,
 } from "@/lib/scope";
 import { OrderRepository } from "@/repositories/order.repository";
+import { MasterRepository } from "@/repositories/master.repository";
 
 export interface OrderListFilter {
   year?: number;
@@ -61,6 +62,12 @@ export class OrderService {
       const allowed = await resolveAllowedSupplierIds(scope);
       orders = filterBySupplierIds(orders, allowed);
     }
+
+    const nccMap = await MasterRepository.nccNames();
+    orders = orders.map((o) => ({
+      ...o,
+      supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
+    }));
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));

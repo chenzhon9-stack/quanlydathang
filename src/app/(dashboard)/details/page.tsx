@@ -171,7 +171,7 @@ export default function DetailsPage() {
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
                   <div><div className="text-xs text-slate-500">Đơn</div><div className="font-medium text-blue-700 text-xs">{d.orderId}</div></div>
-                  <div><div className="text-xs text-slate-500">Xe</div><div className="font-medium">{d.vehicleId}</div></div>
+                  <div><div className="text-xs text-slate-500">Xe</div><div className="font-medium">{d.vehiclePlate || d.vehicleId}</div></div>
                   <div><div className="text-xs text-slate-500">Kế hoạch</div><div className="font-medium">{d.quantity.toFixed(2)}</div></div>
                   <div><div className="text-xs text-slate-500">Thực nhận</div><div className="font-medium text-emerald-700">{d.actualReceived?.toFixed(2) ?? "—"}</div></div>
                 </div>
@@ -204,7 +204,7 @@ export default function DetailsPage() {
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{d.detailId}</td>
                       <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{d.orderId}</td>
                       <td className="px-3 py-2.5 font-medium text-slate-800">{d.productName || d.productId}</td>
-                      <td className="px-3 py-2.5">{d.vehicleId}</td>
+                      <td className="px-3 py-2.5">{d.vehiclePlate || d.vehicleId}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{d.quantity.toFixed(2)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 font-medium">{d.actualReceived?.toFixed(2) ?? "—"}</td>
                       <td className="px-3 py-2.5"><StatusBadge status={STATUS_LABEL[d.status] || d.status} /></td>

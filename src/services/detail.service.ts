@@ -5,6 +5,7 @@ import {
   resolveAllowedSupplierIds,
 } from "@/lib/scope";
 import { DetailRepository } from "@/repositories/detail.repository";
+import { MasterRepository } from "@/repositories/master.repository";
 
 export class DetailService {
   static async listDetails(
@@ -34,7 +35,22 @@ export class DetailService {
       const allowed = await resolveAllowedSupplierIds(scope);
       rows = filterBySupplierIds(rows, allowed);
     }
-    // OWNER on details: need order.User — phase sau join DonHang; tạm theo MaNCC nếu có
+
+    const [nccMap, hhMap, xeMap, kvMap, htvtMap] = await Promise.all([
+      MasterRepository.nccNames(),
+      MasterRepository.hhNames(),
+      MasterRepository.xeNames(),
+      MasterRepository.kvNames(),
+      MasterRepository.htvtNames(),
+    ]);
+    rows = rows.map((d) => ({
+      ...d,
+      supplierName: (d as { supplierName?: string }).supplierName || nccMap[d.supplierId] || d.supplierId,
+      productName: d.productName || hhMap[d.productId] || d.productId,
+      vehiclePlate: xeMap[d.vehicleId] || d.vehicleId,
+      regionName: kvMap[d.regionId] || d.regionId,
+      transportTypeName: d.transportTypeName || htvtMap[d.transportTypeId || ""] || d.transportTypeId,
+    })) as typeof rows;
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
