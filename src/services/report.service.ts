@@ -8,7 +8,8 @@ import type {
   ProductionPlan,
 } from "@/types";
 import { hasPermission } from "@/lib/auth";
-import { filterBySupplierIds, resolveAllowedSupplierIds } from "@/lib/scope";
+import { filterBySupplierIds, resolveAllowedSupplierIds, filterByCustomerIds, resolveAllowedCustomerIds } from "@/lib/scope";
+import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
 
 function applyPagination<T>(
@@ -34,7 +35,7 @@ export class ReportService {
   static async getReceiving(
     filter: ReportFilter,
     user: UserContext,
-    _scope: AccessScope
+    scope: AccessScope
   ) {
     if (
       !hasPermission(user, "REPORT_VIEW") &&
@@ -43,6 +44,15 @@ export class ReportService {
       throw {
         code: "PERMISSION_DENIED",
         message: "Không có quyền xem thực nhận",
+      };
+    }
+
+    // V21: sales / viewer / accountant không xem thực nhận
+    const role = String(user.role || "").toUpperCase();
+    if (["SALES", "VIEWER", "ACCOUNTANT"].includes(role)) {
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Bạn không có quyền xem báo cáo thực nhận.",
       };
     }
 
@@ -75,13 +85,33 @@ export class ReportService {
       );
     }
 
+    // Chỉ dòng có thực nhận > 0 (V21 getReportThucNhan)
+    details = details.filter((d) => (d.actualReceived || 0) > 0);
+
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      details = filterBySupplierIds(details, allowed);
+    }
+
+    const [nccMap, hhMap, xeMap] = await Promise.all([
+      MasterRepository.nccNames(),
+      MasterRepository.hhNames(),
+      MasterRepository.xeNames(),
+    ]);
+    details = details.map((d) => ({
+      ...d,
+      supplierName: d.supplierName || nccMap[d.supplierId] || d.supplierId,
+      productName: d.productName || hhMap[d.productId] || d.productId,
+      vehiclePlate: d.vehiclePlate || xeMap[d.vehicleId] || d.vehicleId,
+    }));
+
     return applyPagination(details, filter.page, filter.pageSize);
   }
 
   static async getDeliveries(
     filter: ReportFilter,
     user: UserContext,
-    _scope: AccessScope
+    scope: AccessScope
   ) {
     if (
       !hasPermission(user, "REPORT_VIEW") &&
@@ -110,6 +140,17 @@ export class ReportService {
     if (filter.customerId) {
       deliveries = deliveries.filter((d) => d.customerId === filter.customerId);
     }
+
+    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
+      const allowed = await resolveAllowedCustomerIds(scope);
+      deliveries = filterByCustomerIds(deliveries, allowed);
+    }
+
+    const khMap = await MasterRepository.khNames();
+    deliveries = deliveries.map((d) => ({
+      ...d,
+      customerName: d.customerName || khMap[d.customerId] || d.customerId,
+    }));
 
     return applyPagination(deliveries, filter.page, filter.pageSize);
   }

@@ -10,7 +10,7 @@ const NAV: Array<{
   icon: string;
   roles?: string[];
 }> = [
-  { href: "/dashboard", label: "Tổng quan", icon: "📊" },
+  { href: "/dashboard", label: "Tổng quan", icon: "📊", roles: ["ADMIN", "MANAGER"] },
   {
     href: "/orders",
     label: "Đơn hàng",

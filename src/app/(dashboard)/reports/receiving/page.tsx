@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ReportSubNav } from "@/components/ReportSubNav";
 
 export default function ReceivingReportPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<any[]>([]);
   const [meta, setMeta] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -13,6 +15,14 @@ export default function ReceivingReportPage() {
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
+    try {
+      const u = JSON.parse(localStorage.getItem("user") || "{}");
+      const role = String(u.role || "").toUpperCase();
+      if (["SALES", "VIEWER", "ACCOUNTANT"].includes(role)) {
+        router.replace("/reports/thuc-giao");
+        return;
+      }
+    } catch { /* ignore */ }
     setLoading(true);
     fetch(`/api/v1/reports/receiving?year=${year}&pageSize=100`, {
       headers: { Authorization: `Bearer ${token}` },
