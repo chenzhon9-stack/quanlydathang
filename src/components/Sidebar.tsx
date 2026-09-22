@@ -45,7 +45,7 @@ const NAV: Array<{
   },
   {
     href: "/users",
-    label: "Tài khoản",
+    label: "User & Quyền",
     icon: "👤",
     roles: ["ADMIN"],
   },

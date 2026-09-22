@@ -79,3 +79,91 @@ export async function batchReadSheets(
 
   return result;
 }
+
+
+/** Ghi đè một dòng theo khóa (cột keyField = keyValue). Trả về row index 1-based hoặc -1. */
+export async function updateSheetRowByKey(
+  sheetName: string,
+  keyField: string,
+  keyValue: string,
+  patch: Record<string, string | number | boolean>,
+  year?: number
+): Promise<number> {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId(year);
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: sheetName,
+    valueRenderOption: "UNFORMATTED_VALUE",
+    dateTimeRenderOption: "FORMATTED_STRING",
+  });
+  const values = res.data.values || [];
+  if (values.length < 2) return -1;
+  const headers = (values[0] as string[]).map((h) => String(h ?? "").trim());
+  const keyIdx = headers.findIndex(
+    (h) => h.toLowerCase() === keyField.toLowerCase()
+  );
+  if (keyIdx < 0) throw new Error(`Thiếu cột ${keyField}`);
+
+  const target = String(keyValue).trim().toLowerCase();
+  let rowIndex = -1; // 0-based in values
+  for (let i = 1; i < values.length; i++) {
+    const cell = String(values[i][keyIdx] ?? "").trim().toLowerCase();
+    if (cell === target) {
+      rowIndex = i;
+      break;
+    }
+  }
+  if (rowIndex < 0) return -1;
+
+  const row = values[rowIndex].slice();
+  while (row.length < headers.length) row.push("");
+  Object.entries(patch).forEach(([field, val]) => {
+    const ci = headers.findIndex(
+      (h) => h.toLowerCase() === field.toLowerCase()
+    );
+    if (ci < 0) return;
+    if (typeof val === "boolean") row[ci] = val ? "TRUE" : "FALSE";
+    else row[ci] = val as string | number;
+  });
+
+  const a1Row = rowIndex + 1; // 1-based
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetName}!A${a1Row}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [row] },
+  });
+  return a1Row;
+}
+
+/** Append một dòng object theo header sheet */
+export async function appendSheetRow(
+  sheetName: string,
+  data: Record<string, string | number | boolean>,
+  year?: number
+): Promise<void> {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId(year);
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!1:1`,
+  });
+  const headers = ((res.data.values || [])[0] || []).map((h: unknown) =>
+    String(h ?? "").trim()
+  );
+  if (!headers.length) throw new Error(`Sheet ${sheetName} thiếu header`);
+  const row = headers.map((h) => {
+    const v = data[h];
+    if (v === undefined || v === null) return "";
+    if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+    return v;
+  });
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: sheetName,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [row] },
+  });
+}

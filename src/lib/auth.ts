@@ -350,6 +350,10 @@ export async function listUsersFromSheet(): Promise<
     role: string;
     quanly: string;
     active: boolean;
+    trangThai: string;
+    phongBan: string;
+    dienThoai: string;
+    lastLogin: string;
   }>
 > {
   if (!isSheetsConfigured()) return [];
@@ -359,12 +363,22 @@ export async function listUsersFromSheet(): Promise<
       .map((row) => {
         const u = userFromSheetRow(row);
         if (!u) return null;
+        const pickLocal = (keys: string[]) => {
+          for (const k of keys) {
+            if (row[k] !== undefined && row[k] !== "") return String(row[k]);
+          }
+          return "";
+        };
         return {
           email: u.email,
           hoTen: u.hoTen,
           role: u.role,
           quanly: u.quanly,
           active: isActiveUser(row),
+          trangThai: pickLocal(["TrangThai", "Status", "trangThai"]) || (isActiveUser(row) ? "Approved" : "Locked"),
+          phongBan: pickLocal(["PhongBan", "Phong", "Department"]),
+          dienThoai: pickLocal(["DienThoai", "Phone", "SDT"]),
+          lastLogin: pickLocal(["LastLogin", "lastLogin"]),
         };
       })
       .filter(Boolean) as Array<{
@@ -373,6 +387,10 @@ export async function listUsersFromSheet(): Promise<
       role: string;
       quanly: string;
       active: boolean;
+      trangThai: string;
+      phongBan: string;
+      dienThoai: string;
+      lastLogin: string;
     }>;
   } catch (e) {
     console.error("[Auth] listUsersFromSheet", e);
