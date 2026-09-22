@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import { MOCK_USERS } from "@/mocks/data";
 import type { UserContext, AccessScope, Role } from "@/types";
-import { normalizeRole, permissionsForRole } from "@/lib/permissions";
+import { normalizeRole, permissionsForRole, resolvePermissionsFromSheets } from "@/lib/permissions";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
@@ -210,7 +210,20 @@ async function loginFromSheet(
     }
     const user = userFromSheetRow(row);
     if (user) {
-      console.info("[Auth] Sheet login OK", user.email, user.role, "from", sheet);
+      const rbac = await resolvePermissionsFromSheets(user.email, user.role);
+      user.role = rbac.role;
+      user.permissions = rbac.permissions;
+      console.info(
+        "[Auth] Sheet login OK",
+        user.email,
+        user.role,
+        "from",
+        sheet,
+        "rbac=",
+        rbac.source,
+        "perms=",
+        user.permissions.length
+      );
     }
     return { user };
   } catch (e) {

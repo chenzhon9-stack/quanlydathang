@@ -3,14 +3,107 @@ import { getCurrentUser, resolveScope, hasPermission } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
-import { filterBySupplierIds, resolveAllowedSupplierIds } from "@/lib/scope";
+import {
+  filterBySupplierIds,
+  resolveAllowedSupplierIds,
+} from "@/lib/scope";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
-import type { VolumeMode, VolumeMetric, VolumeSeriesItem } from "@/mocks/volume";
+import type {
+  VolumeMode,
+  VolumeMetric,
+  VolumeGroupBy,
+  VolumeSeriesItem,
+} from "@/mocks/volume";
 
-function ymd(d: Date) {
-  return d.toISOString().slice(0, 10);
+/** Ngày theo TZ Việt Nam YYYY-MM-DD */
+function vnYmd(d = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+function parseYmd(s: string): { y: number; m: number; d: number } {
+  const [y, m, d] = s.split("-").map(Number);
+  return { y, m, d };
+}
+
+function daysInMonth(y: number, m: number): number {
+  return new Date(y, m, 0).getDate();
+}
+
+function addDaysYmd(ymd: string, delta: number): string {
+  const { y, m, d } = parseYmd(ymd);
+  const dt = new Date(Date.UTC(y, m - 1, d + delta));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
+/**
+ * Cùng kỳ:
+ * - YTD: 1/1 → hôm qua (năm nay) vs 1/1 → cùng ngày tháng năm trước
+ * - MOM: 1/tháng → hôm qua vs 1/tháng trước → cùng số ngày (cắt nếu tháng ngắn hơn)
+ */
+function resolvePeriods(mode: VolumeMode, yearHint?: number) {
+  const today = vnYmd();
+  const yesterday = addDaysYmd(today, -1);
+  const { y: cy, m: cm, d: cd } = parseYmd(yesterday);
+
+  if (mode === "ytd") {
+    const year = yearHint && yearHint > 2000 ? yearHint : cy;
+    // Nếu yearHint khác năm của yesterday, vẫn lấy đến 31/12 year hoặc yesterday nếu cùng năm
+    let currentTo = yesterday;
+    if (year !== cy) {
+      currentTo = `${year}-12-31`;
+    }
+    const currentFrom = `${year}-01-01`;
+    const previousFrom = `${year - 1}-01-01`;
+    // cùng ngày-tháng năm trước
+    const prevD = Math.min(cd, daysInMonth(year - 1, cm));
+    const previousTo = `${year - 1}-${String(cm).padStart(2, "0")}-${String(prevD).padStart(2, "0")}`;
+    return {
+      year,
+      currentFrom,
+      currentTo,
+      previousFrom,
+      previousTo,
+      previousFullFrom: `${year - 1}-01-01`,
+      previousFullTo: `${year - 1}-12-31`,
+      periodNote: `Cùng kỳ: ${currentFrom} → ${currentTo}  so với  ${previousFrom} → ${previousTo}`,
+    };
+  }
+
+  // MOM
+  const year = cy;
+  const currentFrom = `${cy}-${String(cm).padStart(2, "0")}-01`;
+  const currentTo = yesterday;
+  // tháng trước
+  let py = cy;
+  let pm = cm - 1;
+  if (pm < 1) {
+    pm = 12;
+    py = cy - 1;
+  }
+  const prevDim = daysInMonth(py, pm);
+  const prevDay = Math.min(cd, prevDim);
+  const previousFrom = `${py}-${String(pm).padStart(2, "0")}-01`;
+  const previousTo = `${py}-${String(pm).padStart(2, "0")}-${String(prevDay).padStart(2, "0")}`;
+  return {
+    year,
+    currentFrom,
+    currentTo,
+    previousFrom,
+    previousTo,
+    previousFullFrom: previousFrom,
+    previousFullTo: `${py}-${String(pm).padStart(2, "0")}-${String(prevDim).padStart(2, "0")}`,
+    periodNote: `Cùng kỳ tháng: ${currentFrom} → ${currentTo}  so với  ${previousFrom} → ${previousTo}`,
+  };
 }
 
 function classifyPhanLoai(raw: string): "Bao" | "Roi" | "Khac" {
@@ -20,8 +113,12 @@ function classifyPhanLoai(raw: string): "Bao" | "Roi" | "Khac" {
     .toLowerCase()
     .trim();
   if (s === "bao") return "Bao";
-  if (s === "roi" || s === "roi") return "Roi";
+  if (s === "roi") return "Roi";
   return "Khac";
+}
+
+function inRange(dt: string, from: string, to: string) {
+  return !!dt && dt >= from && dt <= to;
 }
 
 export async function GET(req: NextRequest) {
@@ -32,7 +129,6 @@ export async function GET(req: NextRequest) {
     if (!user)
       return jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401);
 
-    // Dashboard volume: ADMIN + MANAGER only (user requirement)
     const role = String(user.role || "").toUpperCase();
     if (role !== "ADMIN" && role !== "MANAGER" && !hasPermission(user, "*")) {
       return jsonResponse(
@@ -44,21 +140,32 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const mode = (searchParams.get("mode") || "ytd") as VolumeMode;
     const metric = (searchParams.get("metric") || "receiving") as VolumeMetric;
-    const year = searchParams.get("year")
+    const groupBy = (searchParams.get("groupBy") ||
+      "phanloai") as VolumeGroupBy;
+    const yearParam = searchParams.get("year")
       ? Number(searchParams.get("year"))
-      : new Date().getFullYear();
+      : undefined;
 
     if (mode !== "ytd" && mode !== "mom") {
       return jsonResponse(error("VALIDATION_ERROR", "mode ytd|mom"), 400);
     }
     if (metric !== "receiving" && metric !== "delivery") {
-      return jsonResponse(error("VALIDATION_ERROR", "metric receiving|delivery"), 400);
+      return jsonResponse(
+        error("VALIDATION_ERROR", "metric receiving|delivery"),
+        400
+      );
+    }
+    if (groupBy !== "phanloai" && groupBy !== "supplier") {
+      return jsonResponse(
+        error("VALIDATION_ERROR", "groupBy phanloai|supplier"),
+        400
+      );
     }
 
-    const now = new Date();
+    const periods = resolvePeriods(mode, yearParam);
     const scope = resolveScope(user);
 
-    // HH map MaHH → PhanLoai
+    // HH map
     let phanLoaiMap: Record<string, string> = {};
     if (isSheetsConfigured()) {
       try {
@@ -68,163 +175,165 @@ export async function GET(req: NextRequest) {
           if (ma) phanLoaiMap[ma] = String(r.PhanLoaiHH || "");
         }
       } catch (e) {
-        console.error("[volume] HH map", e);
+        console.error("[volume] HH", e);
       }
     }
 
-    const buckets = () =>
-      ({
-        Bao: { current: 0, previous: 0 },
-        Roi: { current: 0, previous: 0 },
-        Khac: { current: 0, previous: 0 },
-      }) as Record<"Bao" | "Roi" | "Khac", { current: number; previous: number }>;
+    type Bucket = {
+      current: number;
+      previous: number;
+      previousFullYear: number;
+    };
+    const map = new Map<string, Bucket>();
 
-    const agg = buckets();
-    let currentFrom = "";
-    let currentTo = "";
-    let previousFrom = "";
-    let previousTo = "";
+    function bump(key: string, field: keyof Bucket, qty: number) {
+      if (!map.has(key))
+        map.set(key, { current: 0, previous: 0, previousFullYear: 0 });
+      map.get(key)![field] += qty;
+    }
+
+    function groupKey(
+      productId: string,
+      supplierId: string,
+      phanLoai?: string
+    ): string {
+      if (groupBy === "supplier") return supplierId || "UNKNOWN";
+      return classifyPhanLoai(phanLoai || phanLoaiMap[productId] || "");
+    }
+
+    // Load 2 năm data for ytd full-year note + periods
+    const yearsNeeded = new Set([
+      parseYmd(periods.currentFrom).y,
+      parseYmd(periods.previousFrom).y,
+    ]);
+    if (mode === "ytd") yearsNeeded.add(periods.year - 1);
 
     if (metric === "receiving") {
-      let details = await ReportRepository.getDetails(year);
-      // also previous year for ytd
-      let prevDetails =
-        mode === "ytd"
-          ? await ReportRepository.getDetails(year - 1)
-          : details;
+      let allDetails: Awaited<
+        ReturnType<typeof ReportRepository.getDetails>
+      > = [];
+      for (const y of yearsNeeded) {
+        allDetails = allDetails.concat(await ReportRepository.getDetails(y));
+      }
+      // dedupe by detailId
+      const seen = new Set<string>();
+      allDetails = allDetails.filter((d) => {
+        if (!d.detailId || seen.has(d.detailId)) return false;
+        seen.add(d.detailId);
+        return true;
+      });
 
       if (scope.scopeType === "MANAGEMENT") {
         const allowed = await resolveAllowedSupplierIds(scope);
-        details = filterBySupplierIds(details, allowed);
-        prevDetails = filterBySupplierIds(prevDetails, allowed);
+        allDetails = filterBySupplierIds(allDetails, allowed);
       }
 
-      if (mode === "ytd") {
-        currentFrom = `${year}-01-01`;
-        currentTo = ymd(now);
-        previousFrom = `${year - 1}-01-01`;
-        previousTo = `${year - 1}-12-31`;
-        const inRange = (d: string, a: string, b: string) =>
-          d && d >= a && d <= b;
-        for (const d of details) {
-          const qty = d.actualReceived || 0;
-          if (qty <= 0) continue;
-          const dt = d.receivedDate || d.orderDate || "";
-          if (!inRange(dt, currentFrom, currentTo)) continue;
-          const pl = classifyPhanLoai(
-            d.phanLoai || phanLoaiMap[d.productId] || ""
-          );
-          agg[pl].current += qty;
-        }
-        for (const d of prevDetails) {
-          const qty = d.actualReceived || 0;
-          if (qty <= 0) continue;
-          const dt = d.receivedDate || d.orderDate || "";
-          if (!inRange(dt, previousFrom, previousTo)) continue;
-          const pl = classifyPhanLoai(
-            d.phanLoai || phanLoaiMap[d.productId] || ""
-          );
-          agg[pl].previous += qty;
-        }
-      } else {
-        // MOM: tháng này vs tháng trước
-        const y = now.getFullYear();
-        const m = now.getMonth(); // 0-based
-        const curStart = new Date(y, m, 1);
-        const prevStart = new Date(y, m - 1, 1);
-        const prevEnd = new Date(y, m, 0);
-        currentFrom = ymd(curStart);
-        currentTo = ymd(now);
-        previousFrom = ymd(prevStart);
-        previousTo = ymd(prevEnd);
-        const all = [...details, ...prevDetails];
-        for (const d of all) {
-          const qty = d.actualReceived || 0;
-          if (qty <= 0) continue;
-          const dt = d.receivedDate || d.orderDate || "";
-          const pl = classifyPhanLoai(
-            d.phanLoai || phanLoaiMap[d.productId] || ""
-          );
-          if (dt >= currentFrom && dt <= currentTo) agg[pl].current += qty;
-          else if (dt >= previousFrom && dt <= previousTo)
-            agg[pl].previous += qty;
-        }
+      for (const d of allDetails) {
+        const qty = d.actualReceived || 0;
+        if (qty <= 0) continue;
+        const dt = d.receivedDate || d.orderDate || "";
+        const key = groupKey(d.productId, d.supplierId, d.phanLoai);
+        if (inRange(dt, periods.currentFrom, periods.currentTo))
+          bump(key, "current", qty);
+        if (inRange(dt, periods.previousFrom, periods.previousTo))
+          bump(key, "previous", qty);
+        if (
+          mode === "ytd" &&
+          inRange(dt, periods.previousFullFrom, periods.previousFullTo)
+        )
+          bump(key, "previousFullYear", qty);
       }
     } else {
-      // delivery metric — sum actualQty; join detail for productId if needed
-      let dels = await ReportRepository.getDeliveries(year);
-      let prevDels =
-        mode === "ytd"
-          ? await ReportRepository.getDeliveries(year - 1)
-          : dels;
-      dels = dels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
-      prevDels = prevDels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
-
-      // Map detailId → product for phan loại
-      const details = await ReportRepository.getDetails(year);
-      const prevDet =
-        mode === "ytd"
-          ? await ReportRepository.getDetails(year - 1)
-          : details;
-      const detMap: Record<string, string> = {};
-      for (const d of [...details, ...prevDet]) {
-        detMap[d.detailId] = d.productId;
+      // delivery
+      let allDels: Awaited<
+        ReturnType<typeof ReportRepository.getDeliveries>
+      > = [];
+      let allDet: Awaited<
+        ReturnType<typeof ReportRepository.getDetails>
+      > = [];
+      for (const y of yearsNeeded) {
+        allDels = allDels.concat(await ReportRepository.getDeliveries(y));
+        allDet = allDet.concat(await ReportRepository.getDetails(y));
       }
+      const detMap: Record<string, { productId: string; supplierId: string }> =
+        {};
+      for (const d of allDet) {
+        detMap[d.detailId] = {
+          productId: d.productId,
+          supplierId: d.supplierId,
+        };
+      }
+      allDels = allDels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
 
-      if (mode === "ytd") {
-        currentFrom = `${year}-01-01`;
-        currentTo = ymd(now);
-        previousFrom = `${year - 1}-01-01`;
-        previousTo = `${year - 1}-12-31`;
-        for (const d of dels) {
-          const dt = d.deliveryDate || "";
-          if (!dt || dt < currentFrom || dt > currentTo) continue;
-          const pid = detMap[d.detailId] || "";
-          const pl = classifyPhanLoai(phanLoaiMap[pid] || "");
-          agg[pl].current += d.actualQty || 0;
-        }
-        for (const d of prevDels) {
-          const dt = d.deliveryDate || "";
-          if (!dt || dt < previousFrom || dt > previousTo) continue;
-          const pid = detMap[d.detailId] || "";
-          const pl = classifyPhanLoai(phanLoaiMap[pid] || "");
-          agg[pl].previous += d.actualQty || 0;
-        }
-      } else {
-        const y = now.getFullYear();
-        const m = now.getMonth();
-        currentFrom = ymd(new Date(y, m, 1));
-        currentTo = ymd(now);
-        previousFrom = ymd(new Date(y, m - 1, 1));
-        previousTo = ymd(new Date(y, m, 0));
-        for (const d of [...dels, ...prevDels]) {
-          const dt = d.deliveryDate || "";
-          const pid = detMap[d.detailId] || "";
-          const pl = classifyPhanLoai(phanLoaiMap[pid] || "");
-          const qty = d.actualQty || 0;
-          if (dt >= currentFrom && dt <= currentTo) agg[pl].current += qty;
-          else if (dt >= previousFrom && dt <= previousTo)
-            agg[pl].previous += qty;
-        }
+      for (const d of allDels) {
+        const qty = d.actualQty || 0;
+        const dt = d.deliveryDate || "";
+        const ref = detMap[d.detailId] || { productId: "", supplierId: "" };
+        // delivery sheet không có supplier — lấy từ CT
+        const key = groupKey(ref.productId, ref.supplierId);
+        if (inRange(dt, periods.currentFrom, periods.currentTo))
+          bump(key, "current", qty);
+        if (inRange(dt, periods.previousFrom, periods.previousTo))
+          bump(key, "previous", qty);
+        if (
+          mode === "ytd" &&
+          inRange(dt, periods.previousFullFrom, periods.previousFullTo)
+        )
+          bump(key, "previousFullYear", qty);
       }
     }
 
-    const series: VolumeSeriesItem[] = (
-      ["Bao", "Roi", "Khac"] as const
-    ).map((label) => ({
-      label,
-      current: Math.round(agg[label].current * 1000) / 1000,
-      previous: Math.round(agg[label].previous * 1000) / 1000,
-    }));
+    let series: VolumeSeriesItem[] = [];
+    if (groupBy === "phanloai") {
+      for (const label of ["Bao", "Roi", "Khac"] as const) {
+        const b = map.get(label) || {
+          current: 0,
+          previous: 0,
+          previousFullYear: 0,
+        };
+        series.push({
+          label,
+          current: Math.round(b.current * 1000) / 1000,
+          previous: Math.round(b.previous * 1000) / 1000,
+          previousFullYear:
+            mode === "ytd"
+              ? Math.round(b.previousFullYear * 1000) / 1000
+              : undefined,
+        });
+      }
+    } else {
+      const nccNames = await MasterRepository.nccNames();
+      series = Array.from(map.entries())
+        .map(([id, b]) => ({
+          label: nccNames[id] || id,
+          id,
+          current: Math.round(b.current * 1000) / 1000,
+          previous: Math.round(b.previous * 1000) / 1000,
+          previousFullYear:
+            mode === "ytd"
+              ? Math.round(b.previousFullYear * 1000) / 1000
+              : undefined,
+        }))
+        .filter((s) => s.current > 0 || s.previous > 0)
+        .sort((a, b) => b.current - a.current)
+        .slice(0, 12); // top 12 NCC
+    }
 
     return jsonResponse(
       success(
         {
           mode,
           metric,
-          year,
+          groupBy,
+          year: periods.year,
           series,
-          meta: { currentFrom, currentTo, previousFrom, previousTo },
+          meta: {
+            currentFrom: periods.currentFrom,
+            currentTo: periods.currentTo,
+            previousFrom: periods.previousFrom,
+            previousTo: periods.previousTo,
+            periodNote: periods.periodNote,
+          },
         },
         { source: "sheets", generatedAt: new Date().toISOString() }
       )
