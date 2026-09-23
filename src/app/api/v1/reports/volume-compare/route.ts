@@ -360,7 +360,7 @@ export async function GET(req: NextRequest) {
             previousFrom: periods.previousFrom,
             previousTo: periods.previousTo,
             periodNote: periods.periodNote,
-            phanLoaiScope: "Bao+Roi (loại Khác không tính)",,
+            phanLoaiScope: "Bao+Roi (loại Khác không tính)",
           },
         },
         { source: "sheets", generatedAt: new Date().toISOString() }
