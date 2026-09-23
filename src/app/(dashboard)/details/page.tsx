@@ -107,41 +107,6 @@ function DetailActions({
           Xem
         </button>
       )}
-      {receiveTarget && (
-        <ActionPrompt
-          open
-          title={`Nhận hàng — ${receiveTarget.detailId}`}
-          fields={[
-            {
-              key: "actualReceived",
-              label: "Thực nhận (tấn)",
-              type: "number",
-              defaultValue: receiveTarget.quantity,
-            },
-            {
-              key: "receivedDate",
-              label: "Ngày nhận",
-              type: "date",
-              defaultValue: new Date().toISOString().slice(0, 10),
-            },
-          ]}
-          confirmLabel="Xác nhận nhận"
-          onCancel={() => setReceiveTarget(null)}
-          onConfirm={async (vals) => {
-            const json = await apiPost(
-              `/api/v1/order-details/${encodeURIComponent(receiveTarget.detailId)}/receive`,
-              {
-                actualReceived: Number(vals.actualReceived),
-                receivedDate: vals.receivedDate,
-                year: new Date().getFullYear(),
-              }
-            );
-            if (!json.success) throw new Error(json.error?.message || "Lỗi nhận hàng");
-            setReceiveTarget(null);
-            load(page);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -467,6 +432,7 @@ export default function DetailsPage() {
           )}
         </>
       )}
+
       {receiveTarget && (
         <ActionPrompt
           open
@@ -502,6 +468,7 @@ export default function DetailsPage() {
           }}
         />
       )}
+
     </div>
   );
 }
