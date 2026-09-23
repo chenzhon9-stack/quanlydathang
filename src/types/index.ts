@@ -88,6 +88,12 @@ export interface Delivery {
   plannedQty: number;
   actualQty?: number;
   deliveryDate?: string;
+  /** Ngày đặt lệnh (từ DonHang_Chitiet) — dùng gom nhóm V21 */
+  orderDate?: string;
+  vehicleId?: string;
+  vehiclePlate?: string;
+  productId?: string;
+  productName?: string;
   note?: string;
   deleted?: boolean;
 }

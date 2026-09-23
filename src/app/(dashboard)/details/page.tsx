@@ -28,6 +28,13 @@ const STATUS_LABEL: Record<string, string> = {
   CANCEL: "Hủy",
 };
 
+function fmtDateVN(ymd: string) {
+  if (!ymd || ymd === "—" || ymd === "all") return ymd === "all" ? "Tất cả" : "—";
+  const p = ymd.split("-");
+  if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
+  return ymd;
+}
+
 function DetailActions({ d }: { d: OrderDetail }) {
   function toast(msg: string) {
     alert(`[Mock] ${msg}\n(CT: ${d.detailId})`);
@@ -77,7 +84,7 @@ export default function DetailsPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
-  const pageSize = 50;
+  const pageSize = 100;
 
   const load = useCallback(async (p: number) => {
     const token = localStorage.getItem("token");
@@ -86,24 +93,37 @@ export default function DetailsPage() {
     setErr(null);
     try {
       const qs = new URLSearchParams({
-        year: "2026",
+        year: String(new Date().getFullYear()),
         page: String(p),
         pageSize: String(pageSize),
       });
-      /* multi status client-side */
       const res = await fetch(`/api/v1/order-details?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
       if (!json.success) {
-        setErr(json.error?.message || "Lỗi tải chi tiết");
-        setItems([]);
+        // fallback path
+        const res2 = await fetch(`/api/v1/order-details?${qs}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const j2 = await res2.json();
+        if (!j2.success) {
+          setErr(json.error?.message || j2.error?.message || "Lỗi tải chi tiết");
+          setItems([]);
+          return;
+        }
+        const data = j2.data;
+        setItems(data.items || data || []);
+        setTotal(data.total ?? (data.items?.length || 0));
+        setHasMore(!!data.hasMore);
+        setPage(p);
         return;
       }
-      setItems(json.data.items || []);
-      setTotal(json.data.total || 0);
-      setHasMore(Boolean(json.data.hasMore));
-      setPage(json.data.page || p);
+      const data = json.data;
+      setItems(data.items || data || []);
+      setTotal(data.total ?? (data.items?.length || 0));
+      setHasMore(!!data.hasMore);
+      setPage(p);
     } catch {
       setErr("Không kết nối được API");
     } finally {
@@ -114,7 +134,6 @@ export default function DetailsPage() {
   useEffect(() => {
     load(1);
   }, [load]);
-
 
   const filtered = useMemo(() => {
     return items.filter((d) => {
@@ -136,26 +155,25 @@ export default function DetailsPage() {
     });
   }, [items, statuses, search]);
 
-  const byDate = filtered.reduce<Record<string, typeof items>>((acc, d) => {
-    const key = d.orderDate || d.receivedDate || "—";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(d);
-    return acc;
-  }, {});
-  const displayGroups = groupByDate
-    ? Object.keys(byDate)
-        .sort((a, b) => b.localeCompare(a))
-        .map((k) => ({ key: k, items: byDate[k] }))
-    : [{ key: "all", items: filtered }];
+  const displayGroups = useMemo(() => {
+    if (!groupByDate) return [{ key: "all", items: filtered }];
+    const byDate: Record<string, OrderDetail[]> = {};
+    for (const d of filtered) {
+      const key = d.orderDate || "—";
+      if (!byDate[key]) byDate[key] = [];
+      byDate[key].push(d);
+    }
+    return Object.keys(byDate)
+      .sort((a, b) => b.localeCompare(a))
+      .map((k) => ({ key: k, items: byDate[k] }));
+  }, [filtered, groupByDate]);
 
   return (
     <div className="space-y-4 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-slate-800">Chi tiết xe</h2>
-          <p className="text-xs text-slate-500">
-            {total} dòng · API /api/v1/order-details
-          </p>
+          <p className="text-xs text-slate-500">{total} chi tiết · gom theo ngày đặt lệnh</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => load(page)} className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200">
@@ -173,7 +191,7 @@ export default function DetailsPage() {
         searchPlaceholder="Tìm mã CT, đơn, xe, hàng, NCC…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
-          { key: "NEW", label: "Mới" },
+          { key: "NEW", label: "Mới tạo" },
           { key: "ORDERED", label: "Đặt hàng" },
           { key: "RECEIVED", label: "Đã nhận" },
           { key: "DELIVERING", label: "Đang giao" },
@@ -187,33 +205,63 @@ export default function DetailsPage() {
         countLabel={`${filtered.length}/${items.length}`}
       />
 
-{err && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-          {err}
-        </div>
+      {err && (
+        <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{err}</div>
       )}
 
       {loading ? (
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải chi tiết...</div>
       ) : (
         <>
-          <div className="md:hidden space-y-3">
-            {filtered.map((d) => (
-              <div key={d.detailId} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${STATUS_ROW[d.status] || "bg-white"}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-slate-800">{d.productName || d.productId}</div>
-                    <div className="text-xs text-slate-500 font-mono mt-0.5">{d.detailId}</div>
+          {/* Mobile cards — gom theo ngày đặt */}
+          <div className="md:hidden space-y-4">
+            {displayGroups.map((g) => (
+              <div key={g.key} className="space-y-2">
+                {groupByDate && (
+                  <div className="sticky top-0 z-10 rounded-xl bg-slate-800 text-white px-3 py-2 text-sm font-semibold shadow">
+                    📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
+                    <span className="ml-2 text-xs font-normal text-slate-300">
+                      ({g.items.length})
+                    </span>
                   </div>
-                  <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
-                  <div><div className="text-xs text-slate-500">Đơn</div><div className="font-medium text-blue-700 text-xs">{d.orderId}</div></div>
-                  <div><div className="text-xs text-slate-500">Xe</div><div className="font-medium">{d.vehiclePlate || d.vehicleId}</div></div>
-                  <div><div className="text-xs text-slate-500">Kế hoạch</div><div className="font-medium">{d.quantity.toFixed(2)}</div></div>
-                  <div><div className="text-xs text-slate-500">Thực nhận</div><div className="font-medium text-emerald-700">{d.actualReceived?.toFixed(2) ?? "—"}</div></div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-slate-200/80"><DetailActions d={d} /></div>
+                )}
+                {g.items.map((d) => (
+                  <div
+                    key={d.detailId}
+                    className={`rounded-2xl border p-4 shadow-sm ${STATUS_ROW[d.status] || "bg-white"} border-slate-200`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-bold text-blue-700">{d.orderId}</div>
+                        <div className="text-xs text-slate-500 font-mono mt-0.5">{d.detailId}</div>
+                      </div>
+                      <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
+                    </div>
+                    <div className="mt-3 space-y-1 text-sm">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-500">Xe</span>
+                        <span className="font-semibold bg-amber-300/80 text-amber-950 px-2 py-0.5 rounded text-xs">
+                          {d.vehiclePlate || d.vehicleId || "—"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-500">Hàng</span>
+                        <span className="font-medium text-right truncate max-w-[60%]">
+                          {d.productName || d.productId}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">KH / TN</span>
+                        <span className="tabular-nums">
+                          {d.quantity.toFixed(2)} / {d.actualReceived?.toFixed(2) ?? "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-200/80">
+                      <DetailActions d={d} />
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
             {filtered.length === 0 && !err && (
@@ -221,6 +269,7 @@ export default function DetailsPage() {
             )}
           </div>
 
+          {/* Desktop table — gom theo ngày đặt */}
           <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -237,21 +286,51 @@ export default function DetailsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((d) => (
-                    <tr key={d.detailId} className={`border-t border-slate-100 ${STATUS_ROW[d.status] || "bg-white"}`}>
-                      <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{d.detailId}</td>
-                      <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{d.orderId}</td>
-                      <td className="px-3 py-2.5 font-medium text-slate-800">{d.productName || d.productId}</td>
-                      <td className="px-3 py-2.5">{d.vehiclePlate || d.vehicleId}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{d.quantity.toFixed(2)}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 font-medium">{d.actualReceived?.toFixed(2) ?? "—"}</td>
-                      <td className="px-3 py-2.5"><StatusBadge status={STATUS_LABEL[d.status] || d.status} /></td>
-                      <td className="px-3 py-2.5"><DetailActions d={d} /></td>
-                    </tr>
+                  {displayGroups.map((g) => (
+                    <React.Fragment key={g.key}>
+                      {groupByDate && (
+                        <tr className="bg-slate-800 text-white">
+                          <td colSpan={8} className="px-3 py-2 text-xs font-medium">
+                            📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
+                            <span className="ml-2 opacity-70">({g.items.length} xe)</span>
+                          </td>
+                        </tr>
+                      )}
+                      {g.items.map((d) => (
+                        <tr
+                          key={d.detailId}
+                          className={`border-t border-slate-100 ${STATUS_ROW[d.status] || "bg-white"}`}
+                        >
+                          <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{d.detailId}</td>
+                          <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{d.orderId}</td>
+                          <td className="px-3 py-2.5 font-medium text-slate-800">
+                            {d.productName || d.productId}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className="bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded text-xs font-semibold">
+                              {d.vehiclePlate || d.vehicleId || "—"}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums">{d.quantity.toFixed(2)}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 font-medium">
+                            {d.actualReceived?.toFixed(2) ?? "—"}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <DetailActions d={d} />
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
             </div>
+            {filtered.length === 0 && !err && (
+              <div className="text-center py-12 text-slate-400 text-sm">Không có chi tiết</div>
+            )}
           </div>
 
           {total > pageSize && (
