@@ -72,4 +72,11 @@ export class DetailRepository {
       return applyFilters(getDetailsByYear(year), filter);
     }
   }
+
+  static async findById(detailId: string, year?: number) {
+    const y = year ?? new Date().getFullYear();
+    const rows = await this.findMany({ year: y });
+    return rows.find((d) => d.detailId === detailId) || null;
+  }
+
 }

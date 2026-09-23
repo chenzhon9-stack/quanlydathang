@@ -201,6 +201,15 @@ export async function GET(req: NextRequest) {
       return classifyPhanLoai(phanLoai || phanLoaiMap[productId] || "");
     }
 
+    /** Dashboard chỉ Bao + Rời — loại Khác không đưa vào báo cáo tổng */
+    function isMainPhanLoai(
+      productId: string,
+      phanLoai?: string
+    ): boolean {
+      const pl = classifyPhanLoai(phanLoai || phanLoaiMap[productId] || "");
+      return pl === "Bao" || pl === "Roi";
+    }
+
     // Load 2 năm data for ytd full-year note + periods
     const yearsNeeded = new Set([
       parseYmd(periods.currentFrom).y,
@@ -231,6 +240,7 @@ export async function GET(req: NextRequest) {
       for (const d of allDetails) {
         const qty = d.actualReceived || 0;
         if (qty <= 0) continue;
+        if (!isMainPhanLoai(d.productId, d.phanLoai)) continue;
         const dt = d.receivedDate || d.orderDate || "";
         const key = groupKey(d.productId, d.supplierId, d.phanLoai);
         if (inRange(dt, periods.currentFrom, periods.currentTo))
@@ -255,18 +265,23 @@ export async function GET(req: NextRequest) {
         allDels = allDels.concat(await ReportRepository.getDeliveries(y));
         allDet = allDet.concat(await ReportRepository.getDetails(y));
       }
-      const detMap: Record<string, { productId: string; supplierId: string }> =
-        {};
+      const detMap: Record<
+        string,
+        { productId: string; supplierId: string; phanLoai?: string }
+      > = {};
       for (const d of allDet) {
         detMap[d.detailId] = {
           productId: d.productId,
           supplierId: d.supplierId,
+          phanLoai: d.phanLoai,
         };
       }
       allDels = allDels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
 
       for (const d of allDels) {
         const qty = d.actualQty || 0;
+        const meta = detMap[d.detailId];
+        if (meta && !isMainPhanLoai(meta.productId, meta.phanLoai)) continue;
         const dt = d.deliveryDate || "";
         const ref = detMap[d.detailId] || { productId: "", supplierId: "" };
         // delivery sheet không có supplier — lấy từ CT
@@ -285,7 +300,7 @@ export async function GET(req: NextRequest) {
 
     let series: VolumeSeriesItem[] = [];
     if (groupBy === "phanloai") {
-      for (const label of ["Bao", "Roi", "Khac"] as const) {
+      for (const label of ["Bao", "Roi"] as const) { // Khác không đưa vào dashboard
         const b = map.get(label) || {
           current: 0,
           previous: 0,
@@ -345,6 +360,7 @@ export async function GET(req: NextRequest) {
             previousFrom: periods.previousFrom,
             previousTo: periods.previousTo,
             periodNote: periods.periodNote,
+            phanLoaiScope: "Bao+Roi (loại Khác không tính)",,
           },
         },
         { source: "sheets", generatedAt: new Date().toISOString() }

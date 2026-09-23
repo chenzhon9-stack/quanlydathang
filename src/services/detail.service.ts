@@ -10,6 +10,12 @@ import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { STATUS_CT, todayYmdVN } from "@/lib/status";
+import {
+  qty3,
+  validateStep,
+  validateReceiveDate,
+} from "@/lib/business-rules";
+import { readSheetAsObjects } from "@/lib/sheets/dal";
 
 export class DetailService {
   static async listDetails(
@@ -88,7 +94,15 @@ export class DetailService {
   }
 
 
-  /** Nhận hàng — V21 saveReceive */
+  /**
+   * Nhận hàng — parity V21 confirmReceiveDetail
+   * - permission ORDER_RECEIVE
+   * - status not CANCEL/DELETE/DONE
+   * - ThucNhan > 0 + chia hết TyleChiahet
+   * - ngày nhận hợp lệ
+   * - ghi CT → Đã nhận
+   * - nếu ThucNhan ≠ SoLuong: phân bổ tỷ lệ KHgiao (active GH)
+   */
   static async receiveDetail(
     detailId: string,
     payload: { actualReceived: number; receivedDate?: string },
@@ -105,12 +119,60 @@ export class DetailService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const qty = Number(payload.actualReceived);
+
+    const y = year ?? new Date().getFullYear();
+    const ct = await DetailRepository.findById(detailId, y);
+    if (!ct) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+
+    const st = String(ct.status || "").toUpperCase();
+    // status domain enum or VN
+    const blocked = ["CANCEL", "DELETE", "DONE", "HỦY XE", "XÓA XE", "HOÀN THÀNH"];
+    if (blocked.includes(st) || ["Hủy xe", "Xóa xe", "Hoàn thành"].includes(String(ct.status))) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Chi tiết đã hủy/xóa hoặc hoàn thành, không được nhận hàng.",
+      };
+    }
+
+    const qty = qty3(Number(payload.actualReceived));
     if (!(qty > 0)) {
       throw { code: "VALIDATION_ERROR", message: "Thực nhận phải > 0" };
     }
+
+    // TyleChiahet từ DM_HangHoa
+    let tyleChiahet = 0;
+    let tenHH = ct.productName || ct.productId;
+    try {
+      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+      const hh = hhRows.find(
+        (r) => String(r.MaHH || "").trim() === String(ct.productId || "").trim()
+      );
+      if (hh) {
+        tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
+        tenHH = String(hh.TenHangHoa || tenHH);
+      }
+    } catch {
+      /* optional */
+    }
+    if (!validateStep(qty, tyleChiahet)) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: `Thực nhận của ${tenHH} phải chia hết cho ${tyleChiahet}. Giá trị hiện tại: ${qty.toFixed(2)} tấn.`,
+      };
+    }
+
     const ngay = (payload.receivedDate || todayYmdVN()).slice(0, 10);
-    const y = year ?? new Date().getFullYear();
+    const dateCheck = validateReceiveDate({
+      orderDate: ct.orderDate,
+      receivedDate: ngay,
+      isDuyenHa: !!ct.isDuyenHa,
+    });
+    if (!dateCheck.ok) {
+      throw { code: "VALIDATION_ERROR", message: dateCheck.error };
+    }
+
     const row = await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",
@@ -124,8 +186,75 @@ export class DetailService {
       },
       y
     );
-    if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
-    return { detailId, actualReceived: qty, receivedDate: ngay, status: "RECEIVED", row };
+    if (row < 0) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+
+    // Phân bổ lại KHgiao nếu lệch SoLuong (tỷ lệ; làm tròn qty3)
+    let redistributed = 0;
+    const planQty = qty3(Number(ct.quantity) || 0);
+    if (planQty > 0 && Math.abs(qty - planQty) > 0.0001) {
+      try {
+        const { DeliveryRepository } = await import(
+          "@/repositories/delivery.repository"
+        );
+        const ghs = await DeliveryRepository.findMany({
+          year: y,
+          detailId,
+          includeDeleted: false,
+        });
+        const active = ghs.filter((g) => !g.deleted);
+        const sumPlan = active.reduce((s, g) => s + (Number(g.plannedQty) || 0), 0);
+        if (active.length && sumPlan > 0) {
+          let allocated = 0;
+          for (let i = 0; i < active.length; i++) {
+            const g = active[i];
+            let newKh: number;
+            if (i === active.length - 1) {
+              newKh = qty3(qty - allocated);
+            } else {
+              const ratio = (Number(g.plannedQty) || 0) / sumPlan;
+              newKh = qty3(qty * ratio);
+              allocated = qty3(allocated + newKh);
+            }
+            if (Math.abs(newKh - (Number(g.plannedQty) || 0)) > 0.0001) {
+              await updateSheetRowByKey(
+                SHEETS.GH,
+                "ID_Giaohang",
+                g.deliveryId,
+                { KHgiao: newKh },
+                y
+              );
+              redistributed++;
+            }
+          }
+          // Đồng bộ SoLuong CT = ThucNhan (sau phân bổ)
+          await updateSheetRowByKey(
+            SHEETS.CT,
+            "ID_Chitiet",
+            detailId,
+            { SoLuong: qty },
+            y
+          );
+        }
+      } catch (e) {
+        console.error("[receiveDetail] redistribute GH", e);
+      }
+    }
+
+    return {
+      detailId,
+      actualReceived: qty,
+      receivedDate: ngay,
+      status: "RECEIVED",
+      row,
+      tyleChiahet,
+      redistributed,
+      message:
+        redistributed > 0
+          ? `Đã nhận ${qty} tấn; phân bổ lại ${redistributed} dòng KH giao`
+          : `Đã nhận ${qty} tấn`,
+    };
   }
 
   /** Hủy / Xóa xe — V21 cancelDetail */
