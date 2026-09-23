@@ -50,6 +50,11 @@ export default function DeliveriesPage() {
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
   const [editTarget, setEditTarget] = useState<Delivery | null>(null);
+  const [editKhId, setEditKhId] = useState("");
+  const [editKhName, setEditKhName] = useState("");
+  const [editQty, setEditQty] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const pageSize = 100;
 
