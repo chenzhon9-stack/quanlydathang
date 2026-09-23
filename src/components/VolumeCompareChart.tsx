@@ -131,7 +131,7 @@ export function VolumeCompareChart() {
           {(
             [
               ["phanloai", "Bao/Rời"],
-              ["ncc", "Theo NCC"],
+              ["supplier", "Theo NCC"],
             ] as const
           ).map(([k, l]) => (
             <button

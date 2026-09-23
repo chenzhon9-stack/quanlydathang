@@ -16,6 +16,8 @@ export async function GET(req: NextRequest) {
     const filter = {
       year: searchParams.get("year") ? Number(searchParams.get("year")) : 2026,
       supplierId: searchParams.get("supplierId") || undefined,
+      fromDate: searchParams.get("fromDate") || undefined,
+      toDate: searchParams.get("toDate") || undefined,
       page: searchParams.get("page") ? Number(searchParams.get("page")) : 1,
       pageSize: searchParams.get("pageSize")
         ? Number(searchParams.get("pageSize"))

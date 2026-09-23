@@ -66,11 +66,15 @@ export default function DashboardPage() {
 
         const sumSeries = (j: {
           success?: boolean;
-          data?: { series?: { current?: number; previous?: number }[]; meta?: { periodNote?: string } };
-        }) => {
+          data?: {
+            series?: { current?: number; previous?: number }[];
+            meta?: { periodNote?: string };
+          };
+          meta?: { periodNote?: string };
+        }): { current: number; previous: number } => {
           const series = j.data?.series || [];
           return series.reduce(
-            (a, s) => ({
+            (a: { current: number; previous: number }, s) => ({
               current: a.current + (Number(s.current) || 0),
               previous: a.previous + (Number(s.previous) || 0),
             }),
