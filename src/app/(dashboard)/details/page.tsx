@@ -10,6 +10,7 @@ import {
 import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
 import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
+import { MasterPicker } from "@/components/MasterPicker";
 import { statusRowClass } from "@/lib/status-styles";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -219,7 +220,9 @@ export default function DetailsPage() {
 
   // edit form state
   const [editProduct, setEditProduct] = useState("");
+  const [editProductId, setEditProductId] = useState("");
   const [editRegion, setEditRegion] = useState("");
+  const [editRegionId, setEditRegionId] = useState("");
   const [editNote, setEditNote] = useState("");
 
   // receive form
@@ -304,7 +307,9 @@ export default function DetailsPage() {
     onEdit: (d) => {
       setEditTarget(d);
       setEditProduct(d.productName || d.productId || "");
+      setEditProductId(d.productId || "");
       setEditRegion(d.regionName || d.regionId || "");
+      setEditRegionId(d.regionId || "");
       setEditNote(d.note || "");
     },
     onPlan: (d) => openDeliveryModal(d, "plan"),
@@ -391,12 +396,64 @@ export default function DetailsPage() {
         `/api/v1/order-details/${encodeURIComponent(editTarget.detailId)}`,
         {
           note: editNote,
-          // productId / regionId: chỉ gửi nếu user đổi mã (hiện UI hiển thị tên)
+          productId: editProductId || undefined,
+          regionId: editRegionId || undefined,
           year: new Date().getFullYear(),
         }
       );
       if (!json.success) throw new Error(json.error?.message || "Lỗi lưu");
       setEditTarget(null);
+      load(page);
+    } catch (e: unknown) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitDeliveryPlan() {
+    if (!deliveryTarget) return;
+    setBusy(true);
+    try {
+      const rows = deliveryRows.map((r) => ({
+        deliveryId: r.deliveryId?.startsWith("NEW-") ? undefined : r.deliveryId,
+        customerId: r.customerId,
+        customerDetail: r.customerDetail || r.customerName || "",
+        plannedQty: Number(r.plannedQty) || 0,
+        note: r.note || "",
+      }));
+      if (!rows.length) {
+        alert("Cần ít nhất 1 dòng khách kế hoạch");
+        setBusy(false);
+        return;
+      }
+      for (const r of rows) {
+        if (!r.customerId) {
+          alert("Chọn khách hàng cho mọi dòng");
+          setBusy(false);
+          return;
+        }
+        if (!(r.plannedQty > 0)) {
+          alert("KH giao phải > 0");
+          setBusy(false);
+          return;
+        }
+      }
+      const token = localStorage.getItem("token");
+      const res = await fetch(
+        `/api/v1/order-details/${encodeURIComponent(deliveryTarget.detail.detailId)}/plan`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ rows, year: new Date().getFullYear() }),
+        }
+      );
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error?.message || "Lỗi lưu kế hoạch");
+      setDeliveryTarget(null);
       load(page);
     } catch (e: unknown) {
       alert((e as Error).message);
@@ -746,18 +803,30 @@ export default function DetailsPage() {
             label="Nhà cung cấp"
             value={editTarget.supplierName || editTarget.supplierId}
           />
-          <InputField
-            label="Hàng hóa"
-            value={editProduct}
-            onChange={setEditProduct}
-            readOnly
-          />
-          <InputField
-            label="Khu vực/Công trình"
-            value={editRegion}
-            onChange={setEditRegion}
-            readOnly
-          />
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">Hàng hóa</div>
+            <MasterPicker
+              type="HH"
+              value={editProductId}
+              displayName={editProduct}
+              onChange={(id, name) => {
+                setEditProductId(id);
+                setEditProduct(name);
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">Khu vực/Công trình</div>
+            <MasterPicker
+              type="KV"
+              value={editRegionId}
+              displayName={editRegion}
+              onChange={(id, name) => {
+                setEditRegionId(id);
+                setEditRegion(name);
+              }}
+            />
+          </div>
           <div>
             <div className="text-[12px] font-bold text-slate-600 mb-1">Ghi chú</div>
             <textarea
@@ -767,9 +836,6 @@ export default function DetailsPage() {
               className="w-full px-3 py-2.5 rounded-lg text-sm border border-slate-300 focus:ring-2 focus:ring-sky-400 focus:outline-none"
             />
           </div>
-          <p className="text-[10px] text-slate-400">
-            Đổi HH / khu vực qua picker sẽ bổ sung ở bước tiếp theo. Hiện có thể lưu ghi chú.
-          </p>
         </ModalShell>
       )}
 
@@ -801,11 +867,7 @@ export default function DetailsPage() {
                 onClick={
                   deliveryTarget.mode === "real"
                     ? submitDeliveryReal
-                    : () => {
-                        alert(
-                          "Thêm/sửa kế hoạch KH (ghi Sheet GH) — picker khách sẽ bổ sung bước tiếp theo. Hiện có thể dùng tab Giao hàng để cập nhật thực giao."
-                        );
-                      }
+                    : submitDeliveryPlan
                 }
                 className={primaryBtn}
               >
@@ -865,17 +927,53 @@ export default function DetailsPage() {
                     <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
                       Khách
                     </div>
-                    <div className="text-sm font-medium truncate px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
-                      {r.customerName || r.customerDetail || r.customerId}
-                    </div>
+                    {deliveryTarget.mode === "plan" ? (
+                      <MasterPicker
+                        type="KH"
+                        value={r.customerId}
+                        displayName={r.customerName || r.customerDetail || r.customerId}
+                        onChange={(id, name) => {
+                          setDeliveryRows((rows) =>
+                            rows.map((x, i) =>
+                              i === idx
+                                ? { ...x, customerId: id, customerName: name }
+                                : x
+                            )
+                          );
+                        }}
+                      />
+                    ) : (
+                      <div className="text-sm font-medium truncate px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+                        {r.customerName || r.customerDetail || r.customerId}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
                       KH giao
                     </div>
-                    <div className="text-sm tabular-nums px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-center">
-                      {fmtNum(r.plannedQty)}
-                    </div>
+                    {deliveryTarget.mode === "plan" ? (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={r.plannedQty ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDeliveryRows((rows) =>
+                            rows.map((x, i) =>
+                              i === idx
+                                ? { ...x, plannedQty: v === "" ? 0 : Number(v) }
+                                : x
+                            )
+                          );
+                        }}
+                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg tabular-nums text-center"
+                      />
+                    ) : (
+                      <div className="text-sm tabular-nums px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-center">
+                        {fmtNum(r.plannedQty)}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
@@ -928,8 +1026,22 @@ export default function DetailsPage() {
                       </div>
                     )}
                   </div>
-                  <div className="text-[10px] text-slate-400 font-mono truncate">
-                    {r.deliveryId}
+                  <div className="flex items-center gap-1 justify-end">
+                    <div className="text-[10px] text-slate-400 font-mono truncate max-w-[90px]">
+                      {r.deliveryId?.startsWith("NEW-") ? "mới" : r.deliveryId}
+                    </div>
+                    {deliveryTarget.mode === "plan" && (
+                      <button
+                        type="button"
+                        title="Xóa dòng"
+                        onClick={() =>
+                          setDeliveryRows((rows) => rows.filter((_, i) => i !== idx))
+                        }
+                        className="w-7 h-7 rounded-lg bg-red-500 text-white text-sm font-bold"
+                      >
+                        −
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -939,9 +1051,19 @@ export default function DetailsPage() {
           {deliveryTarget.mode === "plan" && (
             <button
               type="button"
-              onClick={() =>
-                alert("Thêm khách kế hoạch — cần picker DM_KhachHang (bước tiếp theo)")
-              }
+              onClick={() => {
+                setDeliveryRows((rows) => [
+                  ...rows,
+                  {
+                    deliveryId: `NEW-${Date.now()}`,
+                    detailId: deliveryTarget.detail.detailId,
+                    customerId: "",
+                    customerName: "",
+                    plannedQty: 0,
+                    actualQty: 0,
+                  },
+                ]);
+              }}
               className="text-sm font-semibold text-sky-600 hover:underline"
             >
               + Thêm khách kế hoạch
