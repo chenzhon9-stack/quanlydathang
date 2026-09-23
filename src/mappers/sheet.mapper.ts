@@ -10,11 +10,10 @@ import type {
   PhanLoaiHH,
 } from "@/types";
 import { normalizeSheetDate } from "@/lib/sheets/date";
+import { parseNumberVN } from "@/lib/parse";
 
 function num(v: string | undefined): number {
-  if (!v) return 0;
-  const n = Number(String(v).replace(/,/g, ""));
-  return Number.isFinite(n) ? n : 0;
+  return parseNumberVN(v);
 }
 
 function pick(row: Record<string, string>, keys: string[]): string {

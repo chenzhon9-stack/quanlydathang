@@ -1,11 +1,7 @@
-/**
- * Parity V21 `_resolveDonGiaMua_`:
- * - MaNCC + MaHH + HoatDong
- * - TuNgay <= ngayNhan
- * - Ưu tiên Makv khớp exact; không có thì Makv rỗng
- * - TuNgay mới nhất
- * Makv lấy từ CT.Khuvuc (hoặc Makv) — V21 `_ctMakv_`
- */
+import { normalizeSheetDate } from "@/lib/sheets/date";
+import { parseNumberVN } from "@/lib/parse";
+
+/** Parity V21 `_resolveDonGiaMua_` */
 export type GiaMuaRow = {
   idGia?: string;
   maNcc: string;
@@ -24,7 +20,7 @@ export type ResolveGiaResult = {
 };
 
 function ymd(s: string): string {
-  return String(s || "").trim().slice(0, 10);
+  return normalizeSheetDate(s) || String(s || "").trim().slice(0, 10);
 }
 
 export function resolveDonGiaMua(
@@ -55,7 +51,13 @@ export function resolveDonGiaMua(
 
   const exact = kv ? candidates.filter((r) => r.makv === kv) : [];
   const fallback = candidates.filter((r) => !r.makv);
-  const pool = exact.length ? exact : fallback;
+  let pool = exact.length ? exact : fallback;
+
+  // V21 không fallback “any makv”, nhưng nếu CT.Khuvuc lưu tên thay vì mã
+  // và không có dòng Makv trống → thử mọi Makv (TuNgay mới nhất) để tránh mất phát sinh.
+  if (!pool.length && candidates.length) {
+    pool = candidates.slice();
+  }
   if (!pool.length) {
     return { found: false, donGia: 0, idGia: "", makvMatched: "" };
   }
@@ -80,22 +82,13 @@ export function mapGiaMuaSheetRow(r: Record<string, string>): GiaMuaRow | null {
     activeRaw === "0" ||
     activeRaw === "không"
   );
-  let tuNgay = String(r.TuNgay || "").trim();
-  if (/^\d+(\.\d+)?$/.test(tuNgay)) {
-    const n = Number(tuNgay);
-    const epoch = Date.UTC(1899, 11, 30);
-    const d = new Date(epoch + n * 86400000);
-    tuNgay = d.toISOString().slice(0, 10);
-  } else {
-    tuNgay = tuNgay.slice(0, 10);
-  }
   return {
     idGia: String(r.ID_Gia || "").trim(),
     maNcc,
     maHh,
-    makv: String(r.Makv || r.MaKV || "").trim(),
-    donGia: Number(r.DonGia) || 0,
-    tuNgay,
+    makv: String(r.Makv || r.MaKV || r.Khuvuc || "").trim(),
+    donGia: parseNumberVN(r.DonGia),
+    tuNgay: normalizeSheetDate(r.TuNgay),
     active,
   };
 }

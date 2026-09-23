@@ -118,18 +118,9 @@ export class ReportRepository {
       console.info(
         `[ReportRepository] NCC_CongNo raw=${rows.length} mapped=${payables.length} sample=${payables[0]?.id || "-"}`
       );
-      const byYear = payables.filter((p) => {
-        if (!p.date) return true;
-        const y = yearOfDate(p.date);
-        return y === null || y === year;
-      });
-      if (byYear.length === 0 && payables.length > 0) {
-        console.warn(
-          `[ReportRepository] payables year=${year} match=0 total=${payables.length} → all`
-        );
-        return payables;
-      }
-      return byYear;
+      // Giữ toàn bộ dòng CN; service lọc theo yearStart..toDate
+      // (tránh mất dòng khi parse ngày lỗi)
+      return payables;
     } catch (e) {
       console.error("[ReportRepository] getPayables failed, fallback mock", e);
       return getPayablesByYear(year);

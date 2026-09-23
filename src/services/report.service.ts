@@ -320,8 +320,9 @@ export class ReportService {
         dt
       );
       // V21 doi chieu: toFixed(0) for money on balance
+      // V21: _num((thucNhan * donGia).toFixed(0))
       const tien = resolved.found
-        ? Math.round(tons * resolved.donGia)
+        ? Math.round(Number((tons * resolved.donGia).toFixed(0)))
         : 0;
       const bucket = dt < fromDate ? "truocKy" : "trongKy";
       addNo(maNcc, tien, !resolved.found, tons, bucket);
@@ -397,8 +398,8 @@ export class ReportService {
         opening: duDauNam, // alias
         duDauNam,
         duDauKy,
-        phatSinh: Math.round(no.trongKy * 100) / 100, // phaiTraTrongKy
-        phaiTraTrongKy: Math.round(no.trongKy * 100) / 100,
+        phatSinh: Math.round(no.trongKy),
+        phaiTraTrongKy: Math.round(no.trongKy),
         tonsNhan: Math.round(no.tonsTrongKy * 1000) / 1000,
         increase: Math.round(ct["DIEU_CHINH_TANG"] || 0),
         paid: Math.round(ct["THANH_TOAN"] || 0),
@@ -437,6 +438,116 @@ export class ReportService {
           (s, r) => s + (r.soDongThieuGia || 0),
           0
         ),
+      },
+    };
+  }
+
+
+
+  /** Chi tiết sổ công nợ 1 NCC trong kỳ — parity openCongNoDetail */
+  static async getPayablesDetail(
+    supplierId: string,
+    filter: { fromDate?: string; toDate?: string; year?: number },
+    user: UserContext,
+    scope: AccessScope
+  ) {
+    if (
+      !hasPermission(user, "REPORT_VIEW") &&
+      !hasPermission(user, "PAYABLE_VIEW")
+    ) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền xem công nợ" };
+    }
+    const yearHint = filter.year ?? new Date().getFullYear();
+    const fromDate = (filter.fromDate || `${yearHint}-01-01`).slice(0, 10);
+    const toDate = (filter.toDate || `${yearHint}-12-31`).slice(0, 10);
+    const Y = Number(fromDate.slice(0, 4));
+    const yearStart = `${Y}-01-01`;
+    const maNcc = String(supplierId || "").trim();
+
+    const [details, payables, pricesRaw] = await Promise.all([
+      ReportRepository.getDetails(Y),
+      ReportRepository.getPayables(Y),
+      (async () => {
+        if (!isSheetsConfigured()) return [] as GiaMuaRow[];
+        try {
+          const rows = await readSheetAsObjects(SHEETS.GM, {});
+          return rows.map(mapGiaMuaSheetRow).filter((x): x is GiaMuaRow => !!x);
+        } catch {
+          return [] as GiaMuaRow[];
+        }
+      })(),
+    ]);
+
+    const nccMap = await MasterRepository.nccNames();
+    const hhMap = await MasterRepository.hhNames();
+
+    const receiveLines = [];
+    for (const d of details) {
+      if (d.supplierId !== maNcc) continue;
+      if (d.status === "DELETE") continue;
+      const tons = Number(d.actualReceived) || 0;
+      if (tons <= 0) continue;
+      const dt = (d.receivedDate || "").slice(0, 10);
+      if (!dt || dt < yearStart || dt > toDate) continue;
+      const makv = String(d.regionId || "").trim();
+      const resolved = resolveDonGiaMua(pricesRaw, maNcc, d.productId, makv, dt);
+      const thanhTien = resolved.found
+        ? Math.round(Number((tons * resolved.donGia).toFixed(0)))
+        : 0;
+      const bucket = dt < fromDate ? "truocKy" : "trongKy";
+      receiveLines.push({
+        kind: "NHAN" as const,
+        bucket,
+        detailId: d.detailId,
+        orderId: d.orderId,
+        date: dt,
+        productId: d.productId,
+        productName: hhMap[d.productId] || d.productId,
+        makv,
+        tons,
+        donGia: resolved.donGia,
+        thieuGia: !resolved.found,
+        thanhTien,
+        vehicleId: d.vehicleId,
+      });
+    }
+
+    const ledgerLines = [];
+    for (const p of payables) {
+      if (p.supplierId !== maNcc || !p.active) continue;
+      const dt = (p.date || "").slice(0, 10);
+      if (!dt || dt < yearStart || dt > toDate) continue;
+      const bucket = dt < fromDate ? "truocKy" : "trongKy";
+      ledgerLines.push({
+        kind: "SO_CO" as const,
+        bucket,
+        id: p.id,
+        date: dt,
+        type: p.type,
+        amount: Number(p.amount) || 0,
+        documentNo: p.documentNo || "",
+        description: p.description || "",
+        productId: p.productId || "",
+      });
+    }
+
+    receiveLines.sort((a, b) => b.date.localeCompare(a.date));
+    ledgerLines.sort((a, b) => b.date.localeCompare(a.date));
+
+    return {
+      data: {
+        supplierId: maNcc,
+        supplierName: nccMap[maNcc] || maNcc,
+        fromDate,
+        toDate,
+        year: Y,
+        receiveLines,
+        ledgerLines,
+      },
+      meta: {
+        receiveCount: receiveLines.length,
+        ledgerCount: ledgerLines.length,
+        thieuGia: receiveLines.filter((x) => x.thieuGia).length,
       },
     };
   }
