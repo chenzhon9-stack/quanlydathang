@@ -9,6 +9,8 @@ import {
 } from "@/components/ListToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { OrderDetail } from "@/types";
+import { ActionPrompt, apiPost } from "@/components/ActionPrompt";
+import { downloadExcelHtml } from "@/lib/export-excel";
 
 const STATUS_ROW: Record<string, string> = {
   NEW: "bg-amber-50",
@@ -35,40 +37,110 @@ function fmtDateVN(ymd: string) {
   return ymd;
 }
 
-function DetailActions({ d }: { d: OrderDetail }) {
-  function toast(msg: string) {
-    alert(`[Mock] ${msg}\n(CT: ${d.detailId})`);
-  }
+type DetailActionHandlers = {
+  onReceive: (d: OrderDetail) => void;
+  onCancel: (d: OrderDetail, mode: "cancel" | "delete") => void;
+  onDelivery: (d: OrderDetail) => void;
+};
+
+function DetailActions({
+  d,
+  handlers,
+}: {
+  d: OrderDetail;
+  handlers: DetailActionHandlers;
+}) {
   const st = d.status;
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
       {st === "ORDERED" && (
-        <button onClick={() => toast("Nhận hàng")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white">
+        <button
+          type="button"
+          onClick={() => handlers.onReceive(d)}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-indigo-600 text-white"
+        >
           Nhận
         </button>
       )}
       {(st === "ORDERED" || st === "NEW") && (
         <>
-          <button onClick={() => toast("Sửa hàng")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-600 text-white">
+          <button
+            type="button"
+            onClick={() => alert("Sửa hàng — modal sẽ bổ sung (V21 openEditDetail)")}
+            className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-600 text-white"
+          >
             Sửa hàng
           </button>
-          <button onClick={() => toast("Sửa KH")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-500 text-white">
+          <button
+            type="button"
+            onClick={() => handlers.onDelivery(d)}
+            className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-500 text-white"
+          >
             Sửa KH
           </button>
-          <button onClick={() => toast(st === "NEW" ? "Xóa xe" : "Hủy xe")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white">
+          <button
+            type="button"
+            onClick={() =>
+              handlers.onCancel(d, st === "NEW" ? "delete" : "cancel")
+            }
+            className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white"
+          >
             {st === "NEW" ? "Xóa" : "Hủy"}
           </button>
         </>
       )}
       {(st === "RECEIVED" || st === "DELIVERING") && (
-        <button onClick={() => toast("Giao hàng")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white">
+        <button
+          type="button"
+          onClick={() => handlers.onDelivery(d)}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white"
+        >
           Giao
         </button>
       )}
       {st === "DONE" && (
-        <button onClick={() => toast("Xem giao hàng")} className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-200 text-slate-700">
+        <button
+          type="button"
+          onClick={() => handlers.onDelivery(d)}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-200 text-slate-700"
+        >
           Xem
         </button>
+      )}
+      {receiveTarget && (
+        <ActionPrompt
+          open
+          title={`Nhận hàng — ${receiveTarget.detailId}`}
+          fields={[
+            {
+              key: "actualReceived",
+              label: "Thực nhận (tấn)",
+              type: "number",
+              defaultValue: receiveTarget.quantity,
+            },
+            {
+              key: "receivedDate",
+              label: "Ngày nhận",
+              type: "date",
+              defaultValue: new Date().toISOString().slice(0, 10),
+            },
+          ]}
+          confirmLabel="Xác nhận nhận"
+          onCancel={() => setReceiveTarget(null)}
+          onConfirm={async (vals) => {
+            const json = await apiPost(
+              `/api/v1/order-details/${encodeURIComponent(receiveTarget.detailId)}/receive`,
+              {
+                actualReceived: Number(vals.actualReceived),
+                receivedDate: vals.receivedDate,
+                year: new Date().getFullYear(),
+              }
+            );
+            if (!json.success) throw new Error(json.error?.message || "Lỗi nhận hàng");
+            setReceiveTarget(null);
+            load(page);
+          }}
+        />
       )}
     </div>
   );
@@ -84,7 +156,29 @@ export default function DetailsPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
+  const [receiveTarget, setReceiveTarget] = useState<OrderDetail | null>(null);
   const pageSize = 100;
+
+  const handlers: DetailActionHandlers = {
+    onReceive: (d) => setReceiveTarget(d),
+    onCancel: async (d, mode) => {
+      const label = mode === "delete" ? "Xóa" : "Hủy";
+      if (!confirm(`${label} chi tiết ${d.detailId}?`)) return;
+      const json = await apiPost(
+        `/api/v1/order-details/${encodeURIComponent(d.detailId)}/cancel`,
+        { mode, year: new Date().getFullYear() }
+      );
+      if (!json.success) {
+        alert(json.error?.message || "Lỗi " + label);
+        return;
+      }
+      load(page);
+    },
+    onDelivery: (d) => {
+      // Chuyển sang tab giao — filter theo detail
+      window.location.href = `/deliveries?detailId=${encodeURIComponent(d.detailId)}`;
+    },
+  };
 
   const load = useCallback(async (p: number) => {
     const token = localStorage.getItem("token");
@@ -179,7 +273,24 @@ export default function DetailsPage() {
           <button onClick={() => load(page)} className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200">
             Tải lại
           </button>
-          <button onClick={() => alert("[Mock] Xuất Excel")} className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 text-white">
+          <button onClick={() => {
+              downloadExcelHtml(
+                `ChiTietXe_${new Date().toISOString().slice(0, 10)}.xls`,
+                "ChiTiet",
+                ["Mã CT", "Đơn", "Ngày đặt", "Hàng", "Xe", "SL", "TN", "TT", "NCC"],
+                filtered.map((d) => [
+                  d.detailId,
+                  d.orderId,
+                  d.orderDate,
+                  d.productName || d.productId,
+                  d.vehiclePlate || d.vehicleId,
+                  d.quantity,
+                  d.actualReceived ?? "",
+                  d.status,
+                  d.supplierName || d.supplierId,
+                ])
+              );
+            }} className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 text-white">
             Xuất Excel
           </button>
         </div>
@@ -258,7 +369,7 @@ export default function DetailsPage() {
                       </div>
                     </div>
                     <div className="mt-3 pt-3 border-t border-slate-200/80">
-                      <DetailActions d={d} />
+                      <DetailActions d={d} handlers={handlers} />
                     </div>
                   </div>
                 ))}
@@ -319,7 +430,7 @@ export default function DetailsPage() {
                             <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
                           </td>
                           <td className="px-3 py-2.5">
-                            <DetailActions d={d} />
+                            <DetailActions d={d} handlers={handlers} />
                           </td>
                         </tr>
                       ))}
@@ -355,6 +466,41 @@ export default function DetailsPage() {
             </div>
           )}
         </>
+      )}
+      {receiveTarget && (
+        <ActionPrompt
+          open
+          title={`Nhận hàng — ${receiveTarget.detailId}`}
+          fields={[
+            {
+              key: "actualReceived",
+              label: "Thực nhận (tấn)",
+              type: "number",
+              defaultValue: receiveTarget.quantity,
+            },
+            {
+              key: "receivedDate",
+              label: "Ngày nhận",
+              type: "date",
+              defaultValue: new Date().toISOString().slice(0, 10),
+            },
+          ]}
+          confirmLabel="Xác nhận nhận"
+          onCancel={() => setReceiveTarget(null)}
+          onConfirm={async (vals) => {
+            const json = await apiPost(
+              `/api/v1/order-details/${encodeURIComponent(receiveTarget.detailId)}/receive`,
+              {
+                actualReceived: Number(vals.actualReceived),
+                receivedDate: vals.receivedDate,
+                year: new Date().getFullYear(),
+              }
+            );
+            if (!json.success) throw new Error(json.error?.message || "Lỗi nhận hàng");
+            setReceiveTarget(null);
+            load(page);
+          }}
+        />
       )}
     </div>
   );

@@ -6,6 +6,10 @@ import {
 } from "@/lib/scope";
 import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
+import { updateSheetRowByKey } from "@/lib/sheets/dal";
+import { SHEETS } from "@/lib/sheets/constants";
+import { isSheetsConfigured } from "@/lib/sheets/client";
+import { STATUS_DON } from "@/lib/status";
 
 export interface OrderListFilter {
   year?: number;
@@ -128,5 +132,36 @@ export class OrderService {
     }
 
     return order;
+  }
+
+
+  /** Hủy đơn — V21 cancelOrder */
+  static async cancelOrder(
+    orderId: string,
+    user: UserContext,
+    year?: number
+  ) {
+    if (
+      !hasPermission(user, "ORDER_CANCEL") &&
+      !hasPermission(user, "ORDER_UPDATE") &&
+      !hasPermission(user, "*")
+    ) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền hủy đơn" };
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
+    }
+    const y = year ?? new Date().getFullYear();
+    const row = await updateSheetRowByKey(
+      SHEETS.DH,
+      "MaDon",
+      orderId,
+      {
+        TrangThaiDon: STATUS_DON.CANCEL,
+      },
+      y
+    );
+    if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
+    return { orderId, status: "CANCEL", row };
   }
 }

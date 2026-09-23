@@ -8,6 +8,8 @@ import {
   matchSearch,
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
+import { ActionPrompt, apiPatch } from "@/components/ActionPrompt";
+import { downloadExcelHtml } from "@/lib/export-excel";
 
 function fmtDateVN(ymd: string) {
   if (!ymd || ymd === "—" || ymd === "all") return ymd === "all" ? "Tất cả" : "—";
@@ -31,6 +33,7 @@ export default function DeliveriesPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
+  const [editTarget, setEditTarget] = useState<Delivery | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const pageSize = 100;
 
@@ -125,7 +128,23 @@ export default function DeliveriesPage() {
             Tải lại
           </button>
           <button
-            onClick={() => alert("[Mock] Xuất Excel")}
+            onClick={() => {
+              downloadExcelHtml(
+                `GiaoHang_${new Date().toISOString().slice(0, 10)}.xls`,
+                "GiaoHang",
+                ["Mã GH", "CT", "Ngày đặt", "Xe", "KH", "SL KH", "Thực giao", "Ngày giao"],
+                filtered.map((d) => [
+                  d.deliveryId,
+                  d.detailId,
+                  d.orderDate || "",
+                  d.vehiclePlate || "",
+                  d.customerName || d.customerId,
+                  d.plannedQty,
+                  d.actualQty ?? "",
+                  d.deliveryDate || "",
+                ])
+              );
+            }}
             className="px-3 py-2 text-xs font-medium rounded-lg bg-emerald-700 text-white"
           >
             Xuất Excel
@@ -210,7 +229,7 @@ export default function DeliveriesPage() {
                     </div>
                     <div className="mt-3 pt-3 border-t border-slate-200/80 flex justify-end">
                       <button
-                        onClick={() => alert(`[Mock] ${actionLabel(d)} — ${d.deliveryId}`)}
+                        onClick={() => setEditTarget(d)}
                         className="px-3 py-1.5 text-[11px] font-medium rounded bg-blue-600 text-white"
                       >
                         {actionLabel(d)}
@@ -275,7 +294,7 @@ export default function DeliveriesPage() {
                           </td>
                           <td className="px-3 py-2.5 text-right">
                             <button
-                              onClick={() => alert(`[Mock] ${actionLabel(d)} — ${d.deliveryId}`)}
+                              onClick={() => setEditTarget(d)}
                               className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white"
                             >
                               {actionLabel(d)}
@@ -315,6 +334,51 @@ export default function DeliveriesPage() {
             </div>
           )}
         </>
+      )}
+      {editTarget && (
+        <ActionPrompt
+          open
+          title={`${actionLabel(editTarget)} — ${editTarget.deliveryId}`}
+          fields={[
+            {
+              key: "actualQty",
+              label: "Thực giao (tấn)",
+              type: "number",
+              defaultValue: editTarget.actualQty ?? editTarget.plannedQty,
+            },
+            {
+              key: "deliveryDate",
+              label: "Ngày giao",
+              type: "date",
+              defaultValue:
+                editTarget.deliveryDate ||
+                new Date().toISOString().slice(0, 10),
+            },
+            {
+              key: "note",
+              label: "Ghi chú",
+              type: "text",
+              defaultValue: editTarget.note || "",
+            },
+          ]}
+          confirmLabel="Lưu"
+          onCancel={() => setEditTarget(null)}
+          onConfirm={async (vals) => {
+            const json = await apiPatch(
+              `/api/v1/deliveries/${encodeURIComponent(editTarget.deliveryId)}`,
+              {
+                actualQty: Number(vals.actualQty),
+                deliveryDate: vals.deliveryDate,
+                note: vals.note,
+                year: new Date().getFullYear(),
+              }
+            );
+            if (!json.success)
+              throw new Error(json.error?.message || "Lỗi cập nhật giao");
+            setEditTarget(null);
+            load(page);
+          }}
+        />
       )}
     </div>
   );

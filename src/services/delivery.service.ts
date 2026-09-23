@@ -7,6 +7,10 @@ import {
 import { DeliveryRepository } from "@/repositories/delivery.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
+import { updateSheetRowByKey } from "@/lib/sheets/dal";
+import { SHEETS } from "@/lib/sheets/constants";
+import { isSheetsConfigured } from "@/lib/sheets/client";
+import { todayYmdVN } from "@/lib/status";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -100,5 +104,45 @@ export class DeliveryService {
       total,
       hasMore: start + items.length < total,
     };
+  }
+
+
+  /** Cập nhật thực giao — V21 saveDelivery (một dòng) */
+  static async updateDelivery(
+    deliveryId: string,
+    payload: { actualQty: number; deliveryDate?: string; note?: string },
+    user: UserContext,
+    year?: number
+  ) {
+    if (
+      !hasPermission(user, "DELIVERY_UPDATE") &&
+      !hasPermission(user, "ORDER_UPDATE") &&
+      !hasPermission(user, "*")
+    ) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền cập nhật giao hàng" };
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
+    }
+    const qty = Number(payload.actualQty);
+    if (qty < 0) {
+      throw { code: "VALIDATION_ERROR", message: "Thực giao không hợp lệ" };
+    }
+    const ngay = (payload.deliveryDate || todayYmdVN()).slice(0, 10);
+    const y = year ?? new Date().getFullYear();
+    const patch: Record<string, string | number | boolean> = {
+      ThucGiao: qty,
+      Ngaygiao: ngay,
+    };
+    if (payload.note !== undefined) patch.Ghichu = payload.note;
+    const row = await updateSheetRowByKey(
+      SHEETS.GH,
+      "ID_Giaohang",
+      deliveryId,
+      patch,
+      y
+    );
+    if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy GH " + deliveryId };
+    return { deliveryId, actualQty: qty, deliveryDate: ngay, row };
   }
 }

@@ -9,6 +9,8 @@ import {
 } from "@/components/ListToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Order } from "@/types";
+import { apiPost } from "@/components/ActionPrompt";
+import { downloadExcelHtml } from "@/lib/export-excel";
 
 const STATUS_ROW: Record<string, string> = {
   NEW: "bg-amber-50",
@@ -28,8 +30,22 @@ function OrderActions({ o }: { o: Order }) {
   const isNew = o.status === "NEW";
   const isProcessing = o.status === "PROCESSING";
 
-  function toast(msg: string) {
-    alert(`[Mock] ${msg}\n(Mã đơn: ${o.orderId})`);
+  async function toast(msg: string) {
+    // Gửi mail / Thêm xe / PDF — phase sau
+    if (msg.startsWith("Hủy") || msg.startsWith("Xóa")) {
+      if (!confirm(`${msg}?`)) return;
+      const json = await apiPost(
+        `/api/v1/orders/${encodeURIComponent(o.orderId)}/cancel`,
+        { year: new Date().getFullYear() }
+      );
+      if (!json.success) {
+        alert(json.error?.message || "Lỗi hủy đơn");
+        return;
+      }
+      window.location.reload();
+      return;
+    }
+    alert(`${msg}\n(Mã đơn: ${o.orderId})\n[API write sẽ bổ sung: Gửi mail / Thêm xe / PDF]`);
   }
 
   return (
@@ -186,13 +202,27 @@ export default function OrdersPage() {
             Tải lại
           </button>
           <button
-            onClick={() => alert("[Mock] Xuất CSV")}
+            onClick={() => {
+              downloadExcelHtml(
+                `DonHang_${new Date().toISOString().slice(0, 10)}.xls`,
+                "DonHang",
+                ["Mã đơn", "Ngày", "NCC", "TT", "Số CT", "User"],
+                filtered.map((o) => [
+                  o.orderId,
+                  o.orderDate,
+                  o.supplierName || o.supplierId,
+                  o.status,
+                  o.detailCount,
+                  o.createdBy || "",
+                ])
+              );
+            }}
             className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 text-white"
           >
             Xuất CSV
           </button>
           <button
-            onClick={() => alert("[Mock] POST /api/v1/orders — Thêm đơn")}
+            onClick={() => alert("Tạo đơn mới — modal order flow (V21) sẽ triển khai ở bước write path tiếp theo")}
             className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
           >
             + Thêm đơn
