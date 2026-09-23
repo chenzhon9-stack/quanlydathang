@@ -23,6 +23,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         actualQty: Number(body.actualQty ?? body.thucGiao),
         deliveryDate: body.deliveryDate || body.ngayGiao,
         note: body.note || body.ghiChu,
+        customerId: body.customerId || body.maKh,
+        customerDetail: body.customerDetail || body.chitietKh,
       },
       user,
       year

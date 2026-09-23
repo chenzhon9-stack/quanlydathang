@@ -472,6 +472,8 @@ export default function DetailsPage() {
           {
             actualQty: Number(row.actualQty) || 0,
             deliveryDate: row.deliveryDate,
+            customerId: row.customerId,
+            customerDetail: row.customerName || row.customerDetail || "",
             year: new Date().getFullYear(),
           }
         );
@@ -809,6 +811,7 @@ export default function DetailsPage() {
               type="HH"
               value={editProductId}
               displayName={editProduct}
+              supplierId={editTarget.supplierId}
               onChange={(id, name) => {
                 setEditProductId(id);
                 setEditProduct(name);
@@ -927,7 +930,11 @@ export default function DetailsPage() {
                     <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
                       Khách
                     </div>
-                    {deliveryTarget.mode === "plan" ? (
+                    {deliveryTarget.mode === "view" ? (
+                      <div className="text-sm font-medium truncate px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+                        {r.customerName || r.customerDetail || r.customerId}
+                      </div>
+                    ) : (
                       <MasterPicker
                         type="KH"
                         value={r.customerId}
@@ -942,10 +949,6 @@ export default function DetailsPage() {
                           );
                         }}
                       />
-                    ) : (
-                      <div className="text-sm font-medium truncate px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
-                        {r.customerName || r.customerDetail || r.customerId}
-                      </div>
                     )}
                   </div>
                   <div>

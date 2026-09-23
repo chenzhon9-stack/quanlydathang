@@ -98,6 +98,9 @@ export interface Delivery {
   productName?: string;
   note?: string;
   deleted?: boolean;
+  /** Trạng thái CT (enrich) */
+  detailStatus?: string;
+  actualReceived?: number;
 }
 
 export interface ProductionPlan {

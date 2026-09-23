@@ -39,6 +39,11 @@ function isActive(v: unknown) {
   return !["false", "0", "no", "không", "khoa", "khóa"].includes(s);
 }
 
+/**
+ * Picker danh mục.
+ * - type=HH + supplierId → chỉ HH có trong NCC_Hanghoa của NCC đó (V21 getSanPhamByNCC)
+ * - allowedIds → whitelist mã
+ */
 export function MasterPicker({
   type,
   value,
@@ -46,6 +51,8 @@ export function MasterPicker({
   onChange,
   placeholder,
   disabled,
+  supplierId,
+  allowedIds,
 }: {
   type: MasterType;
   value: string;
@@ -53,25 +60,56 @@ export function MasterPicker({
   onChange: (id: string, name: string, raw?: Record<string, string>) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Lọc HH theo NCC_Hanghoa */
+  supplierId?: string;
+  allowedIds?: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [label, setLabel] = useState(displayName || value || "");
+  const [loadedKey, setLoadedKey] = useState("");
 
   useEffect(() => {
     setLabel(displayName || value || "");
   }, [displayName, value]);
 
+  // Reload khi đổi NCC filter
+  useEffect(() => {
+    setItems([]);
+    setLoadedKey("");
+  }, [type, supplierId]);
+
   async function load() {
-    if (items.length) return;
+    const cacheKey = `${type}|${supplierId || ""}`;
+    if (items.length && loadedKey === cacheKey) return;
     setLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const res = await fetch(`/api/v1/masters?type=${type}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const headers = { Authorization: `Bearer ${token}` };
+
+      let allowSet: Set<string> | null = allowedIds
+        ? new Set(allowedIds.map((x) => x.trim()))
+        : null;
+
+      // HH theo NCC_Hanghoa
+      if (type === "HH" && supplierId) {
+        const resLink = await fetch(`/api/v1/masters?type=NCC_HH`, { headers });
+        const jsonLink = await resLink.json();
+        const links: Record<string, string>[] = jsonLink.data?.items || [];
+        const ncc = String(supplierId).trim().toLowerCase();
+        const hhIds = new Set<string>();
+        for (const r of links) {
+          if (r.HoatDong !== undefined && !isActive(r.HoatDong)) continue;
+          const maNcc = String(r.MaNCC || r.MaNcc || "").trim().toLowerCase();
+          const maHh = String(r.MaHH || r.MaHh || "").trim();
+          if (maNcc === ncc && maHh) hhIds.add(maHh);
+        }
+        allowSet = hhIds;
+      }
+
+      const res = await fetch(`/api/v1/masters?type=${type}`, { headers });
       const json = await res.json();
       const rows: Record<string, string>[] = json.data?.items || [];
       const mapped: Item[] = [];
@@ -80,11 +118,13 @@ export function MasterPicker({
           continue;
         const id = pickField(r, ID_KEYS[type]);
         if (!id) continue;
+        if (allowSet && !allowSet.has(id)) continue;
         const name = pickField(r, NAME_KEYS[type]) || id;
         mapped.push({ id, name, raw: r });
       }
       mapped.sort((a, b) => a.name.localeCompare(b.name, "vi"));
       setItems(mapped);
+      setLoadedKey(cacheKey);
     } catch {
       setItems([]);
     } finally {
@@ -94,14 +134,14 @@ export function MasterPicker({
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return items.slice(0, 80);
+    if (!s) return items.slice(0, 100);
     return items
       .filter(
         (it) =>
           it.id.toLowerCase().includes(s) ||
           it.name.toLowerCase().includes(s)
       )
-      .slice(0, 80);
+      .slice(0, 100);
   }, [items, q]);
 
   return (
@@ -122,7 +162,10 @@ export function MasterPicker({
       >
         {label || (
           <span className="text-slate-400">
-            {placeholder || `Chọn ${type}…`}
+            {placeholder ||
+              (type === "HH" && supplierId
+                ? "Chọn hàng theo NCC…"
+                : `Chọn ${type}…`)}
           </span>
         )}
       </button>
@@ -141,8 +184,10 @@ export function MasterPicker({
                 Đang tải…
               </div>
             ) : filtered.length === 0 ? (
-              <div className="text-center text-slate-400 text-xs py-4">
-                Không có dữ liệu
+              <div className="text-center text-slate-400 text-xs py-4 px-2">
+                {type === "HH" && supplierId
+                  ? "Không có HH trong NCC_Hanghoa của NCC này"
+                  : "Không có dữ liệu"}
               </div>
             ) : (
               filtered.map((it) => (
@@ -154,7 +199,7 @@ export function MasterPicker({
                   }`}
                   onClick={() => {
                     onChange(it.id, it.name, it.raw);
-                    setLabel(`${it.name}`);
+                    setLabel(it.name);
                     setOpen(false);
                     setQ("");
                   }}

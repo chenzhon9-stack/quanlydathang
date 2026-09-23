@@ -63,6 +63,8 @@ export class DeliveryService {
           orderDate: ct.orderDate,
           vehicleId: ct.vehicleId,
           productId: ct.productId,
+          status: ct.status,
+          actualReceived: ct.actualReceived,
         },
       ])
     );
@@ -83,6 +85,8 @@ export class DeliveryService {
           d.productName ||
           (ct?.productId ? hhMap[ct.productId] : undefined) ||
           ct?.productId,
+        detailStatus: ct?.status,
+        actualReceived: ct?.actualReceived,
       };
     });
     // Sort mới → cũ theo ngày đặt lệnh
@@ -111,7 +115,13 @@ export class DeliveryService {
   /** Cập nhật thực giao — V21 saveDelivery (một dòng) */
   static async updateDelivery(
     deliveryId: string,
-    payload: { actualQty: number; deliveryDate?: string; note?: string },
+    payload: {
+      actualQty: number;
+      deliveryDate?: string;
+      note?: string;
+      customerId?: string;
+      customerDetail?: string;
+    },
     user: UserContext,
     year?: number
   ) {
@@ -136,6 +146,8 @@ export class DeliveryService {
       Ngaygiao: ngay,
     };
     if (payload.note !== undefined) patch.Ghichu = payload.note;
+    if (payload.customerId) patch.MaKh = payload.customerId;
+    if (payload.customerDetail !== undefined) patch.ChitietKh = payload.customerDetail;
     const row = await updateSheetRowByKey(
       SHEETS.GH,
       "ID_Giaohang",
