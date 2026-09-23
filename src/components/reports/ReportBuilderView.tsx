@@ -91,16 +91,21 @@ export function ReportBuilderView({
     });
   }
 
-  const displayCols = [
+  const displayCols: {
+    key: string;
+    header: string;
+    isMeasure: boolean;
+    format?: "int" | "num" | string;
+  }[] = [
     ...groupBy.map((k) => {
       const d = schema.dimensions.find((x) => x.key === k);
-      return { key: k, header: d?.header || k, isMeasure: false };
+      return { key: k, header: d?.header || k, isMeasure: false as const };
     }),
     ...schema.measures.map((m) => ({
       key: m.key,
       header: m.header,
-      isMeasure: true,
-      format: m.format,
+      isMeasure: true as const,
+      format: m.format as "int" | "num" | string | undefined,
     })),
   ];
 

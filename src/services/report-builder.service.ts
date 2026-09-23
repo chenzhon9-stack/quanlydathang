@@ -95,12 +95,10 @@ async function loadHhPhanLoai(): Promise<Record<string, string>> {
 
 function denySalesViewerAccountant(user: UserContext, report: ReportType) {
   const role = String(user.role || "").toUpperCase();
-  if (
-    ["SALES", "VIEWER", "ACCOUNTANT"].includes(role) &&
-    (report === "thuc_nhan" || report === "doi_chieu" || report === "giao_nhan")
-  ) {
-    // V21: sales only thuc_giao + van_tai; giao_nhan also restricted in some maps
-    if (report === "thuc_nhan" || report === "doi_chieu") {
+  // V21: SALES/VIEWER/ACCOUNTANT → thuc_giao + van_tai only
+  if (["SALES", "VIEWER", "ACCOUNTANT", "ACCOUNT"].includes(role)) {
+    const allowed: ReportType[] = ["thuc_giao", "van_tai"];
+    if (!allowed.includes(report)) {
       throw {
         code: "PERMISSION_DENIED",
         message: "Bạn không có quyền xem báo cáo này.",
@@ -147,6 +145,8 @@ export class ReportBuilderService {
       raw = await this.buildDoiChieu(params, user, scope);
     else if (type === "van_tai")
       raw = await this.buildVanTai(params, user, scope);
+    else if (type === "vong_doi")
+      raw = await this.buildVongDoi(params, user, scope);
 
     const measures: Measure[] = schema.measures.map((m) => ({
       field: m.key,
@@ -385,10 +385,11 @@ export class ReportBuilderService {
       dels = filterByCustomerIds(dels, allowed);
     }
 
-    const [khMap, hhMap, xeExtra] = await Promise.all([
+    const [khMap, hhMap, xeExtra, nccMap] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.hhNames(),
       loadXeExtra(),
+      MasterRepository.nccNames(),
     ]);
 
     const rows: Record<string, unknown>[] = [];
@@ -402,13 +403,18 @@ export class ReportBuilderService {
       const xe = xeExtra[vehicleId];
       const khGiao = g.plannedQty || 0;
       const thucGiao = g.actualQty || 0;
+      const maNcc = ct?.supplierId || "";
       rows.push({
         xe: xe?.plate || vehicleId || "—",
         khachHang: g.customerName || khMap[g.customerId] || g.customerId,
         hangHoa: hhMap[productId] || productId || "—",
+        ncc: ct?.supplierName || nccMap[maNcc] || maNcc || "—",
+        ngayGiao: dt,
+        dvt: xe?.tenDVT || "—",
         khGiao,
         thucGiao,
         chenhLech: thucGiao - khGiao,
+        soChuyenGiao: 1,
       });
     }
     return rows;
@@ -439,10 +445,11 @@ export class ReportBuilderService {
       ghByCt[g.detailId] = (ghByCt[g.detailId] || 0) + (g.actualQty || 0);
     }
 
-    const [nccMap, hhMap, xeExtra] = await Promise.all([
+    const [nccMap, hhMap, xeExtra, plMap] = await Promise.all([
       MasterRepository.nccNames(),
       MasterRepository.hhNames(),
       loadXeExtra(),
+      loadHhPhanLoai(),
     ]);
 
     const rows: Record<string, unknown>[] = [];
@@ -454,13 +461,17 @@ export class ReportBuilderService {
       if (params.fromDate && dt && dt < params.fromDate) continue;
       if (params.toDate && dt && dt > params.toDate) continue;
       const xe = xeExtra[d.vehicleId];
+      const pl = classifyPhanLoai(d.phanLoai || plMap[d.productId] || "");
       rows.push({
         ncc: nccMap[d.supplierId] || d.supplierId,
         hangHoa: hhMap[d.productId] || d.productId,
         xe: xe?.plate || d.vehicleId,
+        phanLoai: pl,
+        maDon: d.orderId || "",
         thucNhan,
         thucGiao,
         ton: thucNhan - thucGiao,
+        soChiTiet: 1,
       });
     }
     return rows;
@@ -514,9 +525,113 @@ export class ReportBuilderService {
         khachHang: g.customerName || khMap[g.customerId] || g.customerId,
         hangHoa: hhMap[productId] || productId || "—",
         ngayGiao: dt,
+        htvt: xe.tenHTVT || xe.maHTVT || "—",
         thucGiao: g.actualQty || 0,
         thucNhan: ct?.actualReceived || 0,
         soChuyenVT: 1,
+      });
+    }
+    return rows;
+  }
+
+  /** Vòng đời đơn: 1 dòng / MaDon — SL đặt, nhận, giao, tỷ lệ */
+  private static async buildVongDoi(
+    params: ReportBuilderParams,
+    _user: UserContext,
+    scope: AccessScope
+  ) {
+    const years = await this.yearsFor(params);
+    let orders = (
+      await Promise.all(years.map((y) => ReportRepository.getOrders(y)))
+    ).flat();
+    let details = (
+      await Promise.all(years.map((y) => ReportRepository.getDetails(y)))
+    ).flat();
+    const dels = (
+      await Promise.all(years.map((y) => ReportRepository.getDeliveries(y)))
+    ).flat();
+
+    const seenO = new Set<string>();
+    orders = orders.filter((o) => {
+      if (!o.orderId || seenO.has(o.orderId)) return false;
+      seenO.add(o.orderId);
+      return true;
+    });
+
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      orders = filterBySupplierIds(orders, allowed);
+      details = filterBySupplierIds(details, allowed);
+    }
+    if (scope.scopeType === "OWNER" && scope.ownerEmail) {
+      const em = scope.ownerEmail.toLowerCase();
+      orders = orders.filter(
+        (o) => String(o.createdBy || "").toLowerCase() === em
+      );
+    }
+
+    const nccMap = await MasterRepository.nccNames();
+
+    type Agg = {
+      soChiTiet: number;
+      soLuongDat: number;
+      thucNhan: number;
+    };
+    const byDon: Record<string, Agg> = {};
+    const detailToOrder: Record<string, string> = {};
+    for (const d of details) {
+      const mid = d.orderId || "";
+      if (!mid) continue;
+      detailToOrder[d.detailId] = mid;
+      if (!byDon[mid]) {
+        byDon[mid] = { soChiTiet: 0, soLuongDat: 0, thucNhan: 0 };
+      }
+      byDon[mid].soChiTiet += 1;
+      byDon[mid].soLuongDat += Number(d.quantity) || 0;
+      byDon[mid].thucNhan += Number(d.actualReceived) || 0;
+    }
+
+    const ghByDon: Record<string, { thucGiao: number; soChuyen: number }> = {};
+    for (const g of dels) {
+      if (g.deleted) continue;
+      const mid = detailToOrder[g.detailId];
+      if (!mid) continue;
+      if (!ghByDon[mid]) ghByDon[mid] = { thucGiao: 0, soChuyen: 0 };
+      ghByDon[mid].thucGiao += Number(g.actualQty) || 0;
+      ghByDon[mid].soChuyen += 1;
+    }
+
+    const rows: Record<string, unknown>[] = [];
+    for (const o of orders) {
+      const dt = o.orderDate || "";
+      if (params.fromDate && dt && dt < params.fromDate) continue;
+      if (params.toDate && dt && dt > params.toDate) continue;
+      const agg = byDon[o.orderId] || {
+        soChiTiet: 0,
+        soLuongDat: 0,
+        thucNhan: 0,
+      };
+      const gh = ghByDon[o.orderId] || { thucGiao: 0, soChuyen: 0 };
+      const soLuongDat = agg.soLuongDat || 0;
+      const thucNhan = agg.thucNhan || 0;
+      const thucGiao = gh.thucGiao || 0;
+      rows.push({
+        maDon: o.orderId,
+        ncc: o.supplierName || nccMap[o.supplierId] || o.supplierId,
+        trangThaiDon: o.status || "",
+        ngayDat: dt,
+        user: o.createdBy || "",
+        soChiTiet: agg.soChiTiet,
+        soLuongDat,
+        thucNhan,
+        thucGiao,
+        soChuyenGiao: gh.soChuyen,
+        tyLeNhan:
+          soLuongDat > 0
+            ? Math.round((thucNhan / soLuongDat) * 1000) / 10
+            : 0,
+        tyLeGiao:
+          thucNhan > 0 ? Math.round((thucGiao / thucNhan) * 1000) / 10 : 0,
       });
     }
     return rows;

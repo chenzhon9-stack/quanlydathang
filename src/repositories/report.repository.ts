@@ -3,6 +3,7 @@ import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS as SheetName } from "@/lib/sheets/constants";
 import { yearOfDate } from "@/lib/sheets/date";
 import {
+  mapOrderRow,
   mapDetailRow,
   mapDeliveryRow,
   mapPlanRow,
@@ -17,6 +18,7 @@ import {
   getOpeningByYear,
 } from "@/mocks/data";
 import type {
+  Order,
   OrderDetail,
   Delivery,
   ProductionPlan,
@@ -25,6 +27,7 @@ import type {
 } from "@/types";
 
 const SHEETS = {
+  orders: SheetName.DH,
   details: SheetName.CT,
   deliveries: SheetName.GH,
   plans: SheetName.KHSL,
@@ -33,6 +36,20 @@ const SHEETS = {
 };
 
 export class ReportRepository {
+
+  static async getOrders(year: number): Promise<Order[]> {
+    if (!isSheetsConfigured()) {
+      return [];
+    }
+    try {
+      const rows = await readSheetAsObjects(SHEETS.orders, { year });
+      return rows.map(mapOrderRow).filter((o) => o.orderId);
+    } catch (e) {
+      console.error("[ReportRepository] getOrders failed", e);
+      return [];
+    }
+  }
+
   static async getDetails(year: number): Promise<OrderDetail[]> {
     if (!isSheetsConfigured()) {
       console.info("[ReportRepository] Sheets not configured → mock details");
