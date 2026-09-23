@@ -73,6 +73,8 @@ export interface OrderDetail {
   status: DetailStatus;
   receivedDate?: string;
   actualReceived?: number;
+  /** Tổng ThucGiao active từ Chitiet_Giaohang */
+  actualDelivered?: number;
   transportTypeId?: string;
   transportTypeName?: string;
   isDuyenHa?: boolean;
