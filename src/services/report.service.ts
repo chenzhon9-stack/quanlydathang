@@ -461,27 +461,67 @@ export class ReportService {
     const fromDate = (filter.fromDate || `${yearHint}-01-01`).slice(0, 10);
     const toDate = (filter.toDate || `${yearHint}-12-31`).slice(0, 10);
     const Y = Number(fromDate.slice(0, 4));
+    if (Number(toDate.slice(0, 4)) !== Y) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Từ ngày và Đến ngày phải cùng một năm.",
+      };
+    }
     const yearStart = `${Y}-01-01`;
     const maNcc = String(supplierId || "").trim();
 
-    const [details, payables, pricesRaw] = await Promise.all([
-      ReportRepository.getDetails(Y),
-      ReportRepository.getPayables(Y),
-      (async () => {
-        if (!isSheetsConfigured()) return [] as GiaMuaRow[];
-        try {
-          const rows = await readSheetAsObjects(SHEETS.GM, {});
-          return rows.map(mapGiaMuaSheetRow).filter((x): x is GiaMuaRow => !!x);
-        } catch {
-          return [] as GiaMuaRow[];
-        }
-      })(),
-    ]);
+    const [details, payables, openings, pricesRaw, xeMap, kvMap] =
+      await Promise.all([
+        ReportRepository.getDetails(Y),
+        ReportRepository.getPayables(Y),
+        ReportRepository.getOpening(Y),
+        (async () => {
+          if (!isSheetsConfigured()) return [] as GiaMuaRow[];
+          try {
+            const rows = await readSheetAsObjects(SHEETS.GM, {});
+            return rows
+              .map(mapGiaMuaSheetRow)
+              .filter((x): x is GiaMuaRow => !!x);
+          } catch {
+            return [] as GiaMuaRow[];
+          }
+        })(),
+        MasterRepository.xeNames(),
+        MasterRepository.kvNames(),
+      ]);
 
     const nccMap = await MasterRepository.nccNames();
     const hhMap = await MasterRepository.hhNames();
+    const tenNcc = nccMap[maNcc] || maNcc;
 
-    const receiveLines = [];
+    // Dư đầu năm
+    const openingRow = openings.find(
+      (o) => o.supplierId === maNcc && o.active !== false
+    );
+    const duDauNam = Number(openingRow?.openingAmount) || 0;
+    const coDuDauNam = !!openingRow;
+
+    type SoCaiLine = {
+      date: string;
+      bucket: "truocKy" | "trongKy";
+      kind: "NHAN" | "SO_CO";
+      dienGiai: string;
+      congTrinh: string;
+      soXe: string;
+      soLuong: number | null;
+      donGia: number | null;
+      thanhTien: number;
+      thanhToan: number;
+      ghiChu: string;
+      detailId?: string;
+      ledgerId?: string;
+      type?: string;
+      thieuGia?: boolean;
+      orderId?: string;
+    };
+
+    const allLines: SoCaiLine[] = [];
+
     for (const d of details) {
       if (d.supplierId !== maNcc) continue;
       if (d.status === "DELETE") continue;
@@ -490,66 +530,137 @@ export class ReportService {
       const dt = (d.receivedDate || "").slice(0, 10);
       if (!dt || dt < yearStart || dt > toDate) continue;
       const makv = String(d.regionId || "").trim();
-      const resolved = resolveDonGiaMua(pricesRaw, maNcc, d.productId, makv, dt);
+      const resolved = resolveDonGiaMua(
+        pricesRaw,
+        maNcc,
+        d.productId,
+        makv,
+        dt
+      );
       const thanhTien = resolved.found
         ? Math.round(Number((tons * resolved.donGia).toFixed(0)))
         : 0;
-      const bucket = dt < fromDate ? "truocKy" : "trongKy";
-      receiveLines.push({
-        kind: "NHAN" as const,
-        bucket,
+      const tenHH = hhMap[d.productId] || d.productId;
+      const tenKv = kvMap[makv] || makv || "";
+      const plate = xeMap[d.vehicleId] || d.vehiclePlate || d.vehicleId || "";
+      allLines.push({
+        date: dt,
+        bucket: dt < fromDate ? "truocKy" : "trongKy",
+        kind: "NHAN",
+        dienGiai: tenHH,
+        congTrinh: tenKv,
+        soXe: plate,
+        soLuong: Math.round(tons * 1000) / 1000,
+        donGia: resolved.found ? resolved.donGia : null,
+        thanhTien,
+        thanhToan: 0,
+        ghiChu: resolved.found ? "" : "Thiếu giá",
         detailId: d.detailId,
         orderId: d.orderId,
-        date: dt,
-        productId: d.productId,
-        productName: hhMap[d.productId] || d.productId,
-        makv,
-        tons,
-        donGia: resolved.donGia,
         thieuGia: !resolved.found,
-        thanhTien,
-        vehicleId: d.vehicleId,
       });
     }
 
-    const ledgerLines = [];
+    const typeLabel: Record<string, string> = {
+      THANH_TOAN: "Thanh toán",
+      CHIET_KHAU: "Chiết khấu",
+      DOI_TRU: "Đối trừ",
+      DIEU_CHINH_GIAM: "Điều chỉnh giảm",
+      DIEU_CHINH_TANG: "Điều chỉnh tăng",
+    };
+
     for (const p of payables) {
       if (p.supplierId !== maNcc || !p.active) continue;
       const dt = (p.date || "").slice(0, 10);
       if (!dt || dt < yearStart || dt > toDate) continue;
-      const bucket = dt < fromDate ? "truocKy" : "trongKy";
-      ledgerLines.push({
-        kind: "SO_CO" as const,
-        bucket,
-        id: p.id,
+      const loai = String(p.type || "").toUpperCase();
+      const amount = Math.round(Number(p.amount) || 0);
+      const isTang = loai === "DIEU_CHINH_TANG";
+      // V21 sổ chi tiết: cột Thành tiền (phải trả) vs Thanh toán (chi/giảm)
+      allLines.push({
         date: dt,
-        type: p.type,
-        amount: Number(p.amount) || 0,
-        documentNo: p.documentNo || "",
-        description: p.description || "",
-        productId: p.productId || "",
+        bucket: dt < fromDate ? "truocKy" : "trongKy",
+        kind: "SO_CO",
+        dienGiai:
+          (p.description || typeLabel[loai] || loai) +
+          (p.documentNo ? ` | ${p.documentNo}` : ""),
+        congTrinh: p.regionId ? kvMap[p.regionId] || p.regionId : "—",
+        soXe: "—",
+        soLuong: null,
+        donGia: null,
+        thanhTien: isTang ? amount : 0,
+        thanhToan: isTang ? 0 : amount,
+        ghiChu: p.documentNo || p.description || "",
+        ledgerId: p.id,
+        type: loai,
       });
     }
 
-    receiveLines.sort((a, b) => b.date.localeCompare(a.date));
-    ledgerLines.sort((a, b) => b.date.localeCompare(a.date));
+    // Sắp xếp tăng dần theo ngày (V21 sổ cái)
+    allLines.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      if (a.kind !== b.kind) return a.kind === "NHAN" ? -1 : 1;
+      return 0;
+    });
+
+    // Dư đầu kỳ = dư đầu năm + (nhận − chi + đc tăng) trước kỳ
+    let noTruoc = 0;
+    let coTruoc = 0; // signed: +tang -chi
+    for (const l of allLines) {
+      if (l.bucket !== "truocKy") continue;
+      if (l.kind === "NHAN") noTruoc += l.thanhTien;
+      else {
+        if (l.type === "DIEU_CHINH_TANG") coTruoc += l.thanhTien;
+        else coTruoc -= l.thanhToan;
+      }
+    }
+    const duDauKy = Math.round(duDauNam + noTruoc + coTruoc);
+
+    // Dòng trong kỳ + chạy dư
+    const trongKy = allLines.filter((l) => l.bucket === "trongKy");
+    let run = duDauKy;
+    let tongSl = 0;
+    let tongThanhTien = 0;
+    let tongThanhToan = 0;
+    const ledger = trongKy.map((l) => {
+      run = Math.round(run + l.thanhTien - l.thanhToan);
+      if (l.soLuong) tongSl += l.soLuong;
+      tongThanhTien += l.thanhTien;
+      tongThanhToan += l.thanhToan;
+      return {
+        ...l,
+        duCuoi: run,
+        ngayHienThi: l.date.split("-").reverse().join("/"),
+      };
+    });
 
     return {
       data: {
         supplierId: maNcc,
-        supplierName: nccMap[maNcc] || maNcc,
+        supplierName: tenNcc,
         fromDate,
         toDate,
         year: Y,
-        receiveLines,
-        ledgerLines,
+        coDuDauNam,
+        duDauNam,
+        duDauKy,
+        tongSoLuong: Math.round(tongSl * 1000) / 1000,
+        tongThanhTien: Math.round(tongThanhTien),
+        tongThanhToan: Math.round(tongThanhToan),
+        duCuoiKy: run,
+        ledger,
+        // giữ tương thích cũ
+        receiveLines: ledger.filter((l) => l.kind === "NHAN"),
+        ledgerLines: ledger.filter((l) => l.kind === "SO_CO"),
       },
       meta: {
-        receiveCount: receiveLines.length,
-        ledgerCount: ledgerLines.length,
-        thieuGia: receiveLines.filter((x) => x.thieuGia).length,
+        receiveCount: ledger.filter((l) => l.kind === "NHAN").length,
+        ledgerCount: ledger.filter((l) => l.kind === "SO_CO").length,
+        thieuGia: ledger.filter((l) => l.thieuGia).length,
+        lineCount: ledger.length,
       },
     };
   }
 
 }
+
