@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ListToolbar,
+  toggleStatus,
+  matchStatuses,
+  matchSearch,
+} from "@/components/ListToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { OrderDetail } from "@/types";
 
@@ -68,7 +74,9 @@ export default function DetailsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [status, setStatus] = useState("ALL");
+  const [statuses, setStatuses] = useState<string[]>(["ALL"]);
+  const [search, setSearch] = useState("");
+  const [groupByDate, setGroupByDate] = useState(true);
   const pageSize = 50;
 
   const load = useCallback(async (p: number) => {
@@ -82,7 +90,7 @@ export default function DetailsPage() {
         page: String(p),
         pageSize: String(pageSize),
       });
-      if (status !== "ALL") qs.set("status", status);
+      /* multi status client-side */
       const res = await fetch(`/api/v1/order-details?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -101,11 +109,44 @@ export default function DetailsPage() {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, []);
 
   useEffect(() => {
     load(1);
   }, [load]);
+
+
+  const filtered = useMemo(() => {
+    return items.filter((d) => {
+      if (!matchStatuses(d.status, statuses)) return false;
+      const hay = [
+        d.detailId,
+        d.orderId,
+        d.supplierId,
+        d.supplierName || "",
+        d.vehicleId,
+        d.vehiclePlate || "",
+        d.productId,
+        d.productName || "",
+        d.status,
+        d.orderDate,
+        d.receivedDate || "",
+      ].join(" ");
+      return matchSearch(hay, search);
+    });
+  }, [items, statuses, search]);
+
+  const byDate = filtered.reduce<Record<string, typeof items>>((acc, d) => {
+    const key = d.orderDate || d.receivedDate || "—";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(d);
+    return acc;
+  }, {});
+  const displayGroups = groupByDate
+    ? Object.keys(byDate)
+        .sort((a, b) => b.localeCompare(a))
+        .map((k) => ({ key: k, items: byDate[k] }))
+    : [{ key: "all", items: filtered }];
 
   return (
     <div className="space-y-4 max-w-full">
@@ -126,30 +167,27 @@ export default function DetailsPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          ["ALL", "Tất cả"],
-          ["NEW", "Mới tạo"],
-          ["ORDERED", "Đặt hàng"],
-          ["RECEIVED", "Đã nhận"],
-          ["DELIVERING", "Đang giao"],
-          ["DONE", "Hoàn thành"],
-        ].map(([k, lab]) => (
-          <button
-            key={k}
-            onClick={() => setStatus(k)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
-              status === k
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white text-slate-600 border-slate-200"
-            }`}
-          >
-            {lab}
-          </button>
-        ))}
-      </div>
+      <ListToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Tìm mã CT, đơn, xe, hàng, NCC…"
+        statuses={[
+          { key: "ALL", label: "Tất cả" },
+          { key: "NEW", label: "Mới" },
+          { key: "ORDERED", label: "Đặt hàng" },
+          { key: "RECEIVED", label: "Đã nhận" },
+          { key: "DELIVERING", label: "Đang giao" },
+          { key: "DONE", label: "Hoàn thành" },
+          { key: "CANCEL", label: "Hủy" },
+        ]}
+        selectedStatuses={statuses}
+        onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
+        groupByDate={groupByDate}
+        onGroupByDate={setGroupByDate}
+        countLabel={`${filtered.length}/${items.length}`}
+      />
 
-      {err && (
+{err && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
           {err}
         </div>
@@ -160,7 +198,7 @@ export default function DetailsPage() {
       ) : (
         <>
           <div className="md:hidden space-y-3">
-            {items.map((d) => (
+            {filtered.map((d) => (
               <div key={d.detailId} className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${STATUS_ROW[d.status] || "bg-white"}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -178,7 +216,7 @@ export default function DetailsPage() {
                 <div className="mt-3 pt-3 border-t border-slate-200/80"><DetailActions d={d} /></div>
               </div>
             ))}
-            {items.length === 0 && !err && (
+            {filtered.length === 0 && !err && (
               <div className="text-center py-12 text-slate-400 text-sm">Không có chi tiết</div>
             )}
           </div>
@@ -199,7 +237,7 @@ export default function DetailsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((d) => (
+                  {filtered.map((d) => (
                     <tr key={d.detailId} className={`border-t border-slate-100 ${STATUS_ROW[d.status] || "bg-white"}`}>
                       <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{d.detailId}</td>
                       <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{d.orderId}</td>

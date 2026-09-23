@@ -93,7 +93,9 @@ function OrderActions({ o }: { o: Order }) {
 }
 
 export default function OrdersPage() {
-  const [filter, setFilter] = useState<"ALL" | "NEW" | "PROCESSING" | "DONE" | "CANCEL">("ALL");
+  const [statuses, setStatuses] = useState<string[]>(["ALL"]);
+  const [search, setSearch] = useState("");
+  const [groupByDate, setGroupByDate] = useState(true);
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -110,7 +112,6 @@ export default function OrdersPage() {
         page: "1",
         pageSize: "100",
       });
-      if (filter !== "ALL") qs.set("status", filter);
 
       const res = await fetch(`/api/v1/orders?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -131,18 +132,36 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const byDate = orders.reduce<Record<string, Order[]>>((acc, o) => {
+  const filtered = useMemo(() => {
+    return orders.filter((o) => {
+      if (!matchStatuses(o.status, statuses)) return false;
+      const hay = [
+        o.orderId,
+        o.supplierId,
+        o.supplierName || "",
+        o.status,
+        o.orderDate,
+        o.createdBy || "",
+      ].join(" ");
+      return matchSearch(hay, search);
+    });
+  }, [orders, statuses, search]);
+
+  const byDate = filtered.reduce<Record<string, Order[]>>((acc, o) => {
     if (!acc[o.orderDate]) acc[o.orderDate] = [];
     acc[o.orderDate].push(o);
     return acc;
   }, {});
   const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+  const displayGroups: { key: string; items: Order[] }[] = groupByDate
+    ? dates.map((d) => ({ key: d, items: byDate[d] }))
+    : [{ key: "all", items: filtered }];
 
   return (
     <div className="space-y-4 max-w-full">
@@ -175,29 +194,23 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ["ALL", "Tất cả"],
-            ["NEW", "Khởi tạo"],
-            ["PROCESSING", "Đang xử lý"],
-            ["DONE", "Hoàn thành"],
-            ["CANCEL", "Hủy đơn"],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setFilter(key)}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-              filter === key
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <ListToolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Tìm mã đơn, NCC, trạng thái…"
+        statuses={[
+          { key: "ALL", label: "Tất cả" },
+          { key: "NEW", label: "Khởi tạo" },
+          { key: "PROCESSING", label: "Đang xử lý" },
+          { key: "DONE", label: "Hoàn thành" },
+          { key: "CANCEL", label: "Hủy đơn" },
+        ]}
+        selectedStatuses={statuses}
+        onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
+        groupByDate={groupByDate}
+        onGroupByDate={setGroupByDate}
+        countLabel={`${filtered.length}/${orders.length} đơn`}
+      />
 
       {err && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -211,7 +224,7 @@ export default function OrdersPage() {
         <>
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
-            {orders.map((o) => (
+            {filtered.map((o) => (
               <div
                 key={o.orderId}
                 className={`rounded-2xl border p-4 shadow-sm ${
@@ -242,7 +255,7 @@ export default function OrdersPage() {
                 </div>
               </div>
             ))}
-            {orders.length === 0 && !err && (
+            {filtered.length === 0 && !err && (
               <div className="text-center py-12 text-slate-500 text-sm space-y-2">
                 <p>Không có đơn hàng (API trả 0 dòng).</p>
                 <p className="text-xs text-slate-400">
@@ -309,7 +322,7 @@ export default function OrdersPage() {
                 </tbody>
               </table>
             </div>
-            {orders.length === 0 && !err && (
+            {filtered.length === 0 && !err && (
               <div className="text-center py-12 text-slate-500 text-sm space-y-2">
                 <p>Không có đơn hàng (API trả 0 dòng).</p>
                 <p className="text-xs text-slate-400">

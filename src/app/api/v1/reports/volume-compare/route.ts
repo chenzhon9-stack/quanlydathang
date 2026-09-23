@@ -319,6 +319,14 @@ export async function GET(req: NextRequest) {
         .slice(0, 12); // top 12 NCC
     }
 
+    const totals = series.reduce(
+      (a, s) => ({
+        current: a.current + (s.current || 0),
+        previous: a.previous + (s.previous || 0),
+      }),
+      { current: 0, previous: 0 }
+    );
+
     return jsonResponse(
       success(
         {
@@ -327,6 +335,10 @@ export async function GET(req: NextRequest) {
           groupBy,
           year: periods.year,
           series,
+          totals: {
+            current: Math.round(totals.current * 1000) / 1000,
+            previous: Math.round(totals.previous * 1000) / 1000,
+          },
           meta: {
             currentFrom: periods.currentFrom,
             currentTo: periods.currentTo,
