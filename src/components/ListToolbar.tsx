@@ -1,5 +1,7 @@
 "use client";
 
+import { STATUS_CHIP } from "@/lib/status-styles";
+
 export type StatusOption = { key: string; label: string };
 
 type Props = {
@@ -35,28 +37,31 @@ export function ListToolbar({
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder={searchPlaceholder}
-          className="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white"
+          className="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm"
         />
-        <label className="inline-flex items-center gap-2 text-xs text-slate-600 px-2 py-2 border border-slate-200 rounded-lg bg-white cursor-pointer select-none">
+        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2 border border-slate-300 rounded-lg bg-white cursor-pointer select-none shadow-sm">
           <input
             type="checkbox"
             checked={groupByDate}
             onChange={(e) => onGroupByDate(e.target.checked)}
+            className="accent-sky-600"
           />
           Nhóm theo ngày
         </label>
         {countLabel && (
-          <span className="text-xs text-slate-400 shrink-0">{countLabel}</span>
+          <span className="text-xs text-slate-500 shrink-0 font-medium">
+            {countLabel}
+          </span>
         )}
       </div>
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           onClick={() => onToggleStatus("ALL")}
-          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+          className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition ${
             allOn
-              ? "bg-blue-600 text-white border-blue-600"
-              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              ? "bg-sky-500 text-white border-sky-600 shadow-sm"
+              : "bg-white text-slate-500 border-slate-200 opacity-50 grayscale hover:opacity-80"
           }`}
         >
           Tất cả
@@ -65,15 +70,16 @@ export function ListToolbar({
           .filter((s) => s.key !== "ALL")
           .map((s) => {
             const on = !allOn && selectedStatuses.includes(s.key);
+            const chip = STATUS_CHIP[s.key] || "bg-slate-100 text-slate-700 border-slate-300";
             return (
               <button
                 key={s.key}
                 type="button"
                 onClick={() => onToggleStatus(s.key)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition ${
                   on
-                    ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                    ? `${chip} shadow-sm scale-[1.03]`
+                    : `${chip} opacity-40 grayscale hover:opacity-70`
                 }`}
               >
                 {s.label}
@@ -86,14 +92,11 @@ export function ListToolbar({
 }
 
 /** Multi-select status helper */
-export function toggleStatus(
-  current: string[],
-  key: string
-): string[] {
+export function toggleStatus(current: string[], key: string): string[] {
   if (key === "ALL") return ["ALL"];
-  const withoutAll = current.filter((x) => x !== "ALL");
+  const withoutAll = current.filter((k) => k !== "ALL");
   if (withoutAll.includes(key)) {
-    const next = withoutAll.filter((x) => x !== key);
+    const next = withoutAll.filter((k) => k !== key);
     return next.length ? next : ["ALL"];
   }
   return [...withoutAll, key];
@@ -107,11 +110,12 @@ export function matchStatuses(
   return selected.includes(status);
 }
 
-export function matchSearch(
-  haystack: string,
-  q: string
-): boolean {
-  const s = q.trim().toLowerCase();
-  if (!s) return true;
-  return haystack.toLowerCase().includes(s);
+export function matchSearch(haystack: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  // Hỗ trợ ; hoặc + như V21
+  const parts = q.split(/[;+]/).map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return true;
+  const hay = haystack.toLowerCase();
+  return parts.every((p) => hay.includes(p));
 }

@@ -7,19 +7,11 @@ import {
   matchStatuses,
   matchSearch,
 } from "@/components/ListToolbar";
-import { StatusBadge } from "@/components/StatusBadge";
+import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
+import { statusRowClass } from "@/lib/status-styles";
 import type { OrderDetail } from "@/types";
 import { ActionPrompt, apiPost } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
-
-const STATUS_ROW: Record<string, string> = {
-  NEW: "bg-amber-50",
-  ORDERED: "bg-blue-50",
-  RECEIVED: "bg-indigo-50",
-  DELIVERING: "bg-violet-50",
-  DONE: "bg-emerald-50",
-  CANCEL: "bg-red-50",
-};
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Mới tạo",
@@ -255,7 +247,7 @@ export default function DetailsPage() {
                   d.supplierName || d.supplierId,
                 ])
               );
-            }} className="px-3 py-2 text-xs font-medium rounded-lg bg-slate-800 text-white">
+            }} className="px-3 py-2 text-xs font-medium rounded-lg bg-[#1a3a5c] text-white">
             Xuất Excel
           </button>
         </div>
@@ -294,7 +286,7 @@ export default function DetailsPage() {
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2">
                 {groupByDate && (
-                  <div className="sticky top-0 z-10 rounded-xl bg-slate-800 text-white px-3 py-2 text-sm font-semibold shadow">
+                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3 py-2 text-sm font-semibold shadow">
                     📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
                     <span className="ml-2 text-xs font-normal text-slate-300">
                       ({g.items.length})
@@ -304,7 +296,7 @@ export default function DetailsPage() {
                 {g.items.map((d) => (
                   <div
                     key={d.detailId}
-                    className={`rounded-2xl border p-4 shadow-sm ${STATUS_ROW[d.status] || "bg-white"} border-slate-200`}
+                    className={`rounded-2xl border border-slate-300/80 p-4 shadow-sm ${statusRowClass(d.status)}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div>
@@ -316,9 +308,7 @@ export default function DetailsPage() {
                     <div className="mt-3 space-y-1 text-sm">
                       <div className="flex justify-between gap-2">
                         <span className="text-slate-500">Xe</span>
-                        <span className="font-semibold bg-amber-300/80 text-amber-950 px-2 py-0.5 rounded text-xs">
-                          {d.vehiclePlate || d.vehicleId || "—"}
-                        </span>
+                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
                       </div>
                       <div className="flex justify-between gap-2">
                         <span className="text-slate-500">Hàng</span>
@@ -365,7 +355,7 @@ export default function DetailsPage() {
                   {displayGroups.map((g) => (
                     <React.Fragment key={g.key}>
                       {groupByDate && (
-                        <tr className="bg-slate-800 text-white">
+                        <tr className="bg-[#1a3a5c] text-white">
                           <td colSpan={8} className="px-3 py-2 text-xs font-medium">
                             📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
                             <span className="ml-2 opacity-70">({g.items.length} xe)</span>
@@ -375,7 +365,7 @@ export default function DetailsPage() {
                       {g.items.map((d) => (
                         <tr
                           key={d.detailId}
-                          className={`border-t border-slate-100 ${STATUS_ROW[d.status] || "bg-white"}`}
+                          className={`border-t border-slate-100 ${statusRowClass(d.status)}`}
                         >
                           <td className="px-3 py-2.5 font-mono text-xs text-slate-600">{d.detailId}</td>
                           <td className="px-3 py-2.5 text-blue-700 text-xs font-medium">{d.orderId}</td>
@@ -383,9 +373,7 @@ export default function DetailsPage() {
                             {d.productName || d.productId}
                           </td>
                           <td className="px-3 py-2.5">
-                            <span className="bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded text-xs font-semibold">
-                              {d.vehiclePlate || d.vehicleId || "—"}
-                            </span>
+                            <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{d.quantity.toFixed(2)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700 font-medium">
@@ -436,7 +424,8 @@ export default function DetailsPage() {
       {receiveTarget && (
         <ActionPrompt
           open
-          title={`Nhận hàng — ${receiveTarget.detailId}`}
+          title="Nhận hàng"
+          subtitle={`${receiveTarget.detailId} · ${receiveTarget.vehiclePlate || receiveTarget.vehicleId || ""} · ${receiveTarget.productName || receiveTarget.productId || ""}`}
           fields={[
             {
               key: "actualReceived",

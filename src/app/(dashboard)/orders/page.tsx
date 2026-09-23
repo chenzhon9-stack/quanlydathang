@@ -8,16 +8,10 @@ import {
   matchSearch,
 } from "@/components/ListToolbar";
 import { StatusBadge } from "@/components/StatusBadge";
+import { statusRowClass } from "@/lib/status-styles";
 import type { Order } from "@/types";
 import { apiPost } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
-
-const STATUS_ROW: Record<string, string> = {
-  NEW: "bg-amber-50",
-  PROCESSING: "bg-sky-50",
-  DONE: "bg-emerald-50",
-  CANCEL: "bg-red-50",
-};
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -264,7 +258,7 @@ export default function OrdersPage() {
               <div
                 key={o.orderId}
                 className={`rounded-2xl border p-4 shadow-sm ${
-                  STATUS_ROW[o.status] || "bg-white"
+                  statusRowClass(o.status)
                 } border-slate-200`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -329,7 +323,7 @@ export default function OrdersPage() {
                         <tr
                           key={o.orderId}
                           className={`border-t border-slate-100 ${
-                            STATUS_ROW[o.status] || "bg-white"
+                            statusRowClass(o.status)
                           }`}
                         >
                           <td className="px-3 py-2.5">

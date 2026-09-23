@@ -1,33 +1,19 @@
-"use client";
-
-const STATUS_STYLES: Record<string, string> = {
-  NEW: "bg-amber-100 text-amber-800 border-amber-200",
-  "Khởi tạo": "bg-amber-100 text-amber-800 border-amber-200",
-  PROCESSING: "bg-sky-100 text-sky-800 border-sky-200",
-  "Đang xử lý": "bg-sky-100 text-sky-800 border-sky-200",
-  DONE: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  "Hoàn thành": "bg-emerald-100 text-emerald-800 border-emerald-200",
-  CANCEL: "bg-red-100 text-red-700 border-red-200",
-  "Hủy đơn": "bg-red-100 text-red-700 border-red-200",
-  ORDERED: "bg-blue-100 text-blue-800 border-blue-200",
-  "Đặt hàng": "bg-blue-100 text-blue-800 border-blue-200",
-  RECEIVED: "bg-indigo-100 text-indigo-800 border-indigo-200",
-  "Đã nhận": "bg-indigo-100 text-indigo-800 border-indigo-200",
-  DELIVERING: "bg-violet-100 text-violet-800 border-violet-200",
-  "Đang giao": "bg-violet-100 text-violet-800 border-violet-200",
-  "Đang thực hiện": "bg-sky-100 text-sky-800 border-sky-200",
-  "Hoàn tất": "bg-emerald-100 text-emerald-800 border-emerald-200",
-  Hủy: "bg-red-100 text-red-700 border-red-200",
-};
+import { statusBadgeClass } from "@/lib/status-styles";
 
 export function StatusBadge({ status }: { status: string }) {
-  const style =
-    STATUS_STYLES[status] || "bg-slate-100 text-slate-600 border-slate-200";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${style}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold border ${statusBadgeClass(
+        status
+      )}`}
     >
       {status}
     </span>
   );
+}
+
+/** Biển số xe — style V21 plate-link */
+export function PlateBadge({ plate }: { plate?: string | null }) {
+  if (!plate) return <span className="text-slate-400">—</span>;
+  return <span className="inline-block bg-[#facc15] text-black px-2 py-0.5 rounded font-black text-[12px] border-2 border-slate-800 shadow-[inset_1px_1px_1px_#fff,2px_2px_4px_rgba(0,0,0,.25)] tracking-wide">{plate}</span>;
 }

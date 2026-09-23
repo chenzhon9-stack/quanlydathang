@@ -8,6 +8,7 @@ import {
   matchSearch,
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
+import { PlateBadge } from "@/components/StatusBadge";
 import { ActionPrompt, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 
@@ -184,7 +185,7 @@ export default function DeliveriesPage() {
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2">
                 {groupByDate && (
-                  <div className="sticky top-0 z-10 rounded-xl bg-slate-800 text-white px-3 py-2.5 text-sm font-semibold shadow-md">
+                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3 py-2.5 text-sm font-semibold shadow-md">
                     📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
                     <span className="ml-2 text-xs font-normal text-slate-300">
                       ({g.items.length})
@@ -194,7 +195,7 @@ export default function DeliveriesPage() {
                 {g.items.map((d) => (
                   <div
                     key={d.deliveryId}
-                    className="rounded-2xl border border-slate-200 bg-amber-50/60 p-4 shadow-sm"
+                    className="rounded-2xl border border-orange-200 bg-[#FFEDD5] p-4 shadow-sm text-[#9A3412]"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-xs text-slate-500">Ngày đặt</div>
@@ -204,9 +205,7 @@ export default function DeliveriesPage() {
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-slate-500">Biển số</span>
-                      <span className="bg-amber-300 text-amber-950 px-2.5 py-0.5 rounded font-bold text-sm">
-                        {d.vehiclePlate || "—"}
-                      </span>
+                      <PlateBadge plate={d.vehiclePlate} />
                     </div>
                     <div className="mt-2 flex justify-between gap-2 text-sm">
                       <span className="text-slate-500">ID Giao hàng</span>
@@ -264,7 +263,7 @@ export default function DeliveriesPage() {
                   {displayGroups.map((g) => (
                     <React.Fragment key={g.key}>
                       {groupByDate && (
-                        <tr className="bg-slate-800 text-white">
+                        <tr className="bg-[#1a3a5c] text-white">
                           <td colSpan={8} className="px-3 py-2 text-xs font-medium">
                             📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
                             <span className="ml-2 opacity-70">({g.items.length} lượt)</span>
@@ -276,9 +275,7 @@ export default function DeliveriesPage() {
                           <td className="px-3 py-2.5 font-mono text-xs">{d.deliveryId}</td>
                           <td className="px-3 py-2.5 text-blue-700 text-xs font-mono">{d.detailId}</td>
                           <td className="px-3 py-2.5">
-                            <span className="bg-amber-200 text-amber-950 px-1.5 py-0.5 rounded text-xs font-semibold">
-                              {d.vehiclePlate || "—"}
-                            </span>
+                            <PlateBadge plate={d.vehiclePlate} />
                           </td>
                           <td className="px-3 py-2.5 font-medium">
                             {d.customerName || d.customerDetail || d.customerId}
@@ -338,7 +335,8 @@ export default function DeliveriesPage() {
       {editTarget && (
         <ActionPrompt
           open
-          title={`${actionLabel(editTarget)} — ${editTarget.deliveryId}`}
+          title={actionLabel(editTarget)}
+          subtitle={`${editTarget.deliveryId} · ${editTarget.customerName || editTarget.customerId}`}
           fields={[
             {
               key: "actualQty",

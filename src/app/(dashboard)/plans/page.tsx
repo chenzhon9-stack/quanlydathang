@@ -2,14 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
+import { statusRowClass } from "@/lib/status-styles";
 import type { ProductionPlan } from "@/types";
-
-const STATUS_ROW: Record<string, string> = {
-  "Đang thực hiện": "bg-sky-50",
-  "Hoàn tất": "bg-emerald-50",
-  "Hoàn thành": "bg-emerald-50",
-  Hủy: "bg-red-50",
-};
 
 function PlanActions({ p }: { p: ProductionPlan }) {
   function toast(msg: string) {
@@ -148,7 +142,7 @@ export default function PlansPage() {
                 <div
                   key={p.id}
                   className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${
-                    STATUS_ROW[p.status] || "bg-white"
+                    statusRowClass(p.status)
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
@@ -225,7 +219,7 @@ export default function PlansPage() {
                       <tr
                         key={p.id}
                         className={`border-t border-slate-100 ${
-                          STATUS_ROW[p.status] || "bg-white"
+                          statusRowClass(p.status)
                         }`}
                       >
                         <td className="px-3 py-2.5 font-mono text-xs text-slate-600">
