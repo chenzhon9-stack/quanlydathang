@@ -268,4 +268,269 @@ export class OrderService {
   static async syncStatus(orderId: string, year?: number) {
     return syncOrderStatusByOrderId(orderId, year);
   }
+
+
+  /**
+   * Tạo đơn mới — parity V21 saveFullNewOrder
+   * - ≤ 6 xe
+   * - generateUniqueMaDon + CT/GH counter
+   * - mỗi CT ≥ 1 dòng GH, chia hết TyleChiahet
+   */
+  static async createOrder(
+    payload: {
+      supplierId: string;
+      orderDate?: string;
+      year?: number;
+      details: Array<{
+        vehicleId: string;
+        productId: string;
+        regionId: string;
+        note?: string;
+        transportTypeId?: string;
+        transportTypeName?: string;
+        carrierId?: string;
+        deliveries: Array<{
+          customerId: string;
+          customerDetail?: string;
+          plannedQty: number;
+        }>;
+      }>;
+    },
+    user: UserContext
+  ) {
+    if (
+      !hasPermission(user, "ORDER_CREATE") &&
+      !hasPermission(user, "ORDER_UPDATE") &&
+      !hasPermission(user, "*")
+    ) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền tạo đơn" };
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
+    }
+
+    const maNcc = String(payload.supplierId || "").trim();
+    if (!maNcc) {
+      throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp." };
+    }
+    const details = payload.details || [];
+    if (!details.length) {
+      throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết đơn hàng." };
+    }
+    if (details.length > 6) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Mỗi đơn hàng không được vượt quá 6 xe.",
+      };
+    }
+
+    // Trùng xe + hàng trong payload
+    const seen = new Set<string>();
+    for (const d of details) {
+      const key = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
+      if (seen.has(key)) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Trùng xe/hàng trong đơn: ${d.vehicleId} / ${d.productId}`,
+        };
+      }
+      seen.add(key);
+    }
+
+    const { ymdDate, toSheetDate } = await import("@/lib/sheets/date");
+    const { generateUniqueMaDon } = await import("@/lib/sheets/ma-don");
+    const { nextCounterCodes } = await import("@/lib/sheets/counter");
+    const { appendSheetRow, readSheetAsObjects } = await import(
+      "@/lib/sheets/dal"
+    );
+    const { qty3, validateStep } = await import("@/lib/business-rules");
+
+    const ngayDatRaw = payload.orderDate || ymdDate(new Date());
+    const ngayDat = toSheetDate(ngayDatRaw) || ymdDate(new Date());
+    const y = payload.year ?? Number(ngayDat.slice(0, 4)) ?? new Date().getFullYear();
+
+    // HH map cho chia hết
+    const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(
+      () => [] as Record<string, string>[]
+    );
+    const hhById = new Map<string, Record<string, string>>();
+    for (const r of hhRows) {
+      const id = String(r.MaHH || r.MaHh || "").trim();
+      if (id) hhById.set(id, r);
+    }
+
+    // Validate từng CT
+    for (const d of details) {
+      if (!String(d.productId || "").trim()) {
+        throw { code: "VALIDATION_ERROR", message: "Thiếu hàng hóa." };
+      }
+      if (!String(d.regionId || "").trim()) {
+        throw { code: "VALIDATION_ERROR", message: "Thiếu Khu vực/Công trình." };
+      }
+      if (!String(d.vehicleId || "").trim()) {
+        throw { code: "VALIDATION_ERROR", message: "Thiếu mã xe." };
+      }
+      if (!d.deliveries?.length) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Mỗi xe phải có ít nhất 1 dòng kế hoạch giao.",
+        };
+      }
+      const product = hhById.get(String(d.productId).trim());
+      const tlCH = Number(
+        product?.TyleChiahet || product?.TyleChiaHet || 0
+      ) || 0;
+      const tenHH =
+        product?.TenHangHoa || product?.TenHH || d.productId;
+      for (const dl of d.deliveries) {
+        if (!String(dl.customerId || "").trim()) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: "Dòng kế hoạch giao thiếu khách hàng.",
+          };
+        }
+        const khg = qty3(Number(dl.plannedQty) || 0);
+        if (!(khg > 0)) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: "Sản lượng kế hoạch giao phải lớn hơn 0.",
+          };
+        }
+        if (!validateStep(khg, tlCH)) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: `Kế hoạch giao cho ${tenHH} phải chia hết cho ${tlCH} tấn. Giá trị hiện tại: ${khg} tấn.`,
+          };
+        }
+      }
+    }
+
+    const { maDon } = await generateUniqueMaDon(maNcc, ngayDat, { year: y });
+    const isDuyenHa =
+      ["dha", "btay"].includes(maNcc.toLowerCase());
+
+    const detailIds = await nextCounterCodes("CT", ngayDat, {
+      count: details.length,
+      email: user.email,
+      year: y,
+    });
+    const totalGh = details.reduce(
+      (s, d) => s + (d.deliveries?.length || 0),
+      0
+    );
+    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
+      count: totalGh,
+      email: user.email,
+      year: y,
+    });
+
+    const now = new Date().toISOString();
+    let ghIndex = 0;
+
+    // DonHang
+    await appendSheetRow(
+      SHEETS.DH,
+      {
+        MaDon: maDon,
+        NgayDatHang: ngayDat,
+        MaNCC: maNcc,
+        LanGui: 0,
+        TrangThaiDon: STATUS_DON.NEW,
+        TongSoChitiet: details.length,
+        ChitietHuy: 0,
+        FileDonhang: "",
+        ChoGuiMail: false,
+        timeGuimail: "",
+        GuiLaimail: false,
+        User: user.email,
+      },
+      y
+    );
+
+    for (let idx = 0; idx < details.length; idx++) {
+      const d = details[idx];
+      const idCt = detailIds[idx];
+      const khTotal = qty3(
+        (d.deliveries || []).reduce(
+          (s, x) => s + (Number(x.plannedQty) || 0),
+          0
+        )
+      );
+
+      await appendSheetRow(
+        SHEETS.CT,
+        {
+          ID_Chitiet: idCt,
+          NgayDatHang: ngayDat,
+          MaDon: maDon,
+          MaNCC: maNcc,
+          MaXe: d.vehicleId,
+          MaHH: d.productId,
+          SoLuong: khTotal,
+          Khuvuc: d.regionId,
+          KhoXuat: "",
+          GhiChu: d.note || "",
+          TrangThaiXe: STATUS_CT.NEW,
+          TimeChange: now,
+          NgayNhanHang: "",
+          ThucNhan: 0,
+          User: user.email,
+          MaHTVT: d.transportTypeId || "",
+          TenHTVT: d.transportTypeName || "",
+          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
+        },
+        y
+      );
+
+      // DonHang_VanTai nếu thuê ngoài
+      if (
+        d.transportTypeId &&
+        String(d.transportTypeId).toUpperCase().includes("THUE") &&
+        d.carrierId
+      ) {
+        await appendSheetRow(
+          SHEETS.CT_VT,
+          {
+            ID_Chitiet: idCt,
+            MaXe: d.vehicleId,
+            MaDVT: d.carrierId,
+            UpdatedAt: now,
+            UpdatedBy: user.email,
+          },
+          y
+        ).catch(() => undefined);
+      }
+
+      for (const dl of d.deliveries || []) {
+        const idGh = deliveryIds[ghIndex++];
+        await appendSheetRow(
+          SHEETS.GH,
+          {
+            ID_Giaohang: idGh,
+            ID_Chitiet: idCt,
+            MaKh: dl.customerId,
+            ChitietKh: dl.customerDetail || "",
+            KHgiao: qty3(Number(dl.plannedQty) || 0),
+            ThucGiao: 0,
+            Ngaygiao: "",
+            Ghichu: "",
+            Deleted: false,
+            DeletedAt: "",
+            DeletedBy: "",
+          },
+          y
+        );
+      }
+    }
+
+    return {
+      orderId: maDon,
+      orderDate: ngayDat,
+      supplierId: maNcc,
+      detailCount: details.length,
+      deliveryCount: totalGh,
+      detailIds,
+      status: "NEW",
+    };
+  }
 }

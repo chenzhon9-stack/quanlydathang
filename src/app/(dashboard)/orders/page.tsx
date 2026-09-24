@@ -12,6 +12,7 @@ import { statusRowClass } from "@/lib/status-styles";
 import type { Order } from "@/types";
 import { apiPost } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
+import { CreateOrderModal } from "@/components/CreateOrderModal";
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -127,6 +128,7 @@ function OrderActions({
   );
 }
 
+
 export default function OrdersPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
@@ -135,6 +137,7 @@ export default function OrdersPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -235,7 +238,7 @@ export default function OrdersPage() {
             Xuất CSV
           </button>
           <button
-            onClick={() => alert("Tạo đơn mới — modal order flow (V21) sẽ triển khai ở bước write path tiếp theo")}
+            onClick={() => setShowCreate(true)}
             className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
           >
             + Thêm đơn
@@ -383,6 +386,15 @@ export default function OrdersPage() {
           </div>
         </>
       )}
+      <CreateOrderModal
+        open={showCreate}
+        onClose={() => setShowCreate(false)}
+        onCreated={(id) => {
+          alert("Đã tạo đơn " + id);
+          load();
+        }}
+      />
     </div>
   );
 }
+
