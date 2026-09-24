@@ -203,6 +203,8 @@ export function DeliveryEditorModal({
         const body: Record<string, unknown> = {
           actualQty: Number(r.actualQty) || 0,
           deliveryDate: r.deliveryDate,
+          customerId: r.customerId,
+          customerDetail: r.customerName || r.customerDetail || "",
           year: new Date().getFullYear(),
         };
         let json = await apiPatch(
@@ -321,7 +323,7 @@ export function DeliveryEditorModal({
                 <div className="text-[10px] text-slate-500 font-semibold sm:hidden mb-0.5">
                   Khách
                 </div>
-                {mode === "view" || mode === "real" ? (
+                {mode === "view" ? (
                   <div className="text-sm font-medium px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 whitespace-normal break-words leading-snug min-h-[40px]">
                     {r.customerName || r.customerDetail || r.customerId || "—"}
                   </div>
@@ -337,7 +339,12 @@ export function DeliveryEditorModal({
                         setRows((prev) =>
                           prev.map((x, i) =>
                             i === idx
-                              ? { ...x, customerId: id, customerName: name }
+                              ? {
+                                  ...x,
+                                  customerId: id,
+                                  customerName: name,
+                                  customerDetail: name,
+                                }
                               : x
                           )
                         );
