@@ -324,7 +324,7 @@ export class DetailService {
       };
     }
     // Chặn nếu đã nhận
-    const cts = await DetailRepository.findMany({ year: y, pageSize: 2000 });
+    const cts = await DetailRepository.findMany({ year: y });
     const ct = cts.find((d) => d.detailId === detailId);
     if (ct && (Number(ct.actualReceived) || 0) > 0) {
       throw {

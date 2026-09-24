@@ -57,7 +57,6 @@ export async function syncOrderStatusByOrderId(
   const details = await DetailRepository.findMany({
     year: y,
     orderId,
-    pageSize: 500,
   });
 
   const active = details.filter((d) => !TERMINAL_CT.has(norm(d.status)));
@@ -99,7 +98,6 @@ export async function syncOrderStatusByDetailId(
   const y = year ?? new Date().getFullYear();
   const details = await DetailRepository.findMany({
     year: y,
-    pageSize: 2000,
   });
   const ct = details.find((d) => d.detailId === detailId);
   if (!ct?.orderId) return null;
