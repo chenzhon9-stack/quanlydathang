@@ -20,6 +20,7 @@ import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
+import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -301,6 +302,8 @@ export class DeliveryService {
         console.error("[updateDelivery] sync CT status", e);
       }
     }
+
+    await syncOrderStatusByDetailId(detailId, y).catch(() => null);
 
     return {
       deliveryId,

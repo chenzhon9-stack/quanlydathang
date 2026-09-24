@@ -20,26 +20,41 @@ const STATUS_LABEL: Record<string, string> = {
   CANCEL: "Hủy đơn",
 };
 
-function OrderActions({ o }: { o: Order }) {
-  const isNew = o.status === "NEW";
-  const isProcessing = o.status === "PROCESSING";
+function OrderActions({
+  o,
+  onChanged,
+}: {
+  o: Order;
+  onChanged?: () => void;
+}) {
+  const st = String(o.status || "").toUpperCase();
+  const isNew =
+    st === "NEW" ||
+    st === "KHỞI TẠO" ||
+    o.status === "Khởi tạo";
+  const isProcessing =
+    st === "PROCESSING" ||
+    st === "ĐANG XỬ LÝ" ||
+    o.status === "Đang xử lý";
 
-  async function toast(msg: string) {
-    // Gửi mail / Thêm xe / PDF — phase sau
-    if (msg.startsWith("Hủy") || msg.startsWith("Xóa")) {
-      if (!confirm(`${msg}?`)) return;
-      const json = await apiPost(
-        `/api/v1/orders/${encodeURIComponent(o.orderId)}/cancel`,
-        { year: new Date().getFullYear() }
-      );
-      if (!json.success) {
-        alert(json.error?.message || "Lỗi hủy đơn");
-        return;
-      }
-      window.location.reload();
+  async function cancelOrder(label: string) {
+    if (!confirm(`${label} đơn ${o.orderId}?`)) return;
+    const json = await apiPost(
+      `/api/v1/orders/${encodeURIComponent(o.orderId)}/cancel`,
+      { year: new Date().getFullYear() }
+    );
+    if (!json.success) {
+      alert(json.error?.message || "Lỗi hủy đơn");
       return;
     }
-    alert(`${msg}\n(Mã đơn: ${o.orderId})\n[API write sẽ bổ sung: Gửi mail / Thêm xe / PDF]`);
+    onChanged?.();
+  }
+
+  async function toast(msg: string) {
+    // Gửi mail / Thêm xe / PDF — phase sau (Strangler 20.8 bước 5–6)
+    alert(
+      `${msg}\n(Mã đơn: ${o.orderId})\n[API write sẽ bổ sung: Gửi mail / Thêm xe / PDF]`
+    );
   }
 
   return (
@@ -59,7 +74,7 @@ function OrderActions({ o }: { o: Order }) {
             Gửi
           </button>
           <button
-            onClick={() => toast("Xóa đơn — POST /orders/:id/cancel")}
+            onClick={() => cancelOrder("Xóa")}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
           >
             Xóa
@@ -69,7 +84,7 @@ function OrderActions({ o }: { o: Order }) {
       {isProcessing && (
         <>
           <button
-            onClick={() => toast("Hủy đơn — POST /orders/:id/cancel")}
+            onClick={() => cancelOrder("Hủy")}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
           >
             Hủy

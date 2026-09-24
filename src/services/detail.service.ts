@@ -19,6 +19,7 @@ import {
   normalizeHaohut,
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
+import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 
 export class DetailService {
   static async listDetails(
@@ -270,6 +271,7 @@ export class DetailService {
       }
     }
 
+    const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
     return {
       detailId,
       actualReceived: qty,
@@ -278,6 +280,7 @@ export class DetailService {
       row,
       tyleChiahet,
       redistributed,
+      orderStatus: sync?.status,
       message:
         redistributed > 0
           ? `Đã nhận ${qty} tấn; phân bổ lại ${redistributed} dòng KH giao`
@@ -320,6 +323,31 @@ export class DetailService {
         message: `Xe đã có ${totalTg} tấn thực giao, không được hủy/xóa.`,
       };
     }
+    // Chặn nếu đã nhận
+    const cts = await DetailRepository.findMany({ year: y, pageSize: 2000 });
+    const ct = cts.find((d) => d.detailId === detailId);
+    if (ct && (Number(ct.actualReceived) || 0) > 0) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: `Xe đã nhận ${ct.actualReceived} tấn, không được hủy/xóa.`,
+      };
+    }
+
+    // Soft-delete GH chưa giao
+    const now = new Date().toISOString();
+    let deletedGh = 0;
+    for (const g of ghs) {
+      if ((Number(g.actualQty) || 0) > 0) continue;
+      const r = await updateSheetRowByKey(
+        SHEETS.GH,
+        "ID_Giaohang",
+        g.deliveryId,
+        { Deleted: true, DeletedAt: now, DeletedBy: user.email },
+        y
+      );
+      if (r > 0) deletedGh++;
+    }
+
     const status = mode === "delete" ? STATUS_CT.DELETE : STATUS_CT.CANCEL;
     const row = await updateSheetRowByKey(
       SHEETS.CT,
@@ -328,13 +356,21 @@ export class DetailService {
       {
         TrangThaiXe: status,
         ThucNhan: 0,
-        TimeChange: new Date().toISOString(),
+        TimeChange: now,
         User: user.email,
       },
       y
     );
     if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
-    return { detailId, status: mode === "delete" ? "DELETE" : "CANCEL", row };
+
+    const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
+    return {
+      detailId,
+      status: mode === "delete" ? "DELETE" : "CANCEL",
+      row,
+      deletedGh,
+      orderStatus: sync?.status,
+    };
   }
 
 
