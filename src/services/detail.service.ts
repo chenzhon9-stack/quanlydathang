@@ -14,6 +14,9 @@ import {
   qty3,
   validateStep,
   validateReceiveDate,
+  roundToStep,
+  computeDetailStatus,
+  normalizeHaohut,
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 
@@ -136,6 +139,28 @@ export class DetailService {
       };
     }
 
+    // R3: phải có kế hoạch giao hợp lệ (Σ KHgiao > 0)
+    {
+      const { DeliveryRepository } = await import(
+        "@/repositories/delivery.repository"
+      );
+      const ghs = await DeliveryRepository.findMany({
+        year: y,
+        detailId,
+        includeDeleted: false,
+      });
+      const sumPlan = ghs
+        .filter((g) => !g.deleted)
+        .reduce((s, g) => s + (Number(g.plannedQty) || 0), 0);
+      if (!(sumPlan > 0)) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message:
+            "Chi tiết này chưa có kế hoạch giao hợp lệ, không thể nhận hàng.",
+        };
+      }
+    }
+
     const qty = qty3(Number(payload.actualReceived));
     if (!(qty > 0)) {
       throw { code: "VALIDATION_ERROR", message: "Thực nhận phải > 0" };
@@ -212,11 +237,14 @@ export class DetailService {
             let newKh: number;
             if (i === active.length - 1) {
               newKh = qty3(qty - allocated);
+              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
             } else {
               const ratio = (Number(g.plannedQty) || 0) / sumPlan;
               newKh = qty3(qty * ratio);
+              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
               allocated = qty3(allocated + newKh);
             }
+            if (newKh < 0) newKh = 0;
             if (Math.abs(newKh - (Number(g.plannedQty) || 0)) > 0.0001) {
               await updateSheetRowByKey(
                 SHEETS.GH,
@@ -228,7 +256,7 @@ export class DetailService {
               redistributed++;
             }
           }
-          // Đồng bộ SoLuong CT = ThucNhan (sau phân bổ)
+          // Đồng bộ SoLuong CT = tổng KHgiao sau phân bổ (≈ ThucNhan)
           await updateSheetRowByKey(
             SHEETS.CT,
             "ID_Chitiet",
@@ -274,8 +302,25 @@ export class DetailService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const status = mode === "delete" ? STATUS_CT.DELETE : STATUS_CT.CANCEL;
     const y = year ?? new Date().getFullYear();
+    const { DeliveryRepository } = await import(
+      "@/repositories/delivery.repository"
+    );
+    const ghs = await DeliveryRepository.findMany({
+      year: y,
+      detailId,
+      includeDeleted: false,
+    });
+    const totalTg = ghs
+      .filter((g) => !g.deleted)
+      .reduce((s, g) => s + (Number(g.actualQty) || 0), 0);
+    if (totalTg > 0) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: `Xe đã có ${totalTg} tấn thực giao, không được hủy/xóa.`,
+      };
+    }
+    const status = mode === "delete" ? STATUS_CT.DELETE : STATUS_CT.CANCEL;
     const row = await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",

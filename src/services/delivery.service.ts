@@ -7,11 +7,19 @@ import {
 import { DeliveryRepository } from "@/repositories/delivery.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
-import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
-import { qty3 } from "@/lib/business-rules";
+import { updateSheetRowByKey, appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
+import {
+  qty3,
+  validateStep,
+  validateDeliveryDate,
+  validateTolerance,
+  normalizeHaohut,
+  computeDetailStatus,
+} from "@/lib/business-rules";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
-import { todayYmdVN } from "@/lib/status";
+import { todayYmdVN, STATUS_CT } from "@/lib/status";
+import { DetailRepository } from "@/repositories/detail.repository";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -112,7 +120,10 @@ export class DeliveryService {
   }
 
 
-  /** Cập nhật thực giao — V21 saveDelivery (một dòng) */
+  /**
+   * Cập nhật thực giao — V21 saveDeliveryData (1 dòng)
+   * Rules: D4 ngày nhận, D5 ngày giao, D6 chia hết, D7 hao hụt (needConfirm)
+   */
   static async updateDelivery(
     deliveryId: string,
     payload: {
@@ -121,6 +132,8 @@ export class DeliveryService {
       note?: string;
       customerId?: string;
       customerDetail?: string;
+      /** Client xác nhận vượt ngưỡng hao hụt */
+      confirm?: boolean;
     },
     user: UserContext,
     year?: number
@@ -135,12 +148,121 @@ export class DeliveryService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const qty = Number(payload.actualQty);
+
+    const qty = qty3(Number(payload.actualQty));
     if (qty < 0) {
       throw { code: "VALIDATION_ERROR", message: "Thực giao không hợp lệ" };
     }
     const ngay = (payload.deliveryDate || todayYmdVN()).slice(0, 10);
     const y = year ?? new Date().getFullYear();
+
+    // Load GH hiện tại
+    const allGh = await DeliveryRepository.findMany({ year: y, includeDeleted: false });
+    const current = allGh.find((g) => g.deliveryId === deliveryId);
+    if (!current) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy GH " + deliveryId };
+    }
+    if (current.deleted) {
+      throw { code: "VALIDATION_ERROR", message: "Dòng giao đã xóa, không thể cập nhật." };
+    }
+    const detailId = current.detailId;
+
+    // Load CT
+    const ct = await DetailRepository.findById(detailId, y);
+    if (!ct) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+    const st = String(ct.status || "");
+    if (["Xóa xe", "DELETE"].includes(st) || st.toUpperCase() === "DELETE") {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Chi tiết đã xóa khỏi đơn, không được lưu giao hàng.",
+      };
+    }
+
+    // HH: chia hết + hao hụt
+    let tyleChiahet = 0;
+    let tyleHaohut = 0;
+    let tenHH = ct.productName || ct.productId || "";
+    try {
+      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+      const hh = hhRows.find(
+        (r) => String(r.MaHH || "").trim() === String(ct.productId || "").trim()
+      );
+      if (hh) {
+        tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
+        tyleHaohut = Number(hh.TyleHaohut || hh.TyleHaoHut || 0) || 0;
+        tenHH = String(hh.TenHangHoa || tenHH);
+      }
+    } catch {
+      /* optional */
+    }
+
+    // D5–D6: khi TG > 0
+    if (qty > 0) {
+      const dateCheck = validateDeliveryDate({
+        receivedDate: ct.receivedDate,
+        deliveryDate: ngay,
+        isDuyenHa: !!ct.isDuyenHa,
+        detailId,
+      });
+      if (!dateCheck.ok) {
+        throw { code: "VALIDATION_ERROR", message: dateCheck.error };
+      }
+      if (!validateStep(qty, tyleChiahet)) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Thực giao cho sản phẩm ${tenHH} phải chia hết cho ${tyleChiahet} tấn. Hiện tại: ${qty.toFixed(2)} tấn.`,
+        };
+      }
+    }
+
+    // D7: tổng TG sau update vs ThucNhan
+    const thucNhan = qty3(Number(ct.actualReceived) || 0);
+    const othersTg = allGh
+      .filter((g) => !g.deleted && g.detailId === detailId && g.deliveryId !== deliveryId)
+      .reduce((s, g) => s + (Number(g.actualQty) || 0), 0);
+    const totalTgAfter = qty3(othersTg + qty);
+    const tl = normalizeHaohut(tyleHaohut);
+
+    if (thucNhan > 0 && totalTgAfter > thucNhan + 1e-6) {
+      const overRatio = (totalTgAfter - thucNhan) / thucNhan;
+      if (overRatio > tl + 1e-9) {
+        const isAdmin = hasPermission(user, "*") || String(user.role).toUpperCase() === "ADMIN";
+        if (!payload.confirm) {
+          throw {
+            code: "NEED_CONFIRM",
+            message:
+              `Tổng thực giao (${totalTgAfter.toFixed(2)}) vượt thực nhận (${thucNhan.toFixed(2)}) ` +
+              `${(overRatio * 100).toFixed(1)}%, vượt ngưỡng cho phép ${(tl * 100).toFixed(0)}%.` +
+              (isAdmin
+                ? "
+Bạn xác nhận lưu với vai trò Admin?"
+                : " Vui lòng liên hệ admin hoặc giảm số lượng."),
+            needConfirm: isAdmin,
+            meta: { totalTgAfter, thucNhan, overRatio, tlHH: tl },
+          };
+        }
+        if (!isAdmin) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: `Tổng thực giao vượt ngưỡng hao hụt ${(tl * 100).toFixed(0)}%. Không có quyền ghi đè.`,
+          };
+        }
+      } else if (!payload.confirm) {
+        // trong ngưỡng — vẫn hỏi xác nhận (V21 soft confirm)
+        throw {
+          code: "NEED_CONFIRM",
+          message:
+            `Tổng thực giao (${totalTgAfter.toFixed(2)}) vượt thực nhận (${thucNhan.toFixed(2)}) ` +
+            `${(overRatio * 100).toFixed(1)}%, trong ngưỡng cho phép ${(tl * 100).toFixed(0)}%.
+Bạn xác nhận lưu?`,
+          needConfirm: true,
+          meta: { totalTgAfter, thucNhan, overRatio, tlHH: tl },
+        };
+      }
+    }
+
     const patch: Record<string, string | number | boolean> = {
       ThucGiao: qty,
       Ngaygiao: ngay,
@@ -148,6 +270,7 @@ export class DeliveryService {
     if (payload.note !== undefined) patch.Ghichu = payload.note;
     if (payload.customerId) patch.MaKh = payload.customerId;
     if (payload.customerDetail !== undefined) patch.ChitietKh = payload.customerDetail;
+
     const row = await updateSheetRowByKey(
       SHEETS.GH,
       "ID_Giaohang",
@@ -156,7 +279,41 @@ export class DeliveryService {
       y
     );
     if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy GH " + deliveryId };
-    return { deliveryId, actualQty: qty, deliveryDate: ngay, row };
+
+    // Sync TrangThaiXe CT
+    const newStatus = computeDetailStatus({
+      currentStatus: st,
+      thucNhan,
+      totalThucGiao: totalTgAfter,
+      tlHaohut: tyleHaohut,
+    });
+    if (newStatus && newStatus !== st) {
+      try {
+        await updateSheetRowByKey(
+          SHEETS.CT,
+          "ID_Chitiet",
+          detailId,
+          {
+            TrangThaiXe: newStatus,
+            TimeChange: new Date().toISOString(),
+          },
+          y
+        );
+      } catch (e) {
+        console.error("[updateDelivery] sync CT status", e);
+      }
+    }
+
+    return {
+      deliveryId,
+      detailId,
+      actualQty: qty,
+      deliveryDate: ngay,
+      totalThucGiao: totalTgAfter,
+      thucNhan,
+      detailStatus: newStatus,
+      row,
+    };
   }
 
 

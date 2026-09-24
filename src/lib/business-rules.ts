@@ -1,6 +1,10 @@
 /**
- * Business rules ported from V21 (qty3, chia hết, ngày nhận).
+ * Business rules ported from V21
+ * - qty3, chia hết (TyleChiahet)
+ * - hao hụt (TyleHaohut)
+ * - ngày nhận / ngày giao (+ Duyên Hà cutoff 14h)
  */
+
 export const EPS = 1e-9;
 
 /** Làm tròn 3 chữ số thập phân (tấn) — V21 qty3 */
@@ -12,13 +16,43 @@ export function qty3(n: number): number {
 /**
  * Thực nhận / thực giao phải chia hết cho TyleChiahet.
  * step <= 0 → bỏ qua (không ràng buộc).
+ * V21: |value/step − round(value/step)| < 1e-9
  */
 export function validateStep(value: number, step: number): boolean {
   const s = Number(step) || 0;
   if (s <= EPS) return true;
-  const v = qty3(value);
-  const k = Math.round(v / s);
-  return Math.abs(v - k * s) < 1e-6;
+  const v = Number(value) || 0;
+  const ratio = v / s;
+  return Math.abs(ratio - Math.round(ratio)) < 1e-9;
+}
+
+/** Làm tròn value về bội của step (qty3) */
+export function roundToStep(value: number, step: number): number {
+  const s = Number(step) || 0;
+  if (s <= EPS) return qty3(value);
+  return qty3(Math.round(value / s) * s);
+}
+
+/**
+ * Hao hụt: |TN − TG| / TN ≤ tlHH
+ * tlHH trên sheet thường là tỷ lệ (0.02 = 2%). Nếu > 1 coi là % → /100.
+ */
+export function normalizeHaohut(raw: number): number {
+  const n = Number(raw) || 0;
+  if (n > 1) return n / 100;
+  return Math.max(0, n);
+}
+
+export function validateTolerance(
+  thucNhan: number,
+  tongGiao: number,
+  tlHHRaw: number
+): boolean {
+  const tn = Number(thucNhan) || 0;
+  const tg = Number(tongGiao) || 0;
+  if (!(tn > 0)) return Math.abs(tg) < EPS;
+  const tl = normalizeHaohut(tlHHRaw);
+  return Math.abs(tn - tg) / tn <= tl + EPS;
 }
 
 /** YYYY-MM-DD so sánh chuỗi */
@@ -46,12 +80,30 @@ export function hourVN(d = new Date()): number {
   return Number(parts.find((p) => p.type === "hour")?.value || 0);
 }
 
+/** Cộng N ngày vào YYYY-MM-DD */
+export function addDaysYmd(ymd: string, days: number): string {
+  const [y, m, d] = ymd.slice(0, 10).split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().slice(0, 10);
+}
+
 /**
- * Validate ngày nhận (rút gọn V21 _validateReceiveDate_).
+ * Business today key (V21 _businessTodayKey_).
+ * Duyên Hà: sau 14h → ngày nghiệp vụ = ngày mai.
+ */
+export function businessTodayKey(isDuyenHa?: boolean, now = new Date()): string {
+  let key = todayYmdVN(now);
+  if (isDuyenHa && hourVN(now) >= 14) {
+    key = addDaysYmd(key, 1);
+  }
+  return key;
+}
+
+/**
+ * Validate ngày nhận — V21 _validateReceiveDate_
+ * - bắt buộc
  * - >= ngày đặt
- * - <= business today (Duyên Hà sau 14h: today = tomorrow? V21: sau 14h cộng 1 ngày vào "business today" khi so sánh)
- * Đơn giản hóa: maxDate = hôm nay; nếu isDuyenHa && hour>=14 thì maxDate vẫn hôm nay nhưng min vẫn orderDate.
- * Rule V21: không vượt business today; Duyên Hà cutoff 14:00 ảnh hưởng ngày nghiệp vụ đặt/gửi — với nhận: không future.
+ * - <= business today (Duyên Hà sau 14h = tomorrow)
  */
 export function validateReceiveDate(opts: {
   orderDate?: string;
@@ -60,18 +112,106 @@ export function validateReceiveDate(opts: {
 }): { ok: true } | { ok: false; error: string } {
   const ngay = (opts.receivedDate || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) {
-    return { ok: false, error: "Ngày nhận không hợp lệ (YYYY-MM-DD)" };
+    return { ok: false, error: "Vui lòng chọn ngày nhận hàng (YYYY-MM-DD)." };
   }
   const order = (opts.orderDate || "").slice(0, 10);
   if (order && ymdCompare(ngay, order) < 0) {
-    return { ok: false, error: `Ngày nhận không được trước ngày đặt (${order})` };
+    return {
+      ok: false,
+      error:
+        `Ngày nhận hàng không được nhỏ hơn ngày đặt hàng.\n` +
+        `Ngày đặt: ${order}\nNgày nhận: ${ngay}` +
+        (opts.isDuyenHa ? "\nDuyên Hà: sau 14h được tính sang ngày hôm sau." : ""),
+    };
   }
-  let maxDay = todayYmdVN();
-  // Duyên Hà: sau 14h vẫn cho nhận trong ngày hôm nay; không cho tương lai
+  const maxDay = businessTodayKey(!!opts.isDuyenHa);
   if (ymdCompare(ngay, maxDay) > 0) {
-    return { ok: false, error: `Ngày nhận không được sau hôm nay (${maxDay})` };
+    return {
+      ok: false,
+      error:
+        `Ngày nhận hàng không được lớn hơn ngày hôm nay.\n` +
+        `Hôm nay hợp lệ: ${maxDay}` +
+        (opts.isDuyenHa ? "\nDuyên Hà: sau 14h được tính sang ngày hôm sau." : ""),
+    };
   }
   return { ok: true };
+}
+
+/**
+ * Validate ngày giao — V21 _validateDeliveryDate_
+ * - bắt buộc
+ * - CT phải có ngày nhận
+ * - >= ngày nhận
+ * - <= business today
+ */
+export function validateDeliveryDate(opts: {
+  receivedDate?: string;
+  deliveryDate: string;
+  isDuyenHa?: boolean;
+  detailId?: string;
+}): { ok: true } | { ok: false; error: string } {
+  const ngay = (opts.deliveryDate || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ngay)) {
+    return { ok: false, error: "Vui lòng chọn ngày giao hàng (YYYY-MM-DD)." };
+  }
+  const recv = (opts.receivedDate || "").slice(0, 10);
+  if (!recv || !/^\d{4}-\d{2}-\d{2}$/.test(recv)) {
+    return {
+      ok: false,
+      error:
+        (opts.detailId ? opts.detailId + " " : "") +
+        "Chi tiết xe chưa có ngày nhận hàng, không thể lưu giao hàng.",
+    };
+  }
+  if (ymdCompare(ngay, recv) < 0) {
+    return {
+      ok: false,
+      error:
+        `Ngày giao hàng không được nhỏ hơn ngày nhận hàng.\n` +
+        `Ngày nhận: ${recv}\nNgày giao: ${ngay}` +
+        (opts.isDuyenHa ? "\nDuyên Hà: sau 14h được tính sang ngày hôm sau." : ""),
+    };
+  }
+  const maxDay = businessTodayKey(!!opts.isDuyenHa);
+  if (ymdCompare(ngay, maxDay) > 0) {
+    return {
+      ok: false,
+      error:
+        `Ngày giao hàng không được lớn hơn ngày hôm nay.\n` +
+        `Hôm nay hợp lệ: ${maxDay}` +
+        (opts.isDuyenHa ? "\nDuyên Hà: sau 14h được tính sang ngày hôm sau." : ""),
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Máy trạng thái CT sau nhận/giao — V21 syncDetailAndOrder_
+ */
+export function computeDetailStatus(opts: {
+  currentStatus: string;
+  thucNhan: number;
+  totalThucGiao: number;
+  tlHaohut: number;
+}): string {
+  const st = String(opts.currentStatus || "");
+  if (st === "Hủy xe" || st === "CANCEL" || st === "Xóa xe" || st === "DELETE") {
+    return st === "CANCEL" ? "Hủy xe" : st === "DELETE" ? "Xóa xe" : st;
+  }
+  const tn = Number(opts.thucNhan) || 0;
+  const tg = Number(opts.totalThucGiao) || 0;
+  if (!(tn > 0)) {
+    // chưa nhận
+    if (["Mới tạo", "NEW"].includes(st)) return "Mới tạo";
+    if (["Đặt hàng", "ORDERED"].includes(st)) return "Đặt hàng";
+    return st || "Đặt hàng";
+  }
+  if (tg <= 0) return "Đã nhận";
+  if (tg < tn) {
+    if (validateTolerance(tn, tg, opts.tlHaohut)) return "Hoàn thành";
+    return "Đang giao";
+  }
+  return "Hoàn thành";
 }
 
 export function classifyPhanLoaiMain(raw: string): "Bao" | "Roi" | "Khac" {
@@ -81,8 +221,7 @@ export function classifyPhanLoaiMain(raw: string): "Bao" | "Roi" | "Khac" {
     .toLowerCase()
     .trim();
   if (s === "bao") return "Bao";
-  if (s === "roi" || s === "rời" || s === "roi ") return "Roi";
-  if (s.includes("roi") || s.includes("rời")) return "Roi";
+  if (s === "roi" || s.includes("roi") || s.includes("rời")) return "Roi";
   if (s.includes("bao")) return "Bao";
   return "Khac";
 }

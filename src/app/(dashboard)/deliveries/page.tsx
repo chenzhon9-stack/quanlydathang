@@ -136,17 +136,30 @@ export default function DeliveriesPage() {
     if (!editTarget) return;
     setBusy(true);
     try {
-      const json = await apiPatch(
+      const body: Record<string, unknown> = {
+        actualQty: Number(editQty) || 0,
+        deliveryDate: editDate,
+        customerId: editKhId,
+        customerDetail: editKhName,
+        year: new Date().getFullYear(),
+      };
+      let json = await apiPatch(
         `/api/v1/deliveries/${encodeURIComponent(editTarget.deliveryId)}`,
-        {
-          actualQty: Number(editQty) || 0,
-          deliveryDate: editDate,
-          customerId: editKhId,
-          customerDetail: editKhName,
-          year: new Date().getFullYear(),
-        }
+        body
       );
-      if (!json.success) throw new Error(json.error?.message || "Lỗi lưu");
+      // V21 NEED_CONFIRM — vượt / trong ngưỡng hao hụt
+      const err = json.error as { code?: string; message?: string; needConfirm?: boolean } | undefined;
+      if (!json.success && err?.code === "NEED_CONFIRM") {
+        if (!confirm(err.message || "Cần xác nhận vượt ngưỡng hao hụt")) {
+          return;
+        }
+        body.confirm = true;
+        json = await apiPatch(
+          `/api/v1/deliveries/${encodeURIComponent(editTarget.deliveryId)}`,
+          body
+        );
+      }
+      if (!json.success) throw new Error(err?.message || json.error?.message || "Lỗi lưu");
       setEditTarget(null);
       load(page);
     } catch (e: unknown) {

@@ -5,7 +5,7 @@ import { success, error, jsonResponse } from "@/lib/api";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** PATCH /api/v1/deliveries/:id — Cập nhật thực giao */
+/** PATCH /api/v1/deliveries/:id — Cập nhật thực giao (V21 rules) */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const token =
@@ -25,17 +25,37 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         note: body.note || body.ghiChu,
         customerId: body.customerId || body.maKh,
         customerDetail: body.customerDetail || body.chitietKh,
+        confirm: !!body.confirm,
       },
       user,
       year
     );
     return jsonResponse(success(result));
   } catch (e: unknown) {
-    const err = e as { code?: string; message?: string };
+    const err = e as {
+      code?: string;
+      message?: string;
+      needConfirm?: boolean;
+      meta?: unknown;
+    };
     if (err?.code === "PERMISSION_DENIED")
       return jsonResponse(error(err.code, err.message || ""), 403);
     if (err?.code === "NOT_FOUND")
       return jsonResponse(error(err.code, err.message || ""), 404);
+    if (err?.code === "NEED_CONFIRM") {
+      return jsonResponse(
+        {
+          success: false,
+          error: {
+            code: "NEED_CONFIRM",
+            message: err.message || "Cần xác nhận",
+            needConfirm: err.needConfirm !== false,
+            meta: err.meta,
+          },
+        },
+        409
+      );
+    }
     if (err?.code)
       return jsonResponse(error(err.code, err.message || ""), 400);
     console.error(e);
