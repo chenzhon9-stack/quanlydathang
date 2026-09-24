@@ -236,8 +236,7 @@ export class DeliveryService {
               `Tổng thực giao (${totalTgAfter.toFixed(2)}) vượt thực nhận (${thucNhan.toFixed(2)}) ` +
               `${(overRatio * 100).toFixed(1)}%, vượt ngưỡng cho phép ${(tl * 100).toFixed(0)}%.` +
               (isAdmin
-                ? "
-Bạn xác nhận lưu với vai trò Admin?"
+                ? " Bạn xác nhận lưu với vai trò Admin?"
                 : " Vui lòng liên hệ admin hoặc giảm số lượng."),
             needConfirm: isAdmin,
             meta: { totalTgAfter, thucNhan, overRatio, tlHH: tl },
@@ -255,8 +254,7 @@ Bạn xác nhận lưu với vai trò Admin?"
           code: "NEED_CONFIRM",
           message:
             `Tổng thực giao (${totalTgAfter.toFixed(2)}) vượt thực nhận (${thucNhan.toFixed(2)}) ` +
-            `${(overRatio * 100).toFixed(1)}%, trong ngưỡng cho phép ${(tl * 100).toFixed(0)}%.
-Bạn xác nhận lưu?`,
+            `${(overRatio * 100).toFixed(1)}%, trong ngưỡng cho phép ${(tl * 100).toFixed(0)}%. Bạn xác nhận lưu?`,
           needConfirm: true,
           meta: { totalTgAfter, thucNhan, overRatio, tlHH: tl },
         };
