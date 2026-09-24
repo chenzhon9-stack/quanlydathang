@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import { foldVn } from "@/lib/vn-search";
 
 export type MasterType = "KH" | "HH" | "KV" | "XE" | "NCC" | "HTVT" | "DVT";
 
@@ -133,14 +134,14 @@ export function MasterPicker({
   }
 
   const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
+    const s = foldVn(q);
     if (!s) return items.slice(0, 100);
+    const parts = s.split(/\s+/).filter(Boolean);
     return items
-      .filter(
-        (it) =>
-          it.id.toLowerCase().includes(s) ||
-          it.name.toLowerCase().includes(s)
-      )
+      .filter((it) => {
+        const hay = foldVn(`${it.id} ${it.name}`);
+        return parts.every((p) => hay.includes(p));
+      })
       .slice(0, 100);
   }, [items, q]);
 

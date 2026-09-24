@@ -111,11 +111,6 @@ export function matchStatuses(
 }
 
 export function matchSearch(haystack: string, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  // Hỗ trợ ; hoặc + như V21
-  const parts = q.split(/[;+]/).map((s) => s.trim()).filter(Boolean);
-  if (!parts.length) return true;
-  const hay = haystack.toLowerCase();
-  return parts.every((p) => hay.includes(p));
+  // Không dấu tiếng Việt + AND theo khoảng trắng / ; / +
+  return matchSearchVn(haystack, query);
 }

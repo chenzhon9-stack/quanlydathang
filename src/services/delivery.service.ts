@@ -21,6 +21,8 @@ import { isSheetsConfigured } from "@/lib/sheets/client";
 import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
+import { newDeliveryId, isTempClientId } from "@/lib/sheets/counter";
+import { ymdDate } from "@/lib/sheets/date";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -390,7 +392,7 @@ export class DeliveryService {
       if (!(khg > 0)) {
         throw { code: "VALIDATION_ERROR", message: "KH giao phải > 0" };
       }
-      if (r.deliveryId && existingIds.has(r.deliveryId)) {
+      if (r.deliveryId && !isTempClientId(r.deliveryId) && existingIds.has(r.deliveryId)) {
         await updateSheetRowByKey(
           SHEETS.GH,
           "ID_Giaohang",
@@ -406,8 +408,11 @@ export class DeliveryService {
         keepIds.add(r.deliveryId);
         updated++;
       } else {
-        const seq = String(Date.now()).slice(-4) + String(created + 1);
-        const idGh = `GH-${ymd}-${seq}`;
+        // Cấp mã GH chuẩn từ System_Counter (parity V21)
+        const idGh = await newDeliveryId(ymdDate(new Date()) || undefined, {
+          email: user.email,
+          year: y,
+        });
         await appendSheetRow(
           SHEETS.GH,
           {

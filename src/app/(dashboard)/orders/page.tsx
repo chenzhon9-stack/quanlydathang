@@ -27,15 +27,19 @@ function OrderActions({
   o: Order;
   onChanged?: () => void;
 }) {
-  const st = String(o.status || "").toUpperCase();
+  // status có thể là enum EN hoặc chuỗi VN từ Sheet
+  const raw = String(o.status || "");
+  const st = raw.toUpperCase();
   const isNew =
     st === "NEW" ||
-    st === "KHỞI TẠO" ||
-    o.status === "Khởi tạo";
+    st.includes("KHỞI") ||
+    st.includes("KHOI") ||
+    raw === "Khởi tạo";
   const isProcessing =
     st === "PROCESSING" ||
-    st === "ĐANG XỬ LÝ" ||
-    o.status === "Đang xử lý";
+    st.includes("XỬ LÝ") ||
+    st.includes("XU LY") ||
+    raw === "Đang xử lý";
 
   async function cancelOrder(label: string) {
     if (!confirm(`${label} đơn ${o.orderId}?`)) return;
