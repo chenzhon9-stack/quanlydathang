@@ -11,6 +11,10 @@ import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
 import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
+import {
+  DeliveryEditorModal,
+  summaryFromDetail,
+} from "@/components/DeliveryEditorModal";
 import { statusRowClass } from "@/lib/status-styles";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -844,235 +848,15 @@ export default function DetailsPage() {
 
       {/* ── Modal Giao / Sửa KH / Xem (V21) ── */}
       {deliveryTarget && (
-        <ModalShell
-          wide
-          title={
-            deliveryTarget.mode === "plan"
-              ? `Sửa kế hoạch giao: Xe ${deliveryTarget.detail.vehiclePlate || deliveryTarget.detail.vehicleId} | Hàng: ${deliveryTarget.detail.productName || deliveryTarget.detail.productId}`
-              : deliveryTarget.mode === "real"
-                ? `Giao hàng thực tế: Xe ${deliveryTarget.detail.vehiclePlate || deliveryTarget.detail.vehicleId} | Hàng: ${deliveryTarget.detail.productName || deliveryTarget.detail.productId}`
-                : `Xem chi tiết giao hàng: Xe ${deliveryTarget.detail.vehiclePlate || deliveryTarget.detail.vehicleId} | Hàng: ${deliveryTarget.detail.productName || deliveryTarget.detail.productId}`
-          }
-          onClose={() => !busy && setDeliveryTarget(null)}
-          footer={
-            deliveryTarget.mode === "view" ? (
-              <button
-                type="button"
-                onClick={() => setDeliveryTarget(null)}
-                className="w-full py-3 rounded-xl bg-slate-200 text-slate-700 font-bold text-sm"
-              >
-                Đóng
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy || deliveryLoading}
-                onClick={
-                  deliveryTarget.mode === "real"
-                    ? submitDeliveryReal
-                    : submitDeliveryPlan
-                }
-                className={primaryBtn}
-              >
-                {busy ? "Đang lưu…" : "LƯU"}
-              </button>
-            )
-          }
-        >
-          {/* Summary bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs">
-            <div>
-              <div className="text-slate-500 font-semibold">Xe</div>
-              <div className="font-bold">
-                {deliveryTarget.detail.vehiclePlate || deliveryTarget.detail.vehicleId}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-500 font-semibold">Hàng hóa</div>
-              <div className="font-bold truncate">
-                {deliveryTarget.detail.productName || deliveryTarget.detail.productId}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-500 font-semibold">KH giao</div>
-              <div className="font-bold tabular-nums">
-                {fmtNum(deliveryTarget.detail.quantity)}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-500 font-semibold">Thực nhận</div>
-              <div className="font-bold tabular-nums">
-                {fmtNum(deliveryTarget.detail.actualReceived ?? 0)}
-              </div>
-            </div>
-            <div>
-              <div className="text-slate-500 font-semibold">Thực giao</div>
-              <div className="font-bold tabular-nums">
-                {fmtNum(deliveryTarget.detail.actualDelivered ?? 0)}
-              </div>
-            </div>
-          </div>
-
-          {deliveryLoading ? (
-            <div className="text-center text-slate-400 py-6 text-sm">Đang tải dòng giao…</div>
-          ) : deliveryRows.length === 0 ? (
-            <div className="text-center text-slate-400 py-6 text-sm">
-              Chưa có dòng giao hàng cho chi tiết này
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {deliveryRows.map((r, idx) => (
-                <div
-                  key={r.deliveryId}
-                  className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-center border border-slate-200 rounded-xl p-2.5 bg-white"
-                >
-                  <div className="sm:col-span-1">
-                    <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
-                      Khách
-                    </div>
-                    {deliveryTarget.mode === "view" ? (
-                      <div className="text-sm font-medium truncate px-2 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
-                        {r.customerName || r.customerDetail || r.customerId}
-                      </div>
-                    ) : (
-                      <MasterPicker
-                        type="KH"
-                        value={r.customerId}
-                        displayName={r.customerName || r.customerDetail || r.customerId}
-                        onChange={(id, name) => {
-                          setDeliveryRows((rows) =>
-                            rows.map((x, i) =>
-                              i === idx
-                                ? { ...x, customerId: id, customerName: name }
-                                : x
-                            )
-                          );
-                        }}
-                      />
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
-                      KH giao
-                    </div>
-                    {deliveryTarget.mode === "plan" ? (
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={r.plannedQty ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDeliveryRows((rows) =>
-                            rows.map((x, i) =>
-                              i === idx
-                                ? { ...x, plannedQty: v === "" ? 0 : Number(v) }
-                                : x
-                            )
-                          );
-                        }}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg tabular-nums text-center"
-                      />
-                    ) : (
-                      <div className="text-sm tabular-nums px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-center">
-                        {fmtNum(r.plannedQty)}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
-                      Thực giao
-                    </div>
-                    {deliveryTarget.mode === "real" ? (
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={r.actualQty ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDeliveryRows((rows) =>
-                            rows.map((x, i) =>
-                              i === idx
-                                ? { ...x, actualQty: v === "" ? 0 : Number(v) }
-                                : x
-                            )
-                          );
-                        }}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg tabular-nums text-center"
-                      />
-                    ) : (
-                      <div className="text-sm tabular-nums px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-center">
-                        {fmtNum(r.actualQty ?? 0)}
-                      </div>
-                    )}
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500 font-semibold sm:hidden">
-                      Ngày giao
-                    </div>
-                    {deliveryTarget.mode === "real" ? (
-                      <input
-                        type="date"
-                        value={r.deliveryDate || ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setDeliveryRows((rows) =>
-                            rows.map((x, i) =>
-                              i === idx ? { ...x, deliveryDate: v } : x
-                            )
-                          );
-                        }}
-                        className="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-lg"
-                      />
-                    ) : (
-                      <div className="text-sm px-2 py-1.5 rounded-lg bg-slate-100 border border-slate-200 text-center">
-                        {fmtDateVN(r.deliveryDate)}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 justify-end">
-                    <div className="text-[10px] text-slate-400 font-mono truncate max-w-[90px]">
-                      {r.deliveryId?.startsWith("NEW-") ? "mới" : r.deliveryId}
-                    </div>
-                    {deliveryTarget.mode === "plan" && (
-                      <button
-                        type="button"
-                        title="Xóa dòng"
-                        onClick={() =>
-                          setDeliveryRows((rows) => rows.filter((_, i) => i !== idx))
-                        }
-                        className="w-7 h-7 rounded-lg bg-red-500 text-white text-sm font-bold"
-                      >
-                        −
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {deliveryTarget.mode === "plan" && (
-            <button
-              type="button"
-              onClick={() => {
-                setDeliveryRows((rows) => [
-                  ...rows,
-                  {
-                    deliveryId: `NEW-${Date.now()}`,
-                    detailId: deliveryTarget.detail.detailId,
-                    customerId: "",
-                    customerName: "",
-                    plannedQty: 0,
-                    actualQty: 0,
-                  },
-                ]);
-              }}
-              className="text-sm font-semibold text-sky-600 hover:underline"
-            >
-              + Thêm khách kế hoạch
-            </button>
-          )}
-        </ModalShell>
+        <DeliveryEditorModal
+          mode={deliveryTarget.mode}
+          summary={summaryFromDetail(deliveryTarget.detail)}
+          initialRows={deliveryRows}
+          onClose={() => {
+            if (!busy) setDeliveryTarget(null);
+          }}
+          onSaved={() => load(page)}
+        />
       )}
     </div>
   );

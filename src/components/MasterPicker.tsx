@@ -154,20 +154,22 @@ export function MasterPicker({
           setOpen((o) => !o);
           if (!open) await load();
         }}
-        className={`w-full text-left px-3 py-2.5 rounded-lg text-sm border ${
+        className={`w-full text-left px-3 py-2 rounded-lg text-sm border whitespace-normal break-words leading-snug min-h-[40px] ${
           disabled
             ? "bg-slate-100 border-slate-200 text-slate-600"
             : "bg-white border-slate-300 hover:border-sky-400"
         }`}
       >
-        {label || (
-          <span className="text-slate-400">
-            {placeholder ||
-              (type === "HH" && supplierId
-                ? "Chọn hàng theo NCC…"
-                : `Chọn ${type}…`)}
-          </span>
-        )}
+        <span className="block whitespace-normal break-words">
+          {label || (
+            <span className="text-slate-400">
+              {placeholder ||
+                (type === "HH" && supplierId
+                  ? "Chọn hàng theo NCC…"
+                  : `Chọn ${type}…`)}
+            </span>
+          )}
+        </span>
       </button>
       {open && !disabled && (
         <div className="absolute z-50 mt-1 left-0 right-0 bg-white border border-slate-200 rounded-xl shadow-xl max-h-64 flex flex-col">
