@@ -5,7 +5,7 @@
  * - Tất cả CT active (không Hủy/Xóa) = DONE → Đơn DONE
  * - Có ít nhất 1 CT RECEIVED/DELIVERING/DONE → Đang xử lý
  * - Tất cả active = ORDERED/NEW → Khởi tạo (hoặc giữ)
- * - Không còn CT active → Hủy đơn
+ * - Không còn CT active → Hủy đơn ()
  */
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
