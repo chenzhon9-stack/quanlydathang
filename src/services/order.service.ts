@@ -166,7 +166,6 @@ export class OrderService {
     const details = await DetailRepository.findMany({
       year: y,
       orderId,
-      pageSize: 500,
     });
     if (!details.length) {
       // vẫn cho hủy header nếu không có CT
