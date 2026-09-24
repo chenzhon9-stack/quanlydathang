@@ -1,6 +1,7 @@
 "use client";
 
 import { STATUS_CHIP } from "@/lib/status-styles";
+import { matchSearchVn } from "@/lib/vn-search";
 
 export type StatusOption = { key: string; label: string };
 
