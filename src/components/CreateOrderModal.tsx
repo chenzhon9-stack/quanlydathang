@@ -106,6 +106,21 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
       setErr("Tối đa 6 xe / đơn");
       return;
     }
+    // Không trùng (xe + hàng) trong cùng đơn — V21
+    const pairSeen = new Set<string>();
+    for (const d of details) {
+      const pair = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
+      if (d.vehicleId && d.productId) {
+        if (pairSeen.has(pair)) {
+          setErr(
+            `Trùng biển số xe + hàng hóa trong đơn: ${d.vehicleName || d.vehicleId} / ${d.productName || d.productId}`
+          );
+          return;
+        }
+        pairSeen.add(pair);
+      }
+    }
+
     for (const d of details) {
       if (!d.transportTypeId) {
         setErr("Chọn hình thức vận tải trước khi chọn xe");
@@ -213,11 +228,32 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
               type="NCC"
               value={supplierId}
               displayName={supplierName}
+              disabled={details.some((d) => !!d.productId)}
+              placeholder={
+                details.some((d) => !!d.productId)
+                  ? "Đã chọn hàng — không đổi NCC"
+                  : "Bấm chọn NCC…"
+              }
               onChange={(id, name) => {
+                // Chỉ cho đổi khi chưa gắn hàng hóa nào
+                if (details.some((d) => !!d.productId)) return;
                 setSupplierId(id);
                 setSupplierName(name);
+                // đổi NCC → clear HH đã chọn (phòng hờ)
+                setDetails((rows) =>
+                  rows.map((x) => ({
+                    ...x,
+                    productId: "",
+                    productName: "",
+                  }))
+                );
               }}
             />
+            {details.some((d) => !!d.productId) && (
+              <p className="text-[11px] text-amber-700 mt-1">
+                Đã chọn hàng hóa — không thể đổi nhà cung cấp (hàng thuộc NCC).
+              </p>
+            )}
           </div>
 
           {details.map((d, di) => {
@@ -228,21 +264,62 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                 key={d.key}
                 className="border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50/50"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="text-xs font-bold text-slate-700">
                     Chọn — Hình thức VT; Xe &amp; Hàng; Khách hàng #{di + 1}
                   </div>
-                  {details.length > 1 && (
-                    <button
-                      type="button"
-                      className="text-xs text-red-600 font-semibold"
-                      onClick={() =>
-                        setDetails((rows) => rows.filter((_, i) => i !== di))
-                      }
-                    >
-                      ×
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {di > 0 && (
+                      <button
+                        type="button"
+                        title="Copy khối xe phía trên"
+                        className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
+                        onClick={() => {
+                          setDetails((rows) => {
+                            const src = rows[di - 1];
+                            if (!src) return rows;
+                            return rows.map((x, i) => {
+                              if (i !== di) return x;
+                              return {
+                                ...x,
+                                transportTypeId: src.transportTypeId,
+                                transportTypeName: src.transportTypeName,
+                                canChonDvt: src.canChonDvt,
+                                carrierId: src.carrierId,
+                                carrierName: src.carrierName,
+                                vehicleId: src.vehicleId,
+                                vehicleName: src.vehicleName,
+                                productId: src.productId,
+                                productName: src.productName,
+                                regionId: src.regionId,
+                                regionName: src.regionName,
+                                note: src.note,
+                                deliveries: src.deliveries.map((g) => ({
+                                  ...g,
+                                  key: `d-${Date.now()}-${Math.random()
+                                    .toString(36)
+                                    .slice(2, 6)}`,
+                                })),
+                              };
+                            });
+                          });
+                        }}
+                      >
+                        📋 Copy khối xe
+                      </button>
+                    )}
+                    {details.length > 1 && (
+                      <button
+                        type="button"
+                        className="w-7 h-7 rounded-lg bg-red-50 text-red-600 border border-red-200 font-bold"
+                        onClick={() =>
+                          setDetails((rows) => rows.filter((_, i) => i !== di))
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* HTVT */}
