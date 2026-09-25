@@ -114,7 +114,8 @@ function classifyPhanLoai(raw: string): "Bao" | "Roi" | "Khac" {
     .toLowerCase()
     .trim();
   if (s === "bao") return "Bao";
-  if (s === "roi") return "Roi";
+  // "roi" / "rời" / "rời hàng" → Roi (bucket nội bộ; label UI có thể là Rời)
+  if (s === "roi" || s.startsWith("roi")) return "Roi";
   return "Khac";
 }
 
@@ -242,8 +243,10 @@ export async function GET(req: NextRequest) {
         if (isExcludedDetailStatus(d.status)) continue;
         const qty = d.actualReceived || 0;
         if (qty <= 0) continue;
+        // Chỉ ngày nhận — parity báo cáo Thực nhận (không fallback orderDate)
+        const dt = (d.receivedDate || "").slice(0, 10);
+        if (!dt) continue;
         if (!isMainPhanLoai(d.productId, d.phanLoai)) continue;
-        const dt = d.receivedDate || d.orderDate || "";
         const key = groupKey(d.productId, d.supplierId, d.phanLoai);
         if (inRange(dt, periods.currentFrom, periods.currentTo))
           bump(key, "current", qty);

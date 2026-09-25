@@ -239,9 +239,11 @@ export class ReportBuilderService {
 
     const rows: Record<string, unknown>[] = [];
     for (const d of details) {
-      const dt = d.receivedDate || "";
-      if (params.fromDate && dt && dt < params.fromDate) continue;
-      if (params.toDate && dt && dt > params.toDate) continue;
+      const dt = (d.receivedDate || "").slice(0, 10);
+      // Bắt buộc có ngày nhận khi lọc kỳ — parity dashboard volume
+      if (!dt) continue;
+      if (params.fromDate && dt < params.fromDate) continue;
+      if (params.toDate && dt > params.toDate) continue;
       if (params.filters?.ncc?.length && !params.filters.ncc.includes(d.supplierId))
         continue;
       if (
