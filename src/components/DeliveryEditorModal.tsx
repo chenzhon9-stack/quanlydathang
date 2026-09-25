@@ -362,15 +362,19 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "plan" ? (
                   <DecimalInput
-                    value={formatDecimalVN(r.plannedQty)}
+                    value={
+                      qtyDisp[`p-${idx}`] ??
+                      formatDecimalVN(r.plannedQty)
+                    }
                     onValueChange={(display, num) => {
-                      setRows((prev) =>
-                        prev.map((x, i) =>
-                          i === idx
-                            ? { ...x, plannedQty: num == null ? 0 : num }
-                            : x
-                        )
-                      );
+                      setQtyDisp((d) => ({ ...d, [`p-${idx}`]: display }));
+                      if (num != null) {
+                        setRows((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, plannedQty: num } : x
+                          )
+                        );
+                      }
                     }}
                   />
                 ) : (
@@ -387,15 +391,19 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "real" ? (
                   <DecimalInput
-                    value={formatDecimalVN(r.actualQty)}
-                    onValueChange={(_display, num) => {
-                      setRows((prev) =>
-                        prev.map((x, i) =>
-                          i === idx
-                            ? { ...x, actualQty: num == null ? 0 : num }
-                            : x
-                        )
-                      );
+                    value={
+                      qtyDisp[`a-${idx}`] ??
+                      formatDecimalVN(r.actualQty)
+                    }
+                    onValueChange={(display, num) => {
+                      setQtyDisp((d) => ({ ...d, [`a-${idx}`]: display }));
+                      if (num != null) {
+                        setRows((prev) =>
+                          prev.map((x, i) =>
+                            i === idx ? { ...x, actualQty: num } : x
+                          )
+                        );
+                      }
                     }}
                   />
                 ) : (

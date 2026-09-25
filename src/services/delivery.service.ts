@@ -351,6 +351,25 @@ export class DeliveryService {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
     const y = year ?? currentYearVN();
+    // TyleChiahet từ HH của chi tiết — parity V21 saveDeliveryData plan
+    let tyleChiahet = 0;
+    let tenHH = detailId;
+    try {
+      const ct = await DetailRepository.findById(detailId, y);
+      if (ct?.productId) {
+        const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+        const hh = hhRows.find(
+          (r) => String(r.MaHH || "").trim() === String(ct.productId).trim()
+        );
+        if (hh) {
+          tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
+          tenHH = String(hh.TenHangHoa || ct.productId);
+        }
+      }
+    } catch {
+      /* optional */
+    }
+
     const existing = await DeliveryRepository.findMany({
       year: y,
       detailId,
@@ -391,6 +410,12 @@ export class DeliveryService {
       }
       if (!(khg > 0)) {
         throw { code: "VALIDATION_ERROR", message: "KH giao phải > 0" };
+      }
+      if (!validateStep(khg, tyleChiahet)) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Kế hoạch giao cho ${tenHH} phải chia hết cho ${tyleChiahet} tấn. Giá trị hiện tại: ${khg} tấn.`,
+        };
       }
       if (r.deliveryId && !isTempClientId(r.deliveryId) && existingIds.has(r.deliveryId)) {
         await updateSheetRowByKey(

@@ -19,9 +19,12 @@ export function qty3(n: number): number {
  * V21: |value/step − round(value/step)| < 1e-9
  */
 export function validateStep(value: number, step: number): boolean {
+  // V21 _validateStep_: step<=0 → true; |value/step − round| < 1e-9
+  // qty3 trước khi chia để tránh lỗi float (0.30000000004 tấn)
   const s = Number(step) || 0;
   if (s <= EPS) return true;
-  const v = Number(value) || 0;
+  const v = qty3(Number(value) || 0);
+  if (Math.abs(v) < EPS) return true; // 0 luôn chia hết
   const ratio = v / s;
   return Math.abs(ratio - Math.round(ratio)) < 1e-9;
 }
