@@ -17,7 +17,32 @@ import {
   summaryFromDetail,
 } from "@/components/DeliveryEditorModal";
 import { statusRowClass } from "@/lib/status-styles";
+import {
+  ColumnCustomizer,
+  ValueFilterBar,
+} from "@/components/ColumnCustomizer";
+import {
+  type ColumnDef,
+  type ColumnState,
+  loadColumnState,
+  resolveColumns,
+} from "@/lib/column-prefs";
 import type { Delivery, OrderDetail } from "@/types";
+
+
+const DETAIL_COLUMNS: ColumnDef[] = [
+  { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
+  { key: "id", label: "ID", defaultVisible: true },
+  { key: "product", label: "Hàng hóa", defaultVisible: true, filterable: true },
+  { key: "qty", label: "KH đặt", defaultVisible: true },
+  { key: "recvDate", label: "Ngày nhận", defaultVisible: true },
+  { key: "actualRecv", label: "Thực nhận", defaultVisible: true },
+  { key: "actualDel", label: "Thực giao", defaultVisible: true },
+  { key: "remain", label: "Tồn", defaultVisible: true },
+  { key: "status", label: "Trạng thái", defaultVisible: true, filterable: true },
+  { key: "note", label: "Ghi chú", defaultVisible: true },
+  { key: "actions", label: "Hành động", defaultVisible: true },
+];
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Mới tạo",
@@ -102,6 +127,13 @@ function ModalShell({
           </div>
         )}
       </div>
+      <ColumnCustomizer
+        open={colOpen}
+        tabKey="details"
+        columns={DETAIL_COLUMNS}
+        onClose={() => setColOpen(false)}
+        onApply={setColState}
+      />
     </div>
   );
 }
@@ -216,6 +248,12 @@ export default function DetailsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [colOpen, setColOpen] = useState(false);
+  const [colState, setColState] = useState<ColumnState>(() =>
+    loadColumnState("details", DETAIL_COLUMNS)
+  );
+  const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
+
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
@@ -364,6 +402,50 @@ export default function DetailsPage() {
       return matchSearch(hay, search);
     });
   }, [items, statuses, search]);
+
+  const visibleCols = useMemo(
+    () => resolveColumns(DETAIL_COLUMNS, colState),
+    [colState]
+  );
+  const colOn = (k: string) => visibleCols.some((c) => c.key === k);
+
+  const filteredCols = useMemo(() => {
+    return filtered.filter((d) => {
+      if (valFilters.status?.length) {
+        const st = STATUS_LABEL[d.status] || d.status;
+        if (!valFilters.status.includes(st) && !valFilters.status.includes(d.status))
+          return false;
+      }
+      if (valFilters.product?.length) {
+        const p = d.productName || d.productId || "";
+        if (!valFilters.product.includes(p)) return false;
+      }
+      if (valFilters.plate?.length) {
+        const pl = d.vehiclePlate || d.vehicleId || "";
+        if (!valFilters.plate.includes(pl)) return false;
+      }
+      return true;
+    });
+  }, [filtered, valFilters]);
+
+  const filterOptions = useMemo(() => {
+    const plates = new Set<string>();
+    const products = new Set<string>();
+    const statuses = new Set<string>();
+    for (const d of filtered) {
+      if (d.vehiclePlate || d.vehicleId)
+        plates.add(d.vehiclePlate || d.vehicleId);
+      if (d.productName || d.productId)
+        products.add(d.productName || d.productId);
+      statuses.add(STATUS_LABEL[d.status] || d.status);
+    }
+    return [
+      { key: "plate", label: "Biển số", values: [...plates].sort() },
+      { key: "product", label: "Hàng hóa", values: [...products].sort() },
+      { key: "status", label: "Trạng thái", values: [...statuses].sort() },
+    ];
+  }, [filtered]);
+
 
   const displayGroups = useMemo(() => {
     if (!groupByDate) return [{ key: "all", items: filtered }];
@@ -556,9 +638,21 @@ export default function DetailsPage() {
           >
             Xuất Excel
           </button>
+          <button
+            type="button"
+            onClick={() => setColOpen(true)}
+            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+          >
+            Tùy chỉnh cột
+          </button>
         </div>
       </div>
 
+      <ValueFilterBar
+        filters={valFilters}
+        options={filterOptions}
+        onChange={setValFilters}
+      />
       <ListToolbar
         search={search}
         onSearch={setSearch}
@@ -650,17 +744,20 @@ export default function DetailsPage() {
               <table className="min-w-full text-sm">
                 <thead>
                   <tr className="bg-[#d9e5f0] text-slate-800 text-xs">
-                    <th className="px-2 py-2 text-left font-bold">Biển số</th>
-                    <th className="px-2 py-2 text-left font-bold">ID</th>
-                    <th className="px-2 py-2 text-left font-bold">Hàng hóa</th>
-                    <th className="px-2 py-2 text-right font-bold">KH đặt</th>
-                    <th className="px-2 py-2 text-left font-bold">Ngày nhận</th>
-                    <th className="px-2 py-2 text-right font-bold">Thực nhận</th>
-                    <th className="px-2 py-2 text-right font-bold">Thực giao</th>
-                    <th className="px-2 py-2 text-right font-bold">Tồn</th>
-                    <th className="px-2 py-2 text-left font-bold">Trạng thái</th>
-                    <th className="px-2 py-2 text-left font-bold">Ghi chú</th>
-                    <th className="px-2 py-2 text-right font-bold">Hành động</th>
+                    {visibleCols.map((c) => (
+                      <th
+                        key={c.key}
+                        className={`px-2 py-2 font-bold ${
+                          ["qty", "actualRecv", "actualDel", "remain"].includes(c.key)
+                            ? "text-right"
+                            : c.key === "actions"
+                              ? "text-right"
+                              : "text-left"
+                        }`}
+                      >
+                        {c.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -681,46 +778,80 @@ export default function DetailsPage() {
                           key={d.detailId}
                           className={`border-t border-slate-200/80 ${statusRowClass(d.status)}`}
                         >
-                          <td className="px-2 py-2">
-                            <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                            {transportSub(d) && (
-                              <div className="text-[10px] opacity-70 mt-0.5">
-                                {transportSub(d)}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-2 py-2 font-mono text-[11px] text-blue-700">
-                            {d.detailId}
-                          </td>
-                          <td className="px-2 py-2 font-medium">
-                            {d.productName || d.productId}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums">
-                            {fmtNum(d.quantity)}
-                          </td>
-                          <td className="px-2 py-2 text-xs">
-                            {fmtDateVN(d.receivedDate)}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums font-medium">
-                            {fmtNum(d.actualReceived ?? 0)}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums">
-                            {fmtNum(d.actualDelivered ?? 0)}
-                          </td>
-                          <td className="px-2 py-2 text-right tabular-nums font-semibold">
-                            {fmtNum(tonConLai(d))}
-                          </td>
-                          <td className="px-2 py-2">
-                            <StatusBadge
-                              status={STATUS_LABEL[d.status] || d.status}
-                            />
-                          </td>
-                          <td className="px-2 py-2 text-xs max-w-[120px] truncate">
-                            {d.note || ""}
-                          </td>
-                          <td className="px-2 py-2">
-                            <DetailActions d={d} h={handlers} />
-                          </td>
+                          {visibleCols.map((c) => {
+                            if (c.key === "plate")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                  {transportSub(d) && (
+                                    <div className="text-[10px] opacity-70 mt-0.5">
+                                      {transportSub(d)}
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            if (c.key === "id")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px] text-blue-700">
+                                  {d.detailId}
+                                </td>
+                              );
+                            if (c.key === "product")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-medium">
+                                  {d.productName || d.productId}
+                                </td>
+                              );
+                            if (c.key === "qty")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums">
+                                  {fmtNum(d.quantity)}
+                                </td>
+                              );
+                            if (c.key === "recvDate")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {fmtDateVN(d.receivedDate)}
+                                </td>
+                              );
+                            if (c.key === "actualRecv")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums font-medium">
+                                  {fmtNum(d.actualReceived ?? 0)}
+                                </td>
+                              );
+                            if (c.key === "actualDel")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums">
+                                  {fmtNum(d.actualDelivered ?? 0)}
+                                </td>
+                              );
+                            if (c.key === "remain")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums font-semibold">
+                                  {fmtNum(tonConLai(d))}
+                                </td>
+                              );
+                            if (c.key === "status")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
+                                </td>
+                              );
+                            if (c.key === "note")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs max-w-[120px] truncate">
+                                  {d.note || ""}
+                                </td>
+                              );
+                            if (c.key === "actions")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <DetailActions d={d} h={handlers} />
+                                </td>
+                              );
+                            return <td key={c.key} />;
+                          })}
                         </tr>
                       ))}
                     </React.Fragment>
@@ -728,7 +859,7 @@ export default function DetailsPage() {
                 </tbody>
               </table>
             </div>
-            {filtered.length === 0 && !err && (
+            {filteredCols.length === 0 && !err && (
               <div className="text-center py-12 text-slate-400 text-sm">
                 Không có chi tiết
               </div>

@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportSubNav } from "@/components/ReportSubNav";
 import { REPORT_SCHEMAS, type ReportType } from "@/lib/reports/dynamic-group";
+import {
+  ColumnCustomizer,
+  ValueFilterBar,
+} from "@/components/ColumnCustomizer";
+import {
+  type ColumnDef,
+  type ColumnState,
+  loadColumnState,
+  resolveColumns,
+} from "@/lib/column-prefs";
 
 function defaultRange(): { from: string; to: string } {
   const now = new Date();
@@ -39,6 +49,9 @@ export function ReportBuilderView({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [page, setPage] = useState(1);
+  const [colOpen, setColOpen] = useState(false);
+  const [colState, setColState] = useState<ColumnState | null>(null);
+  const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
 
   const load = useCallback(
     async (p = 1) => {
@@ -91,23 +104,62 @@ export function ReportBuilderView({
     });
   }
 
+  const allCols: ColumnDef[] = [
+    ...groupBy.map((k) => {
+      const d = schema.dimensions.find((x) => x.key === k);
+      return {
+        key: k,
+        label: d?.header || k,
+        defaultVisible: true,
+        filterable: true,
+      };
+    }),
+    ...schema.measures.map((m) => ({
+      key: m.key,
+      label: m.header,
+      defaultVisible: true,
+    })),
+  ];
+
+  const tabKey = `report:${type}`;
+  const effectiveColState: ColumnState =
+    colState || loadColumnState(tabKey, allCols);
+  const visibleColDefs = resolveColumns(allCols, effectiveColState);
+
   const displayCols: {
     key: string;
     header: string;
     isMeasure: boolean;
     format?: "int" | "num" | string;
-  }[] = [
-    ...groupBy.map((k) => {
-      const d = schema.dimensions.find((x) => x.key === k);
-      return { key: k, header: d?.header || k, isMeasure: false as const };
-    }),
-    ...schema.measures.map((m) => ({
-      key: m.key,
-      header: m.header,
-      isMeasure: true as const,
-      format: m.format as "int" | "num" | string | undefined,
-    })),
-  ];
+  }[] = visibleColDefs.map((c) => {
+    const m = schema.measures.find((x) => x.key === c.key);
+    if (m) {
+      return {
+        key: c.key,
+        header: c.label,
+        isMeasure: true as const,
+        format: m.format as "int" | "num" | string | undefined,
+      };
+    }
+    return { key: c.key, header: c.label, isMeasure: false as const };
+  });
+
+  const filteredItems = items.filter((row) => {
+    for (const [k, vals] of Object.entries(valFilters)) {
+      if (!vals?.length) continue;
+      const cell = String(row[k] ?? "");
+      if (!vals.includes(cell)) return false;
+    }
+    return true;
+  });
+
+  const filterOptions = groupBy.map((k) => {
+    const d = schema.dimensions.find((x) => x.key === k);
+    const values = [
+      ...new Set(items.map((r) => String(r[k] ?? "")).filter(Boolean)),
+    ].sort();
+    return { key: k, label: d?.header || k, values };
+  });
 
   return (
     <div className="space-y-4 max-w-full">
@@ -155,7 +207,19 @@ export function ReportBuilderView({
           >
             Chấp nhận
           </button>
+          <button
+            type="button"
+            onClick={() => setColOpen(true)}
+            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+          >
+            Tùy chỉnh cột
+          </button>
         </div>
+        <ValueFilterBar
+          filters={valFilters}
+          options={filterOptions}
+          onChange={setValFilters}
+        />
 
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
@@ -210,7 +274,7 @@ export function ReportBuilderView({
                 </tr>
               </thead>
               <tbody>
-                {items.map((row, i) => (
+                {filteredItems.map((row, i) => (
                   <tr
                     key={i}
                     className="border-t border-slate-100 hover:bg-slate-50"
@@ -231,7 +295,7 @@ export function ReportBuilderView({
                     ))}
                   </tr>
                 ))}
-                {!items.length && (
+                {!filteredItems.length && (
                   <tr>
                     <td
                       colSpan={displayCols.length}
@@ -242,7 +306,7 @@ export function ReportBuilderView({
                   </tr>
                 )}
               </tbody>
-              {items.length > 0 && (
+              {filteredItems.length > 0 && (
                 <tfoot>
                   <tr className="bg-slate-50 border-t-2 border-slate-200 font-semibold text-sm">
                     {displayCols.map((c, i) => (
@@ -286,6 +350,13 @@ export function ReportBuilderView({
           )}
         </div>
       )}
+      <ColumnCustomizer
+        open={colOpen}
+        tabKey={tabKey}
+        columns={allCols}
+        onClose={() => setColOpen(false)}
+        onApply={(st) => setColState(st)}
+      />
     </div>
   );
 }

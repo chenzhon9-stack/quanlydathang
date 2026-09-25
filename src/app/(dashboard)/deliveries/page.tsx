@@ -10,6 +10,16 @@ import {
 import type { Delivery } from "@/types";
 import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
 import { statusRowClass } from "@/lib/status-styles";
+import {
+  ColumnCustomizer,
+  ValueFilterBar,
+} from "@/components/ColumnCustomizer";
+import {
+  type ColumnDef,
+  type ColumnState,
+  loadColumnState,
+  resolveColumns,
+} from "@/lib/column-prefs";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import {
   DeliveryEditorModal,
@@ -23,6 +33,19 @@ function fmtDateVN(ymd: string) {
   if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
   return ymd;
 }
+
+
+const DELIVERY_COLUMNS: ColumnDef[] = [
+  { key: "id", label: "ID Giao hàng", defaultVisible: true },
+  { key: "detailId", label: "ID Chi tiết", defaultVisible: true },
+  { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
+  { key: "status", label: "Trạng thái xe", defaultVisible: true, filterable: true },
+  { key: "customer", label: "Khách hàng", defaultVisible: true, filterable: true },
+  { key: "planned", label: "KH giao", defaultVisible: true },
+  { key: "actual", label: "Thực giao", defaultVisible: true },
+  { key: "date", label: "Ngày giao", defaultVisible: true },
+  { key: "actions", label: "Hành động", defaultVisible: true },
+];
 
 /** V21 deliveryActionText theo trạng thái CT */
 function actionLabel(d: Delivery) {
@@ -66,6 +89,12 @@ export default function DeliveriesPage() {
     mode: DeliveryModalMode;
   } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [colOpen, setColOpen] = useState(false);
+  const [colState, setColState] = useState<ColumnState>(() =>
+    loadColumnState("delivery", DELIVERY_COLUMNS)
+  );
+  const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
+
   const pageSize = 100;
 
   const load = useCallback(async (p: number) => {
@@ -128,9 +157,50 @@ export default function DeliveriesPage() {
     });
   }, [items, statuses, search]);
 
+  const visibleCols = useMemo(
+    () => resolveColumns(DELIVERY_COLUMNS, colState),
+    [colState]
+  );
+
+  const filteredCols = useMemo(() => {
+    return filtered.filter((d) => {
+      if (valFilters.status?.length) {
+        const st = String(d.detailStatus || "");
+        if (!valFilters.status.includes(st)) return false;
+      }
+      if (valFilters.customer?.length) {
+        const c = d.customerName || d.customerDetail || d.customerId || "";
+        if (!valFilters.customer.includes(c)) return false;
+      }
+      if (valFilters.plate?.length) {
+        const pl = d.vehiclePlate || "";
+        if (!valFilters.plate.includes(pl)) return false;
+      }
+      return true;
+    });
+  }, [filtered, valFilters]);
+
+  const filterOptions = useMemo(() => {
+    const plates = new Set<string>();
+    const customers = new Set<string>();
+    const statuses = new Set<string>();
+    for (const d of filtered) {
+      if (d.vehiclePlate) plates.add(d.vehiclePlate);
+      const c = d.customerName || d.customerDetail || d.customerId;
+      if (c) customers.add(c);
+      if (d.detailStatus) statuses.add(String(d.detailStatus));
+    }
+    return [
+      { key: "plate", label: "Biển số", values: [...plates].sort() },
+      { key: "customer", label: "Khách hàng", values: [...customers].sort() },
+      { key: "status", label: "Trạng thái xe", values: [...statuses].sort() },
+    ];
+  }, [filtered]);
+
+
   /** Gom theo ngày đặt lệnh (V21) — fallback ngày giao */
   const displayGroups = useMemo(() => {
-    if (!groupByDate) return [{ key: "all", items: filtered }];
+    if (!groupByDate) return [{ key: "all", items: filteredCols }];
     const byDate: Record<string, Delivery[]> = {};
     for (const d of filtered) {
       const key = d.orderDate || d.deliveryDate || "—";
@@ -185,6 +255,20 @@ export default function DeliveriesPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 items-center justify-between">
+        <ValueFilterBar
+          filters={valFilters}
+          options={filterOptions}
+          onChange={setValFilters}
+        />
+        <button
+          type="button"
+          onClick={() => setColOpen(true)}
+          className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+        >
+          Tùy chỉnh cột
+        </button>
+      </div>
       <ListToolbar
         search={search}
         onSearch={setSearch}
@@ -282,7 +366,7 @@ export default function DeliveriesPage() {
                 ))}
               </div>
             ))}
-            {filtered.length === 0 && !err && (
+            {filteredCols.length === 0 && !err && (
               <div className="text-center py-12 text-slate-400 text-sm">Không có lượt giao</div>
             )}
           </div>
@@ -292,15 +376,21 @@ export default function DeliveriesPage() {
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wide">
-                    <th className="px-3 py-2.5 text-left font-semibold">Mã GH</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Chi tiết</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Xe</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Khách hàng</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">KH</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Thực giao</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Ngày giao</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Hành động</th>
+                  <tr className="bg-slate-100 text-slate-700 text-xs">
+                    {visibleCols.map((c) => (
+                      <th
+                        key={c.key}
+                        className={`px-3 py-2.5 font-semibold ${
+                          ["planned", "actual"].includes(c.key)
+                            ? "text-right"
+                            : c.key === "actions"
+                              ? "text-right"
+                              : "text-left"
+                        }`}
+                      >
+                        {c.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -308,7 +398,7 @@ export default function DeliveriesPage() {
                     <React.Fragment key={g.key}>
                       {groupByDate && (
                         <tr className="bg-[#1a3a5c] text-white">
-                          <td colSpan={8} className="px-3 py-2 text-xs font-medium">
+                          <td colSpan={Math.max(visibleCols.length, 1)} className="px-3 py-2 text-xs font-medium">
                             📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
                             <span className="ml-2 opacity-70">({g.items.length} lượt)</span>
                           </td>
@@ -316,39 +406,79 @@ export default function DeliveriesPage() {
                       )}
                       {g.items.map((d) => (
                         <tr key={d.deliveryId} className={`border-t border-slate-200/80 ${statusRowClass(d.detailStatus || "")}`}>
-                          <td className="px-3 py-2.5 font-mono text-xs">{d.deliveryId}</td>
-                          <td className="px-3 py-2.5 text-blue-700 text-xs font-mono">{d.detailId}</td>
-                          <td className="px-3 py-2.5">
-                            <PlateBadge plate={d.vehiclePlate} />
-                          </td>
-                          <td className="px-3 py-2.5 font-medium">
-                            {d.customerName || d.customerDetail || d.customerId}
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums">
-                            {d.plannedQty.toFixed(2)}
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
-                            {d.actualQty?.toFixed(2) ?? "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-xs text-slate-600">
-                            {d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"}
-                          </td>
-                          <td className="px-3 py-2.5 text-right">
-                            <button
-                              onClick={() => {
-                          setModalTarget({ delivery: d, mode: modeFromDelivery(d) });
-                        }}
-                              className={`px-2.5 py-1 text-[11px] font-bold rounded border shadow-sm ${
-                                isViewOnly(d)
-                                  ? "bg-white text-slate-600 border-slate-300"
-                                  : actionLabel(d) === "Sửa"
-                                    ? "bg-white text-slate-700 border-slate-300"
-                                    : "bg-sky-500 text-white border-sky-600"
-                              }`}
-                            >
-                              {actionLabel(d)}
-                            </button>
-                          </td>
+                          {visibleCols.map((c) => {
+                            if (c.key === "id")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-mono text-xs">
+                                  {d.deliveryId}
+                                </td>
+                              );
+                            if (c.key === "detailId")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-blue-700 text-xs font-mono">
+                                  {d.detailId}
+                                </td>
+                              );
+                            if (c.key === "plate")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5">
+                                  <PlateBadge plate={d.vehiclePlate} />
+                                </td>
+                              );
+                            if (c.key === "status")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5">
+                                  <StatusBadge status={String(d.detailStatus || "—")} />
+                                </td>
+                              );
+                            if (c.key === "customer")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-medium">
+                                  {d.customerName || d.customerDetail || d.customerId}
+                                </td>
+                              );
+                            if (c.key === "planned")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right tabular-nums">
+                                  {d.plannedQty.toFixed(2)}
+                                </td>
+                              );
+                            if (c.key === "actual")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
+                                  {d.actualQty?.toFixed(2) ?? "—"}
+                                </td>
+                              );
+                            if (c.key === "date")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs text-slate-600">
+                                  {d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"}
+                                </td>
+                              );
+                            if (c.key === "actions")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right">
+                                  <button
+                                    onClick={() => {
+                                      setModalTarget({
+                                        delivery: d,
+                                        mode: modeFromDelivery(d),
+                                      });
+                                    }}
+                                    className={`px-2.5 py-1 text-[11px] font-bold rounded border shadow-sm ${
+                                      isViewOnly(d)
+                                        ? "bg-white text-slate-600 border-slate-300"
+                                        : actionLabel(d) === "Sửa"
+                                          ? "bg-white text-slate-700 border-slate-300"
+                                          : "bg-sky-500 text-white border-sky-600"
+                                    }`}
+                                  >
+                                    {actionLabel(d)}
+                                  </button>
+                                </td>
+                              );
+                            return <td key={c.key} />;
+                          })}
                         </tr>
                       ))}
                     </React.Fragment>
@@ -356,7 +486,7 @@ export default function DeliveriesPage() {
                 </tbody>
               </table>
             </div>
-            {filtered.length === 0 && !err && (
+            {filteredCols.length === 0 && !err && (
               <div className="text-center py-12 text-slate-400 text-sm">Không có lượt giao</div>
             )}
           </div>
@@ -392,6 +522,13 @@ export default function DeliveriesPage() {
           onSaved={() => load(page)}
         />
       )}
+      <ColumnCustomizer
+        open={colOpen}
+        tabKey="delivery"
+        columns={DELIVERY_COLUMNS}
+        onClose={() => setColOpen(false)}
+        onApply={setColState}
+      />
     </div>
   );
 }
