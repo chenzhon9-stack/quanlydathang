@@ -463,40 +463,50 @@ export function OrderManageModal({
                       {b.isNew ? "Xe mới (chưa lưu)" : b.detailId} · {b.status}
                     </span>
                     <div className="flex gap-1">
-                      {bi > 0 && editable && (
+                      {editable && (
                         <button
                           type="button"
-                          className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-sky-50 text-sky-700 border border-sky-200"
+                          disabled={blocks.length >= 6}
+                          className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-sky-50 text-sky-700 border border-sky-200 disabled:opacity-40"
                           onClick={() => {
                             setBlocks((rows) => {
-                              const src = rows[bi - 1];
+                              if (rows.length >= 6) return rows;
+                              const src = rows[bi];
                               if (!src) return rows;
-                              return rows.map((x, i) =>
-                                i === bi
-                                  ? {
-                                      ...x,
-                                      transportTypeId: src.transportTypeId,
-                                      transportTypeName: src.transportTypeName,
-                                      canChonDvt: src.canChonDvt,
-                                      carrierId: src.carrierId,
-                                      carrierName: src.carrierName,
-                                      vehicleId: src.vehicleId,
-                                      vehicleName: src.vehicleName,
-                                      productId: src.productId,
-                                      productName: src.productName,
-                                      regionId: src.regionId,
-                                      regionName: src.regionName,
-                                      note: src.note,
-                                      deliveries: src.deliveries.map((g) => ({
-                                        ...emptyGh(),
-                                        customerId: g.customerId,
-                                        customerName: g.customerName,
-                                        customerDetail: g.customerDetail,
-                                        plannedQty: g.plannedQty,
-                                      })),
-                                    }
-                                  : x
-                              );
+                              const uid = () =>
+                                `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                              const cloned: Block = {
+                                key: `b-${uid()}`,
+                                detailId: "",
+                                isNew: true,
+                                status: "Mới tạo",
+                                transportTypeId: src.transportTypeId,
+                                transportTypeName: src.transportTypeName,
+                                canChonDvt: src.canChonDvt,
+                                carrierId: src.carrierId,
+                                carrierName: src.carrierName,
+                                vehicleId: src.vehicleId,
+                                vehicleName: src.vehicleName,
+                                productId: src.productId,
+                                productName: src.productName,
+                                regionId: src.regionId,
+                                regionName: src.regionName,
+                                note: src.note,
+                                actualReceived: 0,
+                                deliveries: src.deliveries.map((g) => ({
+                                  key: `gh-${uid()}`,
+                                  idGh: "",
+                                  isNew: true,
+                                  customerId: g.customerId,
+                                  customerName: g.customerName,
+                                  customerDetail: g.customerDetail,
+                                  plannedQty: g.plannedQty,
+                                  actualQty: 0,
+                                })),
+                              };
+                              const next = [...rows];
+                              next.splice(bi + 1, 0, cloned);
+                              return next;
                             });
                           }}
                         >

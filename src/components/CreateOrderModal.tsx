@@ -269,45 +269,58 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                     Chọn — Hình thức VT; Xe &amp; Hàng; Khách hàng #{di + 1}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {di > 0 && (
-                      <button
-                        type="button"
-                        title="Copy khối xe phía trên"
-                        className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100"
-                        onClick={() => {
-                          setDetails((rows) => {
-                            const src = rows[di - 1];
-                            if (!src) return rows;
-                            return rows.map((x, i) => {
-                              if (i !== di) return x;
-                              return {
-                                ...x,
-                                transportTypeId: src.transportTypeId,
-                                transportTypeName: src.transportTypeName,
-                                canChonDvt: src.canChonDvt,
-                                carrierId: src.carrierId,
-                                carrierName: src.carrierName,
-                                vehicleId: src.vehicleId,
-                                vehicleName: src.vehicleName,
-                                productId: src.productId,
-                                productName: src.productName,
-                                regionId: src.regionId,
-                                regionName: src.regionName,
-                                note: src.note,
-                                deliveries: src.deliveries.map((g) => ({
-                                  ...g,
-                                  key: `d-${Date.now()}-${Math.random()
-                                    .toString(36)
-                                    .slice(2, 6)}`,
-                                })),
-                              };
-                            });
-                          });
-                        }}
-                      >
-                        📋 Copy khối xe
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      title="Tạo khối xe mới copy đầy đủ từ khối này (V21 copyOrderBlock)"
+                      disabled={details.length >= 6}
+                      className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 disabled:opacity-40 disabled:pointer-events-none"
+                      onClick={() => {
+                        setDetails((rows) => {
+                          if (rows.length >= 6) return rows;
+                          const src = rows[di];
+                          if (!src) return rows;
+                          const uid = () =>
+                            `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                          const cloned: DetailRow = {
+                            key: `ct-${uid()}`,
+                            transportTypeId: src.transportTypeId,
+                            transportTypeName: src.transportTypeName,
+                            canChonDvt: src.canChonDvt,
+                            carrierId: src.carrierId,
+                            carrierName: src.carrierName,
+                            vehicleId: src.vehicleId,
+                            vehicleName: src.vehicleName,
+                            productId: src.productId,
+                            productName: src.productName,
+                            regionId: src.regionId,
+                            regionName: src.regionName,
+                            note: src.note,
+                            deliveries: (src.deliveries.length
+                              ? src.deliveries
+                              : [
+                                  {
+                                    key: "",
+                                    customerId: "",
+                                    customerName: "",
+                                    plannedQty: "",
+                                  },
+                                ]
+                            ).map((g) => ({
+                              key: `d-${uid()}`,
+                              customerId: g.customerId,
+                              customerName: g.customerName,
+                              plannedQty: g.plannedQty,
+                            })),
+                          };
+                          // Chèn ngay sau khối nguồn (V21 addDetailBlock)
+                          const next = [...rows];
+                          next.splice(di + 1, 0, cloned);
+                          return next;
+                        });
+                      }}
+                    >
+                      📋 Copy khối xe
+                    </button>
                     {details.length > 1 && (
                       <button
                         type="button"
