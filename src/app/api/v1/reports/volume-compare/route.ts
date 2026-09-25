@@ -1,16 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCurrentUser, resolveScope, hasPermission } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
-import { ReportRepository } from "@/repositories/report.repository";
-import { MasterRepository } from "@/repositories/master.repository";
-import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
-import {
-  filterBySupplierIds,
-  resolveAllowedSupplierIds,
-} from "@/lib/scope";
-import { readSheetAsObjects } from "@/lib/sheets/dal";
-import { SHEETS } from "@/lib/sheets/constants";
-import { isSheetsConfigured } from "@/lib/sheets/client";
+import { ReportBuilderService } from "@/services/report-builder.service";
 import type {
   VolumeMode,
   VolumeMetric,
@@ -107,20 +98,21 @@ function resolvePeriods(mode: VolumeMode, yearHint?: number) {
   };
 }
 
-function classifyPhanLoai(raw: string): "Bao" | "Roi" | "Khac" {
+
+/** Chuẩn hóa nhãn phân loại để ghép series */
+function normPhanLoaiLabel(raw: unknown): "Bao" | "Roi" | "Khac" {
   const s = String(raw || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
   if (s === "bao") return "Bao";
-  // "roi" / "rời" / "rời hàng" → Roi (bucket nội bộ; label UI có thể là Rời)
   if (s === "roi" || s.startsWith("roi")) return "Roi";
   return "Khac";
 }
 
-function inRange(dt: string, from: string, to: string) {
-  return !!dt && dt >= from && dt <= to;
+function round3(n: number) {
+  return Math.round(n * 1000) / 1000;
 }
 
 export async function GET(req: NextRequest) {
@@ -167,186 +159,102 @@ export async function GET(req: NextRequest) {
     const periods = resolvePeriods(mode, yearParam);
     const scope = resolveScope(user);
 
-    // HH map
-    let phanLoaiMap: Record<string, string> = {};
-    if (isSheetsConfigured()) {
-      try {
-        const hhRows = await readSheetAsObjects(SHEETS.HH, {});
-        for (const r of hhRows) {
-          const ma = String(r.MaHH || "").trim();
-          if (ma) phanLoaiMap[ma] = String(r.PhanLoaiHH || "");
-        }
-      } catch (e) {
-        console.error("[volume] HH", e);
-      }
+    // Dùng đúng pipeline báo cáo → không lệch số với tab Thực nhận / Thực giao
+    const reportType = metric === "receiving" ? "thuc_nhan" : "thuc_giao";
+    const measureKey = metric === "receiving" ? "thucNhan" : "thucGiao";
+    const dimKey =
+      groupBy === "supplier"
+        ? metric === "receiving"
+          ? "ncc"
+          : "khachHang"
+        : "phanLoai";
+
+    async function loadPeriod(fromDate: string, toDate: string) {
+      const res = await ReportBuilderService.run(
+        reportType,
+        {
+          fromDate,
+          toDate,
+          groupBy: [dimKey],
+          page: 1,
+          pageSize: 500,
+        },
+        user,
+        scope
+      );
+      return res.items as Record<string, unknown>[];
     }
 
-    type Bucket = {
-      current: number;
-      previous: number;
-      previousFullYear: number;
-    };
+    const [curItems, prevItems, prevFullItems] = await Promise.all([
+      loadPeriod(periods.currentFrom, periods.currentTo),
+      loadPeriod(periods.previousFrom, periods.previousTo),
+      mode === "ytd"
+        ? loadPeriod(periods.previousFullFrom, periods.previousFullTo)
+        : Promise.resolve([] as Record<string, unknown>[]),
+    ]);
+
+    type Bucket = { current: number; previous: number; previousFullYear: number };
     const map = new Map<string, Bucket>();
 
     function bump(key: string, field: keyof Bucket, qty: number) {
+      if (!key) return;
       if (!map.has(key))
         map.set(key, { current: 0, previous: 0, previousFullYear: 0 });
       map.get(key)![field] += qty;
     }
 
-    function groupKey(
-      productId: string,
-      supplierId: string,
-      phanLoai?: string
-    ): string {
-      if (groupBy === "supplier") return supplierId || "UNKNOWN";
-      return classifyPhanLoai(phanLoai || phanLoaiMap[productId] || "");
+    function rowKey(row: Record<string, unknown>): string {
+      if (groupBy === "supplier") {
+        return String(row[dimKey] ?? row.MaNCC ?? row.ncc ?? "UNKNOWN");
+      }
+      return normPhanLoaiLabel(row.phanLoai ?? row[dimKey]);
     }
 
-    /** Dashboard chỉ Bao + Rời — loại Khác không đưa vào báo cáo tổng */
-    function isMainPhanLoai(
-      productId: string,
-      phanLoai?: string
-    ): boolean {
-      const pl = classifyPhanLoai(phanLoai || phanLoaiMap[productId] || "");
-      return pl === "Bao" || pl === "Roi";
+    for (const row of curItems) {
+      const k = rowKey(row);
+      if (groupBy === "phanloai" && k === "Khac") continue;
+      bump(k, "current", Number(row[measureKey]) || 0);
     }
-
-    // Load 2 năm data for ytd full-year note + periods
-    const yearsNeeded = new Set([
-      parseYmd(periods.currentFrom).y,
-      parseYmd(periods.previousFrom).y,
-    ]);
-    if (mode === "ytd") yearsNeeded.add(periods.year - 1);
-
-    if (metric === "receiving") {
-      let allDetails: Awaited<
-        ReturnType<typeof ReportRepository.getDetails>
-      > = [];
-      for (const y of yearsNeeded) {
-        allDetails = allDetails.concat(await ReportRepository.getDetails(y));
-      }
-      // dedupe by detailId
-      const seen = new Set<string>();
-      allDetails = allDetails.filter((d) => {
-        if (!d.detailId || seen.has(d.detailId)) return false;
-        seen.add(d.detailId);
-        return true;
-      });
-
-      if (scope.scopeType === "MANAGEMENT") {
-        const allowed = await resolveAllowedSupplierIds(scope);
-        allDetails = filterBySupplierIds(allDetails, allowed);
-      }
-
-      for (const d of allDetails) {
-        if (isExcludedDetailStatus(d.status)) continue;
-        const qty = d.actualReceived || 0;
-        if (qty <= 0) continue;
-        // Chỉ ngày nhận — parity báo cáo Thực nhận (không fallback orderDate)
-        const dt = (d.receivedDate || "").slice(0, 10);
-        if (!dt) continue;
-        if (!isMainPhanLoai(d.productId, d.phanLoai)) continue;
-        const key = groupKey(d.productId, d.supplierId, d.phanLoai);
-        if (inRange(dt, periods.currentFrom, periods.currentTo))
-          bump(key, "current", qty);
-        if (inRange(dt, periods.previousFrom, periods.previousTo))
-          bump(key, "previous", qty);
-        if (
-          mode === "ytd" &&
-          inRange(dt, periods.previousFullFrom, periods.previousFullTo)
-        )
-          bump(key, "previousFullYear", qty);
-      }
-    } else {
-      // delivery
-      let allDels: Awaited<
-        ReturnType<typeof ReportRepository.getDeliveries>
-      > = [];
-      let allDet: Awaited<
-        ReturnType<typeof ReportRepository.getDetails>
-      > = [];
-      for (const y of yearsNeeded) {
-        allDels = allDels.concat(await ReportRepository.getDeliveries(y));
-        allDet = allDet.concat(await ReportRepository.getDetails(y));
-      }
-      const detMap: Record<
-        string,
-        { productId: string; supplierId: string; phanLoai?: string }
-      > = {};
-      for (const d of allDet) {
-        detMap[d.detailId] = {
-          productId: d.productId,
-          supplierId: d.supplierId,
-          phanLoai: d.phanLoai,
-        };
-      }
-      // Map status từ CT để loại Hủy/Xóa xe
-      const statusByCt: Record<string, string> = {};
-      for (const ct of allDet) {
-        statusByCt[ct.detailId] = String(ct.status || "");
-      }
-      allDels = allDels.filter(
-        (d) =>
-          !d.deleted &&
-          (d.actualQty || 0) > 0 &&
-          !isExcludedDetailStatus(statusByCt[d.detailId])
-      );
-
-      for (const d of allDels) {
-        const qty = d.actualQty || 0;
-        const meta = detMap[d.detailId];
-        if (meta && !isMainPhanLoai(meta.productId, meta.phanLoai)) continue;
-        const dt = d.deliveryDate || "";
-        const ref = detMap[d.detailId] || { productId: "", supplierId: "" };
-        // delivery sheet không có supplier — lấy từ CT
-        const key = groupKey(ref.productId, ref.supplierId);
-        if (inRange(dt, periods.currentFrom, periods.currentTo))
-          bump(key, "current", qty);
-        if (inRange(dt, periods.previousFrom, periods.previousTo))
-          bump(key, "previous", qty);
-        if (
-          mode === "ytd" &&
-          inRange(dt, periods.previousFullFrom, periods.previousFullTo)
-        )
-          bump(key, "previousFullYear", qty);
-      }
+    for (const row of prevItems) {
+      const k = rowKey(row);
+      if (groupBy === "phanloai" && k === "Khac") continue;
+      bump(k, "previous", Number(row[measureKey]) || 0);
+    }
+    for (const row of prevFullItems) {
+      const k = rowKey(row);
+      if (groupBy === "phanloai" && k === "Khac") continue;
+      bump(k, "previousFullYear", Number(row[measureKey]) || 0);
     }
 
     let series: VolumeSeriesItem[] = [];
     if (groupBy === "phanloai") {
-      for (const label of ["Bao", "Roi"] as const) { // Khác không đưa vào dashboard
+      for (const label of ["Bao", "Roi"] as const) {
         const b = map.get(label) || {
           current: 0,
           previous: 0,
           previousFullYear: 0,
         };
         series.push({
-          label,
-          current: Math.round(b.current * 1000) / 1000,
-          previous: Math.round(b.previous * 1000) / 1000,
+          label: label === "Roi" ? "Rời" : label,
+          current: round3(b.current),
+          previous: round3(b.previous),
           previousFullYear:
-            mode === "ytd"
-              ? Math.round(b.previousFullYear * 1000) / 1000
-              : undefined,
+            mode === "ytd" ? round3(b.previousFullYear) : undefined,
         });
       }
     } else {
-      const nccNames = await MasterRepository.nccNames();
       series = Array.from(map.entries())
         .map(([id, b]) => ({
-          label: nccNames[id] || id,
+          label: id,
           id,
-          current: Math.round(b.current * 1000) / 1000,
-          previous: Math.round(b.previous * 1000) / 1000,
+          current: round3(b.current),
+          previous: round3(b.previous),
           previousFullYear:
-            mode === "ytd"
-              ? Math.round(b.previousFullYear * 1000) / 1000
-              : undefined,
+            mode === "ytd" ? round3(b.previousFullYear) : undefined,
         }))
         .filter((s) => s.current > 0 || s.previous > 0)
         .sort((a, b) => b.current - a.current)
-        .slice(0, 12); // top 12 NCC
+        .slice(0, 12);
     }
 
     const totals = series.reduce(
@@ -366,8 +274,8 @@ export async function GET(req: NextRequest) {
           year: periods.year,
           series,
           totals: {
-            current: Math.round(totals.current * 1000) / 1000,
-            previous: Math.round(totals.previous * 1000) / 1000,
+            current: round3(totals.current),
+            previous: round3(totals.previous),
           },
           meta: {
             currentFrom: periods.currentFrom,
@@ -375,14 +283,24 @@ export async function GET(req: NextRequest) {
             previousFrom: periods.previousFrom,
             previousTo: periods.previousTo,
             periodNote: periods.periodNote,
-            phanLoaiScope: "Bao+Roi (loại Khác không tính)",
+            source: `ReportBuilderService.${reportType}`,
+            phanLoaiScope: "Bao+Rời (loại Khác không tính trên dashboard)",
           },
         },
-        { source: "sheets", generatedAt: new Date().toISOString() }
+        {
+          currentFrom: periods.currentFrom,
+          currentTo: periods.currentTo,
+          previousFrom: periods.previousFrom,
+          previousTo: periods.previousTo,
+        }
       )
     );
   } catch (e) {
-    console.error(e);
-    return jsonResponse(error("INTERNAL_ERROR", "Lỗi hệ thống"), 500);
+    console.error("[volume-compare]", e);
+    const err = e as { code?: string; message?: string };
+    return jsonResponse(
+      error(err.code || "INTERNAL", err.message || "Lỗi so sánh sản lượng"),
+      err.code === "PERMISSION_DENIED" ? 403 : 500
+    );
   }
 }
