@@ -14,6 +14,7 @@ import { apiPost } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { CreateOrderModal } from "@/components/CreateOrderModal";
 import { AddDetailModal } from "@/components/AddDetailModal";
+import { OrderManageModal } from "@/components/OrderManageModal";
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -25,11 +26,11 @@ const STATUS_LABEL: Record<string, string> = {
 function OrderActions({
   o,
   onChanged,
-  onAddVehicle,
+  onManageOrder,
 }: {
   o: Order;
   onChanged?: () => void;
-  onAddVehicle?: (o: Order) => void;
+  onManageOrder?: (o: Order) => void;
 }) {
   // status có thể là enum EN hoặc chuỗi VN từ Sheet
   const raw = String(o.status || "");
@@ -67,14 +68,16 @@ function OrderActions({
 
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
-      {isNew && (
-        <>
+      {(isNew || isProcessing) && (
           <button
-            onClick={() => (onAddVehicle ? onAddVehicle(o) : toast("Thêm xe"))}
+            onClick={() => (onManageOrder ? onManageOrder(o) : toast("Quản lý đơn"))}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500"
           >
-            Thêm
+            {isNew ? "Thêm" : "Sửa"}
           </button>
+      )}
+      {isNew && (
+        <>
           <button
             onClick={() => toast("Gửi mail NCC — POST /orders/:id/send")}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500"
@@ -142,6 +145,7 @@ export default function OrdersPage() {
   const [err, setErr] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [addTarget, setAddTarget] = useState<Order | null>(null);
+  const [manageOrderId, setManageOrderId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -307,7 +311,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/80">
-                  <OrderActions o={o} onChanged={load} onAddVehicle={setAddTarget} />
+                  <OrderActions o={o} onChanged={load} onManageOrder={(o) => setManageOrderId(o.orderId)} />
                 </div>
               </div>
             ))}
@@ -369,7 +373,7 @@ export default function OrdersPage() {
                             {o.createdBy}
                           </td>
                           <td className="px-3 py-2.5">
-                            <OrderActions o={o} onChanged={load} onAddVehicle={setAddTarget} />
+                            <OrderActions o={o} onChanged={load} onManageOrder={(o) => setManageOrderId(o.orderId)} />
                           </td>
                         </tr>
                       ))}
@@ -405,6 +409,12 @@ export default function OrdersPage() {
           alert("Đã thêm xe vào đơn");
           load();
         }}
+      />
+      <OrderManageModal
+        orderId={manageOrderId}
+        year={2026}
+        onClose={() => setManageOrderId(null)}
+        onSaved={() => load()}
       />
     </div>
   );
