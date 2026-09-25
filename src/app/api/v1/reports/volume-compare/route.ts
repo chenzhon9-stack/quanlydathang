@@ -157,7 +157,9 @@ export async function GET(req: NextRequest) {
     }
 
     const periods = resolvePeriods(mode, yearParam);
-    const scope = resolveScope(user);
+    // Sau check null ở trên — narrow type cho closure
+    const authedUser = user!;
+    const scope = resolveScope(authedUser);
 
     // Dùng đúng pipeline báo cáo → không lệch số với tab Thực nhận / Thực giao
     const reportType = metric === "receiving" ? "thuc_nhan" : "thuc_giao";
@@ -179,7 +181,7 @@ export async function GET(req: NextRequest) {
           page: 1,
           pageSize: 500,
         },
-        user,
+        authedUser,
         scope
       );
       return res.items as Record<string, unknown>[];
