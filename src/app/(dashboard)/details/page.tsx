@@ -127,13 +127,6 @@ function ModalShell({
           </div>
         )}
       </div>
-      <ColumnCustomizer
-        open={colOpen}
-        tabKey="details"
-        columns={DETAIL_COLUMNS}
-        onClose={() => setColOpen(false)}
-        onApply={setColState}
-      />
     </div>
   );
 }
@@ -998,6 +991,13 @@ export default function DetailsPage() {
           onSaved={() => load(page)}
         />
       )}
+      <ColumnCustomizer
+        open={colOpen}
+        tabKey="details"
+        columns={DETAIL_COLUMNS}
+        onClose={() => setColOpen(false)}
+        onApply={setColState}
+      />
     </div>
   );
 }
