@@ -25,30 +25,15 @@ import {
   type SortDir,
 } from "@/components/HeaderFilterTh";
 import {
-  type ColumnDef,
   type ColumnState,
   loadColumnState,
   resolveColumns,
 } from "@/lib/column-prefs";
+import { DETAILS_COLUMN_DEFS } from "@/lib/column-definitions";
 import type { Delivery, OrderDetail } from "@/types";
 
 
-const DETAIL_COLUMNS: ColumnDef[] = [
-  { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
-  { key: "id", label: "ID", defaultVisible: true, filterable: true },
-  { key: "orderId", label: "Mã đơn", defaultVisible: false, filterable: true },
-  { key: "supplier", label: "NCC", defaultVisible: false, filterable: true },
-  { key: "product", label: "Hàng hóa", defaultVisible: true, filterable: true },
-  { key: "region", label: "Khu vực", defaultVisible: false, filterable: true },
-  { key: "qty", label: "KH đặt", defaultVisible: true, align: "right" },
-  { key: "recvDate", label: "Ngày nhận", defaultVisible: true, filterable: true },
-  { key: "actualRecv", label: "Thực nhận", defaultVisible: true, align: "right" },
-  { key: "actualDel", label: "Thực giao", defaultVisible: true, align: "right" },
-  { key: "remain", label: "Tồn", defaultVisible: true, align: "right" },
-  { key: "status", label: "Trạng thái", defaultVisible: true, filterable: true },
-  { key: "note", label: "Ghi chú", defaultVisible: true },
-  { key: "actions", label: "Hành động", defaultVisible: true },
-];
+const DETAIL_COLUMNS = DETAILS_COLUMN_DEFS;
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Mới tạo",
@@ -418,8 +403,16 @@ export default function DetailsPage() {
         ["plate", d.vehiclePlate || d.vehicleId || ""],
         ["id", d.detailId || ""],
         ["orderId", d.orderId || ""],
+        ["orderDate", String(d.orderDate || "").slice(0, 10)],
         ["supplier", d.supplierName || d.supplierId || ""],
+        ["supplierId", d.supplierId || ""],
         ["region", d.regionName || d.regionId || ""],
+        ["regionId", d.regionId || ""],
+        ["vehicleId", d.vehicleId || ""],
+        ["productId", d.productId || ""],
+        ["htvt", d.transportTypeName || ""],
+        ["htvtId", d.transportTypeId || ""],
+        ["isDuyenHa", d.isDuyenHa ? "Có" : "Không"],
         ["recvDate", String(d.receivedDate || "").slice(0, 10)],
       ];
       for (const [key, val] of checks) {
@@ -436,9 +429,17 @@ export default function DetailsPage() {
       plate: new Set(),
       id: new Set(),
       orderId: new Set(),
+      orderDate: new Set(),
       supplier: new Set(),
+      supplierId: new Set(),
       product: new Set(),
+      productId: new Set(),
       region: new Set(),
+      regionId: new Set(),
+      vehicleId: new Set(),
+      htvt: new Set(),
+      htvtId: new Set(),
+      isDuyenHa: new Set(),
       recvDate: new Set(),
       status: new Set(),
     };
@@ -446,9 +447,17 @@ export default function DetailsPage() {
       buckets.plate?.add(d.vehiclePlate || d.vehicleId || "");
       buckets.id?.add(d.detailId || "");
       buckets.orderId?.add(d.orderId || "");
+      if (d.orderDate) buckets.orderDate?.add(String(d.orderDate).slice(0, 10));
       buckets.supplier?.add(d.supplierName || d.supplierId || "");
+      buckets.supplierId?.add(d.supplierId || "");
       buckets.product?.add(d.productName || d.productId || "");
+      buckets.productId?.add(d.productId || "");
       buckets.region?.add(d.regionName || d.regionId || "");
+      buckets.regionId?.add(d.regionId || "");
+      buckets.vehicleId?.add(d.vehicleId || "");
+      if (d.transportTypeName) buckets.htvt?.add(d.transportTypeName);
+      if (d.transportTypeId) buckets.htvtId?.add(d.transportTypeId);
+      buckets.isDuyenHa?.add(d.isDuyenHa ? "Có" : "Không");
       if (d.receivedDate) buckets.recvDate?.add(String(d.receivedDate).slice(0, 10));
       buckets.status?.add(STATUS_LABEL[d.status] || d.status || "");
     }
@@ -467,12 +476,28 @@ export default function DetailsPage() {
         return d.detailId || "";
       case "orderId":
         return d.orderId || "";
+      case "orderDate":
+        return String(d.orderDate || "");
       case "supplier":
         return d.supplierName || d.supplierId || "";
+      case "supplierId":
+        return d.supplierId || "";
       case "product":
         return d.productName || d.productId || "";
+      case "productId":
+        return d.productId || "";
       case "region":
         return d.regionName || d.regionId || "";
+      case "regionId":
+        return d.regionId || "";
+      case "vehicleId":
+        return d.vehicleId || "";
+      case "htvt":
+        return d.transportTypeName || "";
+      case "htvtId":
+        return d.transportTypeId || "";
+      case "isDuyenHa":
+        return d.isDuyenHa ? 1 : 0;
       case "qty":
         return Number(d.quantity) || 0;
       case "recvDate":
@@ -858,6 +883,12 @@ export default function DetailsPage() {
                                   {d.detailId}
                                 </td>
                               );
+                            if (c.key === "orderDate")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {fmtDateVN(d.orderDate)}
+                                </td>
+                              );
                             if (c.key === "orderId")
                               return (
                                 <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
@@ -874,6 +905,53 @@ export default function DetailsPage() {
                               return (
                                 <td key={c.key} className="px-2 py-2 text-xs">
                                   {d.regionName || d.regionId}
+                                </td>
+                              );
+
+                            if (c.key === "vehicleId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.vehicleId}
+                                </td>
+                              );
+                            if (c.key === "productId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.productId}
+                                </td>
+                              );
+                            if (c.key === "regionId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.regionId}
+                                </td>
+                              );
+                            if (c.key === "supplierId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.supplierId}
+                                </td>
+                              );
+                            if (c.key === "htvtId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.transportTypeId || "—"}
+                                </td>
+                              );
+                            if (c.key === "htvt")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.transportTypeName || d.transportTypeId || "—"}
+                                </td>
+                              );
+                            if (c.key === "isDuyenHa")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs font-semibold">
+                                  {d.isDuyenHa ? (
+                                    <span className="text-teal-700">Có</span>
+                                  ) : (
+                                    "Không"
+                                  )}
                                 </td>
                               );
                             if (c.key === "product")

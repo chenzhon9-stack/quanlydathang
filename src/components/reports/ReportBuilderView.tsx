@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportSubNav } from "@/components/ReportSubNav";
 import { REPORT_SCHEMAS, type ReportType } from "@/lib/reports/dynamic-group";
+import { REPORT_COLUMN_META } from "@/lib/column-definitions";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
   HeaderFilterTh,
@@ -109,21 +110,28 @@ export function ReportBuilderView({
     });
   }
 
+  const metaCols = REPORT_COLUMN_META[type] || [];
   const allCols: ColumnDef[] = [
     ...groupBy.map((k) => {
       const d = schema.dimensions.find((x) => x.key === k);
+      const meta = metaCols.find((m) => m.key === k);
       return {
         key: k,
-        label: d?.header || k,
+        label: d?.header || meta?.header || k,
         defaultVisible: true,
         filterable: true,
+        dimension: true,
       };
     }),
-    ...schema.measures.map((m) => ({
-      key: m.key,
-      label: m.header,
-      defaultVisible: true,
-    })),
+    ...schema.measures.map((m) => {
+      const meta = metaCols.find((x) => x.key === m.key);
+      return {
+        key: m.key,
+        label: m.header,
+        defaultVisible: true,
+        align: (meta?.align as "left" | "right") || "right",
+      };
+    }),
   ];
 
   const tabKey = `report:${type}`;

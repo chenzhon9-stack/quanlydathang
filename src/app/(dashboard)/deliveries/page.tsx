@@ -18,11 +18,11 @@ import {
   type SortDir,
 } from "@/components/HeaderFilterTh";
 import {
-  type ColumnDef,
   type ColumnState,
   loadColumnState,
   resolveColumns,
 } from "@/lib/column-prefs";
+import { DELIVERY_COLUMN_DEFS } from "@/lib/column-definitions";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import {
   DeliveryEditorModal,
@@ -38,17 +38,7 @@ function fmtDateVN(ymd: string) {
 }
 
 
-const DELIVERY_COLUMNS: ColumnDef[] = [
-  { key: "id", label: "ID Giao hàng", defaultVisible: true, filterable: true },
-  { key: "detailId", label: "ID Chi tiết", defaultVisible: true, filterable: true },
-  { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
-  { key: "status", label: "Trạng thái xe", defaultVisible: true, filterable: true },
-  { key: "customer", label: "Khách hàng", defaultVisible: true, filterable: true },
-  { key: "planned", label: "KH giao", defaultVisible: true, align: "right" },
-  { key: "actual", label: "Thực giao", defaultVisible: true, align: "right" },
-  { key: "date", label: "Ngày giao", defaultVisible: true, filterable: true },
-  { key: "actions", label: "Hành động", defaultVisible: true },
-];
+const DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
 
 /** V21 deliveryActionText theo trạng thái CT */
 function actionLabel(d: Delivery) {
@@ -195,13 +185,22 @@ export default function DeliveriesPage() {
 
   const filteredCols = useMemo(() => {
     return filtered.filter((d) => {
+      const planned = Number(d.plannedQty) || 0;
+      const actual = Number(d.actualQty) || 0;
       const checks: [string, string][] = [
         ["status", String(d.detailStatus || "")],
         ["customer", d.customerName || d.customerDetail || d.customerId || ""],
+        ["customerId", d.customerId || ""],
+        ["customerDetail", d.customerDetail || ""],
         ["plate", d.vehiclePlate || ""],
         ["id", d.deliveryId || ""],
         ["detailId", d.detailId || ""],
         ["date", String(d.deliveryDate || "").slice(0, 10)],
+        ["orderDate", String(d.orderDate || "").slice(0, 10)],
+        ["recvDate", String((d as { receivedDate?: string }).receivedDate || "").slice(0, 10)],
+        ["product", d.productName || d.productId || ""],
+        ["productId", d.productId || ""],
+        ["vehicleId", d.vehicleId || ""],
       ];
       for (const [key, val] of checks) {
         const sel = valFilters[key];
@@ -219,7 +218,12 @@ export default function DeliveriesPage() {
       plate: new Set(),
       status: new Set(),
       customer: new Set(),
+      customerId: new Set(),
       date: new Set(),
+      orderDate: new Set(),
+      product: new Set(),
+      productId: new Set(),
+      vehicleId: new Set(),
     };
     for (const d of filtered) {
       buckets.id?.add(d.deliveryId || "");
@@ -228,7 +232,13 @@ export default function DeliveriesPage() {
       if (d.detailStatus) buckets.status?.add(String(d.detailStatus));
       const c = d.customerName || d.customerDetail || d.customerId;
       if (c) buckets.customer?.add(c);
+      if (d.customerId) buckets.customerId?.add(d.customerId);
       if (d.deliveryDate) buckets.date?.add(String(d.deliveryDate).slice(0, 10));
+      if (d.orderDate) buckets.orderDate?.add(String(d.orderDate).slice(0, 10));
+      if (d.productName || d.productId)
+        buckets.product?.add(d.productName || d.productId || "");
+      if (d.productId) buckets.productId?.add(d.productId);
+      if (d.vehicleId) buckets.vehicleId?.add(d.vehicleId);
     }
     for (const [k, set] of Object.entries(buckets)) {
       map[k] = [...set].filter(Boolean).sort();
@@ -238,6 +248,8 @@ export default function DeliveriesPage() {
 
 
   function delSortVal(d: Delivery, key: string): string | number {
+    const planned = Number(d.plannedQty) || 0;
+    const actual = Number(d.actualQty) || 0;
     switch (key) {
       case "id":
         return d.deliveryId || "";
@@ -249,12 +261,26 @@ export default function DeliveriesPage() {
         return String(d.detailStatus || "");
       case "customer":
         return d.customerName || d.customerDetail || d.customerId || "";
+      case "customerId":
+        return d.customerId || "";
+      case "product":
+        return d.productName || d.productId || "";
+      case "productId":
+        return d.productId || "";
+      case "orderDate":
+        return String(d.orderDate || "");
       case "planned":
-        return Number(d.plannedQty) || 0;
+        return planned;
       case "actual":
-        return Number(d.actualQty) || 0;
+        return actual;
+      case "diff":
+        return actual - planned;
+      case "actualRecv":
+        return Number(d.actualReceived) || 0;
       case "date":
         return String(d.deliveryDate || "");
+      case "vehicleId":
+        return d.vehicleId || "";
       default:
         return "";
     }
@@ -528,6 +554,70 @@ export default function DeliveriesPage() {
                               return (
                                 <td key={c.key} className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
                                   {d.actualQty?.toFixed(2) ?? "—"}
+                                </td>
+                              );
+                            if (c.key === "diff") {
+                              const planned = Number(d.plannedQty) || 0;
+                              const actual = Number(d.actualQty) || 0;
+                              const v = actual - planned;
+                              const color =
+                                v > 0.005
+                                  ? "text-green-700"
+                                  : v < -0.005
+                                    ? "text-red-700"
+                                    : "text-slate-700";
+                              return (
+                                <td key={c.key} className={`px-3 py-2.5 text-right tabular-nums font-bold ${color}`}>
+                                  {v.toFixed(2)}
+                                </td>
+                              );
+                            }
+                            if (c.key === "product")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-medium">
+                                  {d.productName || d.productId || "—"}
+                                </td>
+                              );
+                            if (c.key === "orderDate")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs">
+                                  {d.orderDate ? fmtDateVN(d.orderDate) : "—"}
+                                </td>
+                              );
+                            if (c.key === "recvDate")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs">
+                                  —
+                                </td>
+                              );
+                            if (c.key === "customerId")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-mono text-xs">
+                                  {d.customerId}
+                                </td>
+                              );
+                            if (c.key === "customerDetail")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs">
+                                  {d.customerDetail || "—"}
+                                </td>
+                              );
+                            if (c.key === "productId")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-mono text-xs">
+                                  {d.productId || "—"}
+                                </td>
+                              );
+                            if (c.key === "vehicleId")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-mono text-xs">
+                                  {d.vehicleId || "—"}
+                                </td>
+                              );
+                            if (c.key === "actualRecv")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right tabular-nums">
+                                  {(Number(d.actualReceived) || 0).toFixed(2)}
                                 </td>
                               );
                             if (c.key === "date")
