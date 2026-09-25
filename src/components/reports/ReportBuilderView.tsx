@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportSubNav } from "@/components/ReportSubNav";
 import { REPORT_SCHEMAS, type ReportType } from "@/lib/reports/dynamic-group";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
-import { HeaderFilterTh } from "@/components/HeaderFilterTh";
+import {
+  HeaderFilterTh,
+  cycleSort,
+  compareValues,
+  type SortDir,
+} from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -50,6 +55,8 @@ export function ReportBuilderView({
   const [colOpen, setColOpen] = useState(false);
   const [colState, setColState] = useState<ColumnState | null>(null);
   const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
 
   const load = useCallback(
     async (p = 1) => {
@@ -142,14 +149,22 @@ export function ReportBuilderView({
     return { key: c.key, header: c.label, isMeasure: false as const };
   });
 
-  const filteredItems = items.filter((row) => {
-    for (const [k, vals] of Object.entries(valFilters)) {
-      if (!vals?.length) continue;
-      const cell = String(row[k] ?? "");
-      if (!vals.includes(cell)) return false;
+  const filteredItems = useMemo(() => {
+    let rows = items.filter((row) => {
+      for (const [k, vals] of Object.entries(valFilters)) {
+        if (!vals?.length) continue;
+        const cell = String(row[k] ?? "");
+        if (!vals.includes(cell)) return false;
+      }
+      return true;
+    });
+    if (sortKey && sortDir) {
+      rows = [...rows].sort((a, b) =>
+        compareValues(a[sortKey], b[sortKey], sortDir)
+      );
     }
-    return true;
-  });
+    return rows;
+  }, [items, valFilters, sortKey, sortDir]);
 
   const colUnique = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -266,6 +281,13 @@ export function ReportBuilderView({
                       onChange={(next) =>
                         setValFilters((f) => ({ ...f, [c.key]: next }))
                       }
+                      sortable
+                      sortDir={sortKey === c.key ? sortDir : null}
+                      onSort={() => {
+                        const n = cycleSort(c.key, sortKey, sortDir);
+                        setSortKey(n.key);
+                        setSortDir(n.dir);
+                      }}
                     />
                   ))}
                 </tr>

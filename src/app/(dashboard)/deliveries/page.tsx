@@ -11,7 +11,12 @@ import type { Delivery } from "@/types";
 import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
 import { statusRowClass } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
-import { HeaderFilterTh } from "@/components/HeaderFilterTh";
+import {
+  HeaderFilterTh,
+  cycleSort,
+  compareValues,
+  type SortDir,
+} from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -92,6 +97,8 @@ export default function DeliveriesPage() {
     loadColumnState("delivery", DELIVERY_COLUMNS)
   );
   const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
 
   const pageSize = 100;
 
@@ -133,10 +140,35 @@ export default function DeliveriesPage() {
   }, [load]);
 
   const filtered = useMemo(() => {
+    const norm = (s: string) =>
+      String(s || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+    const STATUS_ALIASES: Record<string, string[]> = {
+      "moi tao": ["moi tao", "new"],
+      "dat hang": ["dat hang", "ordered"],
+      "da nhan": ["da nhan", "received"],
+      "dang giao": ["dang giao", "delivering"],
+      "hoan thanh": ["hoan thanh", "done"],
+      "huy xe": ["huy xe", "huy", "cancel"],
+      "xoa xe": ["xoa xe", "xoa", "delete"],
+    };
     return items.filter((d) => {
-      const st = d.deleted ? "DELETED" : (d.actualQty || 0) > 0 ? "DONE" : "PENDING";
+      if (d.deleted && !(statuses.includes("Xóa xe") || statuses.includes("ALL") || statuses.length === 0)) {
+        // vẫn cho xem nếu chọn Xóa xe / ALL
+      }
       if (!(statuses.length === 0 || statuses.includes("ALL"))) {
-        if (!statuses.includes(st)) return false;
+        const stRaw = String(d.detailStatus || "");
+        const stN = norm(stRaw);
+        const ok = statuses.some((sel) => {
+          const sn = norm(sel);
+          if (stN === sn || stRaw === sel) return true;
+          const aliases = STATUS_ALIASES[sn] || [sn];
+          return aliases.some((a) => stN === a || stN.includes(a));
+        });
+        if (!ok) return false;
       }
       const hay = [
         d.deliveryId,
@@ -148,6 +180,7 @@ export default function DeliveriesPage() {
         d.orderDate || "",
         d.vehiclePlate || "",
         d.productName || "",
+        String(d.detailStatus || ""),
         String(d.plannedQty),
         String(d.actualQty ?? ""),
       ].join(" ");
@@ -204,11 +237,43 @@ export default function DeliveriesPage() {
   }, [filtered]);
 
 
-  /** Gom theo ngày đặt lệnh (V21) — fallback ngày giao */
+  function delSortVal(d: Delivery, key: string): string | number {
+    switch (key) {
+      case "id":
+        return d.deliveryId || "";
+      case "detailId":
+        return d.detailId || "";
+      case "plate":
+        return d.vehiclePlate || "";
+      case "status":
+        return String(d.detailStatus || "");
+      case "customer":
+        return d.customerName || d.customerDetail || d.customerId || "";
+      case "planned":
+        return Number(d.plannedQty) || 0;
+      case "actual":
+        return Number(d.actualQty) || 0;
+      case "date":
+        return String(d.deliveryDate || "");
+      default:
+        return "";
+    }
+  }
+
+  const sortedFiltered = useMemo(() => {
+    const rows = [...filteredCols];
+    if (!sortKey || !sortDir) return rows;
+    rows.sort((a, b) =>
+      compareValues(delSortVal(a, sortKey), delSortVal(b, sortKey), sortDir)
+    );
+    return rows;
+  }, [filteredCols, sortKey, sortDir]);
+
+  /** Gom theo ngày đặt lệnh (V21) — fallback ngày giao; dùng filteredCols + sort */
   const displayGroups = useMemo(() => {
-    if (!groupByDate) return [{ key: "all", items: filteredCols }];
+    if (!groupByDate) return [{ key: "all", items: sortedFiltered }];
     const byDate: Record<string, Delivery[]> = {};
-    for (const d of filtered) {
+    for (const d of sortedFiltered) {
       const key = d.orderDate || d.deliveryDate || "—";
       if (!byDate[key]) byDate[key] = [];
       byDate[key].push(d);
@@ -216,7 +281,7 @@ export default function DeliveriesPage() {
     return Object.keys(byDate)
       .sort((a, b) => b.localeCompare(a))
       .map((k) => ({ key: k, items: byDate[k] }));
-  }, [filtered, groupByDate]);
+  }, [sortedFiltered, groupByDate]);
 
 
   return (
@@ -276,15 +341,19 @@ export default function DeliveriesPage() {
         searchPlaceholder="Tìm mã GH, CT, khách, biển số…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
-          { key: "PENDING", label: "Chưa giao" },
-          { key: "DONE", label: "Đã giao" },
-          { key: "DELETED", label: "Đã xóa" },
+          { key: "Mới tạo", label: "Mới tạo" },
+          { key: "Đặt hàng", label: "Đặt hàng" },
+          { key: "Đã nhận", label: "Đã nhận" },
+          { key: "Đang giao", label: "Đang giao" },
+          { key: "Hoàn thành", label: "Hoàn thành" },
+          { key: "Hủy xe", label: "Hủy xe" },
+          { key: "Xóa xe", label: "Xóa xe" },
         ]}
         selectedStatuses={statuses}
         onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
         groupByDate={groupByDate}
         onGroupByDate={setGroupByDate}
-        countLabel={`${filtered.length}/${items.length}`}
+        countLabel={`${sortedFiltered?.length ?? filteredCols.length}/${items.length}`}
       />
 
       {err && (
@@ -394,6 +463,13 @@ export default function DeliveriesPage() {
                         onChange={(next) =>
                           setValFilters((f) => ({ ...f, [c.key]: next }))
                         }
+                        sortable={c.key !== "actions"}
+                        sortDir={sortKey === c.key ? sortDir : null}
+                        onSort={() => {
+                          const n = cycleSort(c.key, sortKey, sortDir);
+                          setSortKey(n.key);
+                          setSortDir(n.dir);
+                        }}
                       />
                     ))}
                   </tr>

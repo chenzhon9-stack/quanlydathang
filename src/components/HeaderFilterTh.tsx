@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Header cột + icon lọc (parity V21 toggleFilterPopup trên th).
- * Popup checkbox multi-select ngay dưới header, không vùng lọc riêng.
+ * Header cột + lọc popup (V21) + click tiêu đề để sort.
  */
 import React, { useEffect, useMemo, useRef, useState } from "react";
+
+export type SortDir = "asc" | "desc" | null;
 
 export function HeaderFilterTh({
   label,
@@ -13,15 +14,20 @@ export function HeaderFilterTh({
   values,
   selected,
   onChange,
+  sortable,
+  sortDir,
+  onSort,
   children,
 }: {
   label: string;
   align?: "left" | "right";
   filterable?: boolean;
-  /** Unique values for this column */
   values?: string[];
   selected?: string[];
   onChange?: (next: string[]) => void;
+  sortable?: boolean;
+  sortDir?: SortDir;
+  onSort?: () => void;
   children?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -59,6 +65,9 @@ export function HeaderFilterTh({
     onChange(checked ? [...(values || [])] : []);
   }
 
+  const sortIcon =
+    sortDir === "asc" ? " ▲" : sortDir === "desc" ? " ▼" : sortable ? " ↕" : "";
+
   return (
     <th
       ref={ref}
@@ -71,7 +80,27 @@ export function HeaderFilterTh({
           align === "right" ? "flex-row-reverse" : ""
         }`}
       >
-        <span>{label}</span>
+        <button
+          type="button"
+          className={`inline-flex items-center gap-0.5 ${
+            sortable ? "cursor-pointer hover:text-sky-700" : "cursor-default"
+          }`}
+          onClick={() => {
+            if (sortable && onSort) onSort();
+          }}
+          title={sortable ? "Sắp xếp cột" : undefined}
+        >
+          <span>{label}</span>
+          {sortable && (
+            <span
+              className={`text-[10px] ${
+                sortDir ? "text-sky-600" : "text-slate-400"
+              }`}
+            >
+              {sortIcon}
+            </span>
+          )}
+        </button>
         {filterable && (
           <button
             type="button"
@@ -102,7 +131,7 @@ export function HeaderFilterTh({
 
       {open && filterable && (
         <div
-          className="absolute left-0 top-full mt-1 z-[50] w-56 bg-white border border-slate-200 rounded-xl shadow-xl text-left font-normal"
+          className="absolute left-0 top-full mt-1 z-[50] w-56 bg-white border border-slate-200 rounded-xl shadow-xl text-left font-normal normal-case"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="px-3 py-2 border-b bg-slate-50 text-[12px] font-semibold text-slate-700">
@@ -175,4 +204,30 @@ export function HeaderFilterTh({
       )}
     </th>
   );
+}
+
+/** Sort helper dùng chung */
+export function cycleSort(
+  key: string,
+  currentKey: string | null,
+  currentDir: SortDir
+): { key: string | null; dir: SortDir } {
+  if (currentKey !== key) return { key, dir: "asc" };
+  if (currentDir === "asc") return { key, dir: "desc" };
+  return { key: null, dir: null };
+}
+
+export function compareValues(a: unknown, b: unknown, dir: "asc" | "desc") {
+  const na = Number(a);
+  const nb = Number(b);
+  let cmp = 0;
+  if (Number.isFinite(na) && Number.isFinite(nb) && String(a).trim() !== "" && String(b).trim() !== "") {
+    cmp = na - nb;
+  } else {
+    cmp = String(a ?? "").localeCompare(String(b ?? ""), "vi", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  }
+  return dir === "asc" ? cmp : -cmp;
 }

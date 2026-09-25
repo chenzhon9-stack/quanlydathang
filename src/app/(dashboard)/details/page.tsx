@@ -18,7 +18,12 @@ import {
 } from "@/components/DeliveryEditorModal";
 import { statusRowClass } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
-import { HeaderFilterTh } from "@/components/HeaderFilterTh";
+import {
+  HeaderFilterTh,
+  cycleSort,
+  compareValues,
+  type SortDir,
+} from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -247,6 +252,8 @@ export default function DetailsPage() {
     loadColumnState("details", DETAIL_COLUMNS)
   );
   const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
 
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
@@ -452,10 +459,52 @@ export default function DetailsPage() {
   }, [filtered]);
 
 
+  function detailSortVal(d: OrderDetail, key: string): string | number {
+    switch (key) {
+      case "plate":
+        return d.vehiclePlate || d.vehicleId || "";
+      case "id":
+        return d.detailId || "";
+      case "orderId":
+        return d.orderId || "";
+      case "supplier":
+        return d.supplierName || d.supplierId || "";
+      case "product":
+        return d.productName || d.productId || "";
+      case "region":
+        return d.regionName || d.regionId || "";
+      case "qty":
+        return Number(d.quantity) || 0;
+      case "recvDate":
+        return String(d.receivedDate || "");
+      case "actualRecv":
+        return Number(d.actualReceived) || 0;
+      case "actualDel":
+        return Number(d.actualDelivered) || 0;
+      case "remain":
+        return Number(d.quantity || 0) - Number(d.actualReceived || 0);
+      case "status":
+        return STATUS_LABEL[d.status] || d.status || "";
+      case "note":
+        return d.note || "";
+      default:
+        return "";
+    }
+  }
+
+  const sortedFiltered = useMemo(() => {
+    const rows = [...filteredCols];
+    if (!sortKey || !sortDir) return rows;
+    rows.sort((a, b) =>
+      compareValues(detailSortVal(a, sortKey), detailSortVal(b, sortKey), sortDir)
+    );
+    return rows;
+  }, [filteredCols, sortKey, sortDir]);
+
   const displayGroups = useMemo(() => {
-    if (!groupByDate) return [{ key: "all", items: filtered }];
+    if (!groupByDate) return [{ key: "all", items: sortedFiltered }];
     const byDate: Record<string, OrderDetail[]> = {};
-    for (const d of filtered) {
+    for (const d of sortedFiltered) {
       const key = d.orderDate || "—";
       if (!byDate[key]) byDate[key] = [];
       byDate[key].push(d);
@@ -463,7 +512,7 @@ export default function DetailsPage() {
     return Object.keys(byDate)
       .sort((a, b) => b.localeCompare(a))
       .map((k) => ({ key: k, items: byDate[k] }));
-  }, [filtered, groupByDate]);
+  }, [sortedFiltered, groupByDate]);
 
   async function submitReceive() {
     if (!receiveTarget) return;
@@ -670,7 +719,7 @@ export default function DetailsPage() {
         onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
         groupByDate={groupByDate}
         onGroupByDate={setGroupByDate}
-        countLabel={`${filtered.length}/${items.length}`}
+        countLabel={`${sortedFiltered.length}/${items.length}`}
       />
 
       {err && (
@@ -762,6 +811,13 @@ export default function DetailsPage() {
                         onChange={(next) =>
                           setValFilters((f) => ({ ...f, [c.key]: next }))
                         }
+                        sortable={c.key !== "actions"}
+                        sortDir={sortKey === c.key ? sortDir : null}
+                        onSort={() => {
+                          const n = cycleSort(c.key, sortKey, sortDir);
+                          setSortKey(n.key);
+                          setSortDir(n.dir);
+                        }}
                       />
                     ))}
                   </tr>
