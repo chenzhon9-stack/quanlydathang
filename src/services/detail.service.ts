@@ -1,3 +1,4 @@
+import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import {
@@ -69,7 +70,7 @@ export class DetailService {
     // Tổng thực giao theo CT (cho cột Tồn / Thực giao)
     try {
       const { DeliveryRepository } = await import("@/repositories/delivery.repository");
-      const year = filter.year ?? new Date().getFullYear();
+      const year = filter.year ?? currentYearVN();
       const allGh = await DeliveryRepository.findMany({ year, includeDeleted: false });
       const sumByCt: Record<string, number> = {};
       for (const g of allGh) {
@@ -124,7 +125,7 @@ export class DetailService {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
 
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
     const ct = await DetailRepository.findById(detailId, y);
     if (!ct) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
@@ -207,7 +208,7 @@ export class DetailService {
         ThucNhan: qty,
         NgayNhanHang: ngay,
         TrangThaiXe: STATUS_CT.RECEIVED,
-        TimeChange: new Date().toISOString(),
+        TimeChange: formatDateTimeVN(),
         User: user.email,
       },
       y
@@ -305,7 +306,7 @@ export class DetailService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
     const { DeliveryRepository } = await import(
       "@/repositories/delivery.repository"
     );
@@ -334,7 +335,7 @@ export class DetailService {
     }
 
     // Soft-delete GH chưa giao
-    const now = new Date().toISOString();
+    const now = formatDateTimeVN();
     let deletedGh = 0;
     for (const g of ghs) {
       if ((Number(g.actualQty) || 0) > 0) continue;
@@ -395,13 +396,13 @@ export class DetailService {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
     const patch: Record<string, string | number | boolean> = {
-      TimeChange: new Date().toISOString(),
+      TimeChange: formatDateTimeVN(),
       User: user.email,
     };
     if (payload.productId !== undefined) patch.MaHH = payload.productId;
     if (payload.regionId !== undefined) patch.Khuvuc = payload.regionId;
     if (payload.note !== undefined) patch.GhiChu = payload.note;
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
     const row = await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",

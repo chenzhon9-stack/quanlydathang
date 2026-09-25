@@ -1,3 +1,4 @@
+import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import {
@@ -156,7 +157,7 @@ export class OrderService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
 
     const { DetailRepository } = await import("@/repositories/detail.repository");
     const { DeliveryRepository } = await import(
@@ -203,7 +204,7 @@ export class OrderService {
     // Soft-delete GH chưa có thực giao + hủy CT
     let cancelledCt = 0;
     let deletedGh = 0;
-    const now = new Date().toISOString();
+    const now = formatDateTimeVN();
     for (const d of details) {
       const st = String(d.status || "").trim();
       if (st === STATUS_CT.CANCEL || st === STATUS_CT.DELETE) continue;
@@ -356,7 +357,7 @@ export class OrderService {
     const y =
       payload.year ??
       Number(String(ngayDat).slice(0, 4)) ??
-      new Date().getFullYear();
+      currentYearVN();
 
     // HH map cho chia hết
     const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(
@@ -433,7 +434,7 @@ export class OrderService {
       year: y,
     });
 
-    const now = new Date().toISOString();
+    const now = formatDateTimeVN();
     let ghIndex = 0;
 
     // DonHang
@@ -606,7 +607,7 @@ export class OrderService {
       throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết xe cần thêm." };
     }
 
-    const y = payload.year ?? new Date().getFullYear();
+    const y = payload.year ?? currentYearVN();
     const order = await OrderRepository.findById(orderId, y);
     if (!order) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
@@ -747,7 +748,7 @@ export class OrderService {
       year: y,
     });
 
-    const now = new Date().toISOString();
+    const now = formatDateTimeVN();
     let ghIndex = 0;
     const createdCt: string[] = [];
 

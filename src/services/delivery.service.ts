@@ -22,7 +22,7 @@ import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import { newDeliveryId, isTempClientId } from "@/lib/sheets/counter";
-import { ymdDate } from "@/lib/sheets/date";
+import {ymdDate, formatDateTimeVN, currentYearVN} from "@/lib/sheets/date";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -58,7 +58,7 @@ export class DeliveryService {
     }
 
     // Enrich tên KH + orderDate/xe/hàng từ CT (gom theo ngày đặt lệnh)
-    const year = filter.year ?? new Date().getFullYear();
+    const year = filter.year ?? currentYearVN();
     const [khMap, xeMap, hhMap, details] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.xeNames(),
@@ -157,7 +157,7 @@ export class DeliveryService {
       throw { code: "VALIDATION_ERROR", message: "Thực giao không hợp lệ" };
     }
     const ngay = (payload.deliveryDate || todayYmdVN()).slice(0, 10);
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
 
     // Load GH hiện tại
     const allGh = await DeliveryRepository.findMany({ year: y, includeDeleted: false });
@@ -296,7 +296,7 @@ export class DeliveryService {
           detailId,
           {
             TrangThaiXe: newStatus,
-            TimeChange: new Date().toISOString(),
+            TimeChange: formatDateTimeVN(),
           },
           y
         );
@@ -350,7 +350,7 @@ export class DeliveryService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
-    const y = year ?? new Date().getFullYear();
+    const y = year ?? currentYearVN();
     const existing = await DeliveryRepository.findMany({
       year: y,
       detailId,
@@ -376,7 +376,7 @@ export class DeliveryService {
           r.deliveryId,
           {
             Deleted: true,
-            DeletedAt: now.toISOString(),
+            DeletedAt: formatDateTimeVN(now),
             DeletedBy: user.email,
           },
           y
@@ -447,7 +447,7 @@ export class DeliveryService {
             e.deliveryId,
             {
               Deleted: true,
-              DeletedAt: now.toISOString(),
+              DeletedAt: formatDateTimeVN(now),
               DeletedBy: user.email,
             },
             y
@@ -468,7 +468,7 @@ export class DeliveryService {
       SHEETS.CT,
       "ID_Chitiet",
       detailId,
-      { SoLuong: sumKh, TimeChange: now.toISOString(), User: user.email },
+      { SoLuong: sumKh, TimeChange: formatDateTimeVN(now), User: user.email },
       y
     );
 

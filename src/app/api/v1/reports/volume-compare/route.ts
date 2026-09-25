@@ -8,16 +8,11 @@ import type {
   VolumeGroupBy,
   VolumeSeriesItem,
 } from "@/mocks/volume";
-
-/** Ngày theo TZ Việt Nam YYYY-MM-DD */
-function vnYmd(d = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Ho_Chi_Minh",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
+import {
+  todayYmdVN,
+  addDaysYmd,
+  currentYearVN,
+} from "@/lib/sheets/date";
 
 function parseYmd(s: string): { y: number; m: number; d: number } {
   const [y, m, d] = s.split("-").map(Number);
@@ -25,16 +20,7 @@ function parseYmd(s: string): { y: number; m: number; d: number } {
 }
 
 function daysInMonth(y: number, m: number): number {
-  return new Date(y, m, 0).getDate();
-}
-
-function addDaysYmd(ymd: string, delta: number): string {
-  const { y, m, d } = parseYmd(ymd);
-  const dt = new Date(Date.UTC(y, m - 1, d + delta));
-  const yy = dt.getUTCFullYear();
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(dt.getUTCDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
 /**
@@ -43,12 +29,12 @@ function addDaysYmd(ymd: string, delta: number): string {
  * - MOM: 1/tháng → hôm qua vs 1/tháng trước → cùng số ngày (cắt nếu tháng ngắn hơn)
  */
 function resolvePeriods(mode: VolumeMode, yearHint?: number) {
-  const today = vnYmd();
+  const today = todayYmdVN();
   const yesterday = addDaysYmd(today, -1);
   const { y: cy, m: cm, d: cd } = parseYmd(yesterday);
 
   if (mode === "ytd") {
-    const year = yearHint && yearHint > 2000 ? yearHint : cy;
+    const year = yearHint && yearHint > 2000 ? yearHint : cy; // cy từ yesterday HCM
     // Nếu yearHint khác năm của yesterday, vẫn lấy đến 31/12 year hoặc yesterday nếu cùng năm
     let currentTo = yesterday;
     if (year !== cy) {
