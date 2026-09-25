@@ -345,9 +345,18 @@ export class OrderService {
     );
     const { qty3, validateStep } = await import("@/lib/business-rules");
 
-    const ngayDatRaw = payload.orderDate || ymdDate(new Date());
-    const ngayDat = toSheetDate(ngayDatRaw) || ymdDate(new Date());
-    const y = payload.year ?? Number(ngayDat.slice(0, 4)) ?? new Date().getFullYear();
+    // Giữ full datetime nếu client gửi (V21 NgayDatHang có giờ)
+    const ngayDatRaw = String(payload.orderDate || "").trim();
+    let ngayDat = "";
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ngayDatRaw)) {
+      ngayDat = ngayDatRaw.length === 16 ? ngayDatRaw + ":00" : ngayDatRaw.slice(0, 19);
+    } else {
+      ngayDat = toSheetDate(ngayDatRaw) || ymdDate(new Date());
+    }
+    const y =
+      payload.year ??
+      Number(String(ngayDat).slice(0, 4)) ??
+      new Date().getFullYear();
 
     // HH map cho chia hết
     const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(

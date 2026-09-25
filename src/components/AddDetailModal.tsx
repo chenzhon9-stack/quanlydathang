@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
+import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import type { Order } from "@/types";
 
@@ -14,6 +15,11 @@ type DeliveryRow = {
 
 type DetailRow = {
   key: string;
+  transportTypeId: string;
+  transportTypeName: string;
+  canChonDvt: boolean;
+  carrierId: string;
+  carrierName: string;
   vehicleId: string;
   vehicleName: string;
   productId: string;
@@ -36,6 +42,11 @@ function emptyDelivery(): DeliveryRow {
 function emptyDetail(): DetailRow {
   return {
     key: `ct-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    transportTypeId: "",
+    transportTypeName: "",
+    canChonDvt: false,
+    carrierId: "",
+    carrierName: "",
     vehicleId: "",
     vehicleName: "",
     productId: "",
@@ -45,6 +56,11 @@ function emptyDetail(): DetailRow {
     note: "",
     deliveries: [emptyDelivery()],
   };
+}
+
+function needsDvt(maHtvt: string, canChon: boolean): boolean {
+  const c = String(maHtvt || "").toUpperCase();
+  return canChon || c === "THUE_NGOAI" || c.includes("THUE");
 }
 
 type Props = {
@@ -64,6 +80,20 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
     if (!order) return;
     const orderId = order.orderId;
     setErr(null);
+    for (const d of details) {
+      if (!d.transportTypeId) {
+        setErr("Chọn hình thức vận tải trước");
+        return;
+      }
+      if (needsDvt(d.transportTypeId, d.canChonDvt) && !d.carrierId) {
+        setErr("Thuê ngoài — chọn đơn vị vận tải");
+        return;
+      }
+      if (!d.vehicleId || !d.productId || !d.regionId) {
+        setErr("Thiếu xe / hàng / khu vực");
+        return;
+      }
+    }
     setBusy(true);
     try {
       const body = {
@@ -73,10 +103,13 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
           productId: d.productId,
           regionId: d.regionId,
           note: d.note,
+          transportTypeId: d.transportTypeId || undefined,
+          transportTypeName: d.transportTypeName || undefined,
+          carrierId: d.carrierId || undefined,
           deliveries: d.deliveries.map((g) => ({
             customerId: g.customerId,
             customerDetail: g.customerName,
-            plannedQty: Number(g.plannedQty) || 0,
+            plannedQty: parseDecimalVN(g.plannedQty),
           })),
         })),
       };
@@ -118,146 +151,223 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
               {err}
             </div>
           )}
-          {details.map((d, di) => (
-            <div key={d.key} className="border rounded-xl p-3 space-y-2 bg-slate-50/50">
-              <div className="flex justify-between text-xs font-bold text-slate-600">
-                <span>Xe mới #{di + 1}</span>
-                {details.length > 1 && (
-                  <button
-                    type="button"
-                    className="text-red-600"
-                    onClick={() => setDetails((rows) => rows.filter((_, i) => i !== di))}
-                  >
-                    Xóa
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {details.map((d, di) => {
+            const needCarrier = needsDvt(d.transportTypeId, d.canChonDvt);
+            const xeDisabled =
+              !d.transportTypeId || (needCarrier && !d.carrierId);
+            return (
+              <div key={d.key} className="border rounded-xl p-3 space-y-2 bg-slate-50/50">
+                <div className="flex justify-between text-xs font-bold text-slate-600">
+                  <span>Xe mới #{di + 1}</span>
+                  {details.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-red-600"
+                      onClick={() =>
+                        setDetails((rows) => rows.filter((_, i) => i !== di))
+                      }
+                    >
+                      Xóa
+                    </button>
+                  )}
+                </div>
                 <MasterPicker
-                  type="XE"
-                  value={d.vehicleId}
-                  displayName={d.vehicleName}
-                  onChange={(id, name) =>
+                  type="HTVT"
+                  value={d.transportTypeId}
+                  displayName={d.transportTypeName}
+                  placeholder="Hình thức VT…"
+                  onChange={(id, name, raw) => {
+                    const can =
+                      String(raw?.CanChonDVT || "")
+                        .toLowerCase()
+                        .match(/^(true|1|yes|có|co)$/) != null ||
+                      String(id).toUpperCase().includes("THUE");
                     setDetails((rows) =>
                       rows.map((x, i) =>
-                        i === di ? { ...x, vehicleId: id, vehicleName: name } : x
+                        i === di
+                          ? {
+                              ...x,
+                              transportTypeId: id,
+                              transportTypeName: name,
+                              canChonDvt: !!can,
+                              carrierId: "",
+                              carrierName: "",
+                              vehicleId: "",
+                              vehicleName: "",
+                            }
+                          : x
                       )
-                    )
-                  }
+                    );
+                  }}
                 />
-                <MasterPicker
-                  type="HH"
-                  value={d.productId}
-                  displayName={d.productName}
-                  supplierId={order.supplierId}
-                  onChange={(id, name) =>
-                    setDetails((rows) =>
-                      rows.map((x, i) =>
-                        i === di ? { ...x, productId: id, productName: name } : x
-                      )
-                    )
-                  }
-                />
-                <MasterPicker
-                  type="KV"
-                  value={d.regionId}
-                  displayName={d.regionName}
-                  onChange={(id, name) =>
-                    setDetails((rows) =>
-                      rows.map((x, i) =>
-                        i === di ? { ...x, regionId: id, regionName: name } : x
-                      )
-                    )
-                  }
-                />
-              </div>
-              {d.deliveries.map((g, gi) => (
-                <div
-                  key={g.key}
-                  className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_auto] gap-2"
-                >
+                {needCarrier && (
                   <MasterPicker
-                    type="KH"
-                    value={g.customerId}
-                    displayName={g.customerName}
+                    type="DVT"
+                    value={d.carrierId}
+                    displayName={d.carrierName}
+                    placeholder="Đơn vị vận tải…"
                     onChange={(id, name) =>
                       setDetails((rows) =>
                         rows.map((x, i) =>
                           i === di
                             ? {
                                 ...x,
-                                deliveries: x.deliveries.map((dd, j) =>
-                                  j === gi
-                                    ? { ...dd, customerId: id, customerName: name }
-                                    : dd
-                                ),
+                                carrierId: id,
+                                carrierName: name,
+                                vehicleId: "",
+                                vehicleName: "",
                               }
                             : x
                         )
                       )
                     }
                   />
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="SL tấn"
-                    value={g.plannedQty}
-                    onChange={(e) =>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <MasterPicker
+                    type="XE"
+                    value={d.vehicleId}
+                    displayName={d.vehicleName}
+                    disabled={xeDisabled}
+                    htvtId={d.transportTypeId || undefined}
+                    dvtId={needCarrier ? d.carrierId || undefined : undefined}
+                    placeholder={
+                      xeDisabled ? "Chọn HTVT trước…" : "Chọn xe…"
+                    }
+                    onChange={(id, name) =>
                       setDetails((rows) =>
                         rows.map((x, i) =>
                           i === di
-                            ? {
-                                ...x,
-                                deliveries: x.deliveries.map((dd, j) =>
-                                  j === gi
-                                    ? { ...dd, plannedQty: e.target.value }
-                                    : dd
-                                ),
-                              }
+                            ? { ...x, vehicleId: id, vehicleName: name }
                             : x
                         )
                       )
                     }
-                    className="px-2 py-2 text-sm border rounded-lg text-center"
                   />
-                  <button
-                    type="button"
-                    disabled={d.deliveries.length <= 1}
-                    onClick={() =>
+                  <MasterPicker
+                    type="HH"
+                    value={d.productId}
+                    displayName={d.productName}
+                    supplierId={order.supplierId}
+                    onChange={(id, name) =>
                       setDetails((rows) =>
                         rows.map((x, i) =>
                           i === di
-                            ? {
-                                ...x,
-                                deliveries: x.deliveries.filter((_, j) => j !== gi),
-                              }
+                            ? { ...x, productId: id, productName: name }
                             : x
                         )
                       )
                     }
-                    className="w-8 h-8 rounded-lg bg-red-500 text-white font-bold disabled:opacity-30"
-                  >
-                    −
-                  </button>
+                  />
+                  <MasterPicker
+                    type="KV"
+                    value={d.regionId}
+                    displayName={d.regionName}
+                    onChange={(id, name) =>
+                      setDetails((rows) =>
+                        rows.map((x, i) =>
+                          i === di
+                            ? { ...x, regionId: id, regionName: name }
+                            : x
+                        )
+                      )
+                    }
+                  />
                 </div>
-              ))}
-              <button
-                type="button"
-                className="text-xs font-semibold text-sky-600"
-                onClick={() =>
-                  setDetails((rows) =>
-                    rows.map((x, i) =>
-                      i === di
-                        ? { ...x, deliveries: [...x.deliveries, emptyDelivery()] }
-                        : x
+                {d.deliveries.map((g, gi) => (
+                  <div
+                    key={g.key}
+                    className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_auto] gap-2"
+                  >
+                    <MasterPicker
+                      type="KH"
+                      value={g.customerId}
+                      displayName={g.customerName}
+                      onChange={(id, name) =>
+                        setDetails((rows) =>
+                          rows.map((x, i) =>
+                            i === di
+                              ? {
+                                  ...x,
+                                  deliveries: x.deliveries.map((dd, j) =>
+                                    j === gi
+                                      ? {
+                                          ...dd,
+                                          customerId: id,
+                                          customerName: name,
+                                        }
+                                      : dd
+                                  ),
+                                }
+                              : x
+                          )
+                        )
+                      }
+                    />
+                    <DecimalInput
+                      value={g.plannedQty}
+                      placeholder="SL tấn"
+                      onValueChange={(display) =>
+                        setDetails((rows) =>
+                          rows.map((x, i) =>
+                            i === di
+                              ? {
+                                  ...x,
+                                  deliveries: x.deliveries.map((dd, j) =>
+                                    j === gi
+                                      ? { ...dd, plannedQty: display }
+                                      : dd
+                                  ),
+                                }
+                              : x
+                          )
+                        )
+                      }
+                    />
+                    <button
+                      type="button"
+                      disabled={d.deliveries.length <= 1}
+                      onClick={() =>
+                        setDetails((rows) =>
+                          rows.map((x, i) =>
+                            i === di
+                              ? {
+                                  ...x,
+                                  deliveries: x.deliveries.filter(
+                                    (_, j) => j !== gi
+                                  ),
+                                }
+                              : x
+                          )
+                        )
+                      }
+                      className="w-8 h-8 rounded-lg bg-red-500 text-white font-bold disabled:opacity-30"
+                    >
+                      −
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-sky-600"
+                  onClick={() =>
+                    setDetails((rows) =>
+                      rows.map((x, i) =>
+                        i === di
+                          ? {
+                              ...x,
+                              deliveries: [...x.deliveries, emptyDelivery()],
+                            }
+                          : x
+                      )
                     )
-                  )
-                }
-              >
-                + Thêm khách kế hoạch
-              </button>
-            </div>
-          ))}
+                  }
+                >
+                  + Thêm khách kế hoạch
+                </button>
+              </div>
+            );
+          })}
           {details.length < 6 && (
             <button
               type="button"

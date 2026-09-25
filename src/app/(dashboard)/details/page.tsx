@@ -11,6 +11,7 @@ import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
 import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
+import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
 import {
   DeliveryEditorModal,
   summaryFromDetail,
@@ -129,21 +130,29 @@ function InputField({
   type?: string;
   readOnly?: boolean;
 }) {
+  const cls = `w-full px-3 py-2.5 rounded-lg text-sm border ${
+    readOnly
+      ? "bg-slate-100 border-slate-200 text-slate-700"
+      : "bg-white border-slate-300 text-slate-900 focus:ring-2 focus:ring-sky-400 focus:outline-none"
+  }`;
   return (
     <div>
       <div className="text-[12px] font-bold text-slate-600 mb-1">{label}</div>
-      <input
-        type={type}
-        step={type === "number" ? "0.01" : undefined}
-        value={value}
-        readOnly={readOnly}
-        onChange={(e) => onChange?.(e.target.value)}
-        className={`w-full px-3 py-2.5 rounded-lg text-sm border ${
-          readOnly
-            ? "bg-slate-100 border-slate-200 text-slate-700"
-            : "bg-white border-slate-300 text-slate-900 focus:ring-2 focus:ring-sky-400 focus:outline-none"
-        }`}
-      />
+      {type === "number" && !readOnly ? (
+        <DecimalInput
+          value={value}
+          onValueChange={(display) => onChange?.(display)}
+          className={cls + " tabular-nums"}
+        />
+      ) : (
+        <input
+          type={type === "number" ? "text" : type}
+          value={value}
+          readOnly={readOnly}
+          onChange={(e) => onChange?.(e.target.value)}
+          className={cls}
+        />
+      )}
     </div>
   );
 }
@@ -376,7 +385,7 @@ export default function DetailsPage() {
       const json = await apiPost(
         `/api/v1/order-details/${encodeURIComponent(receiveTarget.detailId)}/receive`,
         {
-          actualReceived: Number(recvQty),
+          actualReceived: parseDecimalVN(recvQty),
           receivedDate: recvDate,
           year: new Date().getFullYear(),
         }

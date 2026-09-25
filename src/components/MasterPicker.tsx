@@ -54,6 +54,8 @@ export function MasterPicker({
   disabled,
   supplierId,
   allowedIds,
+  htvtId,
+  dvtId,
 }: {
   type: MasterType;
   value: string;
@@ -64,6 +66,10 @@ export function MasterPicker({
   /** Lọc HH theo NCC_Hanghoa */
   supplierId?: string;
   allowedIds?: string[];
+  /** Lọc XE theo MaHTVT (V21 XE_BY_HTVT) */
+  htvtId?: string;
+  /** Lọc XE theo MaDVT khi thuê ngoài (V21 XE_BY_DVT) */
+  dvtId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -80,10 +86,10 @@ export function MasterPicker({
   useEffect(() => {
     setItems([]);
     setLoadedKey("");
-  }, [type, supplierId]);
+  }, [type, supplierId, htvtId, dvtId]);
 
   async function load() {
-    const cacheKey = `${type}|${supplierId || ""}`;
+    const cacheKey = `${type}|${supplierId || ""}|${htvtId || ""}|${dvtId || ""}`;
     if (items.length && loadedKey === cacheKey) return;
     setLoading(true);
     try {
@@ -120,7 +126,25 @@ export function MasterPicker({
         const id = pickField(r, ID_KEYS[type]);
         if (!id) continue;
         if (allowSet && !allowSet.has(id)) continue;
-        const name = pickField(r, NAME_KEYS[type]) || id;
+        // XE phụ thuộc HTVT / DVT (V21)
+        if (type === "XE") {
+          if (htvtId) {
+            const xH = String(r.MaHTVT || "").trim();
+            if (xH && xH !== htvtId) continue;
+          }
+          if (dvtId) {
+            const xD = String(r.MaDVT || "").trim();
+            if (xD && xD !== dvtId) continue;
+            // nếu xe không gắn MaDVT nhưng đang lọc DVT — bỏ qua
+            if (!xD) continue;
+          }
+        }
+        let name = pickField(r, NAME_KEYS[type]) || id;
+        if (type === "XE") {
+          const plate = String(r.BienSoXe || r.BienSo || name).trim();
+          const sub = [r.Tenlaixe, r.TenHTVT, r.TenDVT].filter(Boolean).join(" - ");
+          name = sub ? `${plate} | ${sub}` : plate;
+        }
         mapped.push({ id, name, raw: r });
       }
       mapped.sort((a, b) => a.name.localeCompare(b.name, "vi"));

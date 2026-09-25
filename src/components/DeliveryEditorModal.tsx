@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
+import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
 import { apiPatch } from "@/components/ActionPrompt";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -360,21 +361,17 @@ export function DeliveryEditorModal({
                   KH giao
                 </div>
                 {mode === "plan" ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={r.plannedQty ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                  <DecimalInput
+                    value={r.plannedQty == null || r.plannedQty === 0 ? "" : String(r.plannedQty).replace(".", ",")}
+                    onValueChange={(display, num) => {
                       setRows((prev) =>
                         prev.map((x, i) =>
                           i === idx
-                            ? { ...x, plannedQty: v === "" ? 0 : Number(v) }
+                            ? { ...x, plannedQty: num == null ? 0 : num }
                             : x
                         )
                       );
                     }}
-                    className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg tabular-nums text-center"
                   />
                 ) : (
                   <div className="text-sm tabular-nums px-2 py-2 rounded-lg bg-slate-100 border border-slate-200 text-center">
@@ -389,21 +386,21 @@ export function DeliveryEditorModal({
                   Thực giao
                 </div>
                 {mode === "real" ? (
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={r.actualQty ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
+                  <DecimalInput
+                    value={
+                      r.actualQty == null || r.actualQty === ""
+                        ? ""
+                        : String(r.actualQty).replace(".", ",")
+                    }
+                    onValueChange={(_display, num) => {
                       setRows((prev) =>
                         prev.map((x, i) =>
                           i === idx
-                            ? { ...x, actualQty: v === "" ? 0 : Number(v) }
+                            ? { ...x, actualQty: num == null ? 0 : num }
                             : x
                         )
                       );
                     }}
-                    className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg tabular-nums text-center"
                   />
                 ) : (
                   <div className="text-sm tabular-nums px-2 py-2 rounded-lg bg-slate-100 border border-slate-200 text-center">
