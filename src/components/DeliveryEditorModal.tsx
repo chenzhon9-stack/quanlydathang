@@ -362,7 +362,7 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "plan" ? (
                   <DecimalInput
-                    value={r.plannedQty == null || r.plannedQty === 0 ? "" : String(r.plannedQty).replace(".", ",")}
+                    value={r.plannedQty == null ? "" : String(r.plannedQty).replace(".", ",")}
                     onValueChange={(display, num) => {
                       setRows((prev) =>
                         prev.map((x, i) =>
@@ -388,7 +388,7 @@ export function DeliveryEditorModal({
                 {mode === "real" ? (
                   <DecimalInput
                     value={
-                      r.actualQty == null || r.actualQty === ""
+                      r.actualQty == null
                         ? ""
                         : String(r.actualQty).replace(".", ",")
                     }
