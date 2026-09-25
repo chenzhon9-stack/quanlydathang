@@ -8,7 +8,8 @@ import {
   matchSearch,
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
-import { PlateBadge } from "@/components/StatusBadge";
+import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
+import { statusRowClass } from "@/lib/status-styles";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import {
   DeliveryEditorModal,
@@ -226,13 +227,17 @@ export default function DeliveriesPage() {
                 {g.items.map((d) => (
                   <div
                     key={d.deliveryId}
-                    className="rounded-2xl border border-orange-200 bg-[#FFEDD5] p-4 shadow-sm text-[#9A3412]"
+                    className={`rounded-2xl border border-slate-300/70 p-4 shadow-sm ${statusRowClass(d.detailStatus || d.status || "")}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-xs text-slate-500">Ngày đặt</div>
-                      <div className="text-sm font-medium text-orange-700">
+                      <div className="text-sm font-medium text-slate-800">
                         {fmtDateVN(d.orderDate || d.deliveryDate || "")}
                       </div>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <span className="text-xs text-slate-500">Trạng thái xe</span>
+                      <StatusBadge status={String(d.detailStatus || "—")} />
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-slate-500">Biển số</span>
@@ -240,7 +245,7 @@ export default function DeliveriesPage() {
                     </div>
                     <div className="mt-2 flex justify-between gap-2 text-sm">
                       <span className="text-slate-500">ID Giao hàng</span>
-                      <span className="font-mono text-xs text-orange-800">{d.deliveryId}</span>
+                      <span className="font-mono text-xs text-slate-700">{d.deliveryId}</span>
                     </div>
                     <div className="mt-2 flex justify-between gap-2 text-sm">
                       <span className="text-slate-500">Khách hàng</span>
@@ -310,7 +315,7 @@ export default function DeliveriesPage() {
                         </tr>
                       )}
                       {g.items.map((d) => (
-                        <tr key={d.deliveryId} className="border-t border-slate-100 hover:bg-slate-50">
+                        <tr key={d.deliveryId} className={`border-t border-slate-200/80 ${statusRowClass(d.detailStatus || d.status || "")}`}>
                           <td className="px-3 py-2.5 font-mono text-xs">{d.deliveryId}</td>
                           <td className="px-3 py-2.5 text-blue-700 text-xs font-mono">{d.detailId}</td>
                           <td className="px-3 py-2.5">
