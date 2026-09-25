@@ -10,7 +10,7 @@ import { MasterRepository } from "@/repositories/master.repository";
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
-import { STATUS_CT, todayYmdVN } from "@/lib/status";
+import { STATUS_CT } from "@/lib/status";
 import {
   qty3,
   validateStep,
