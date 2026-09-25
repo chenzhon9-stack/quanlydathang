@@ -13,6 +13,7 @@ import type { Order } from "@/types";
 import { apiPost } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { CreateOrderModal } from "@/components/CreateOrderModal";
+import { AddDetailModal } from "@/components/AddDetailModal";
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -24,9 +25,11 @@ const STATUS_LABEL: Record<string, string> = {
 function OrderActions({
   o,
   onChanged,
+  onAddVehicle,
 }: {
   o: Order;
   onChanged?: () => void;
+  onAddVehicle?: (o: Order) => void;
 }) {
   // status có thể là enum EN hoặc chuỗi VN từ Sheet
   const raw = String(o.status || "");
@@ -67,7 +70,7 @@ function OrderActions({
       {isNew && (
         <>
           <button
-            onClick={() => toast("Thêm xe / mở order flow")}
+            onClick={() => (onAddVehicle ? onAddVehicle(o) : toast("Thêm xe"))}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500"
           >
             Thêm
@@ -138,6 +141,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [addTarget, setAddTarget] = useState<Order | null>(null);
 
   const load = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -303,7 +307,7 @@ export default function OrdersPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/80">
-                  <OrderActions o={o} />
+                  <OrderActions o={o} onChanged={load} onAddVehicle={setAddTarget} />
                 </div>
               </div>
             ))}
@@ -365,7 +369,7 @@ export default function OrdersPage() {
                             {o.createdBy}
                           </td>
                           <td className="px-3 py-2.5">
-                            <OrderActions o={o} />
+                            <OrderActions o={o} onChanged={load} onAddVehicle={setAddTarget} />
                           </td>
                         </tr>
                       ))}
@@ -391,6 +395,14 @@ export default function OrdersPage() {
         onClose={() => setShowCreate(false)}
         onCreated={(id) => {
           alert("Đã tạo đơn " + id);
+          load();
+        }}
+      />
+      <AddDetailModal
+        order={addTarget}
+        onClose={() => setAddTarget(null)}
+        onAdded={() => {
+          alert("Đã thêm xe vào đơn");
           load();
         }}
       />

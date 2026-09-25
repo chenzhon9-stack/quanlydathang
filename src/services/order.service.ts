@@ -523,6 +523,25 @@ export class OrderService {
       }
     }
 
+    try {
+      const { writeAudit } = await import("@/lib/sheets/audit");
+      await writeAudit({
+        email: user.email,
+        role: user.role,
+        action: "CREATE_ORDER",
+        maDon,
+        targetId: maDon,
+        newValue: JSON.stringify({
+          detailCount: details.length,
+          deliveryCount: totalGh,
+          detailIds,
+        }),
+        year: y,
+      });
+    } catch {
+      /* audit optional */
+    }
+
     return {
       orderId: maDon,
       orderDate: ngayDat,
@@ -531,6 +550,289 @@ export class OrderService {
       deliveryCount: totalGh,
       detailIds,
       status: "NEW",
+    };
+  }
+
+
+  /**
+   * Thêm xe vào đơn có sẵn — parity V21 saveOrderBatch type ADD_DETAIL
+   * - Đơn editable (NEW / chưa gửi cứng)
+   * - Tổng xe active ≤ 6
+   * - Validate + counter CT/GH giống createOrder
+   */
+  static async addDetailsToOrder(
+    orderId: string,
+    payload: {
+      year?: number;
+      details: Array<{
+        vehicleId: string;
+        productId: string;
+        regionId: string;
+        note?: string;
+        transportTypeId?: string;
+        transportTypeName?: string;
+        carrierId?: string;
+        deliveries: Array<{
+          customerId: string;
+          customerDetail?: string;
+          plannedQty: number;
+        }>;
+      }>;
+    },
+    user: UserContext
+  ) {
+    if (
+      !hasPermission(user, "ORDER_CREATE") &&
+      !hasPermission(user, "ORDER_UPDATE") &&
+      !hasPermission(user, "*")
+    ) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền thêm xe" };
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
+    }
+
+    const details = payload.details || [];
+    if (!details.length) {
+      throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết xe cần thêm." };
+    }
+
+    const y = payload.year ?? new Date().getFullYear();
+    const order = await OrderRepository.findById(orderId, y);
+    if (!order) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
+    }
+
+    const st = String(order.status || "");
+    const stU = st.toUpperCase();
+    // Cho phép thêm khi Khởi tạo / Đang xử lý; cấm Hủy / Hoàn thành
+    if (
+      stU.includes("CANCEL") ||
+      st.includes("Hủy") ||
+      stU === "DONE" ||
+      st.includes("Hoàn thành")
+    ) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Đơn đã hủy hoặc hoàn thành, không thêm xe.",
+      };
+    }
+    // Nếu đã gửi mail nhiều lần — vẫn cho purchase/admin thêm? V21: !_isOrderEditable_ chặn batch.
+    // Editable khi NEW hoặc chưa có file/lanGui lớn — nới: cho NEW + PROCESSING
+    const editable =
+      stU === "NEW" ||
+      st.includes("Khởi tạo") ||
+      stU === "PROCESSING" ||
+      st.includes("Đang xử lý");
+    if (!editable) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Trạng thái đơn không cho phép thêm xe.",
+      };
+    }
+
+    const { DetailRepository } = await import("@/repositories/detail.repository");
+    const existing = await DetailRepository.findMany({ year: y, orderId });
+    const active = existing.filter((d) => {
+      const s = String(d.status || "");
+      return !s.includes("Xóa") && s !== STATUS_CT.DELETE;
+    });
+    if (active.length + details.length > 6) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: `Mỗi đơn tối đa 6 xe (hiện ${active.length}, thêm ${details.length}).`,
+      };
+    }
+
+    // Trùng xe+hàng với active hiện có
+    const seen = new Set(
+      active.map((d) => `${d.vehicleId}|${d.productId}`)
+    );
+    for (const d of details) {
+      const key = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
+      if (seen.has(key)) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Trùng xe/hàng với đơn hiện tại: ${d.vehicleId} / ${d.productId}`,
+        };
+      }
+      seen.add(key);
+    }
+
+    const { ymdDate, toSheetDate } = await import("@/lib/sheets/date");
+    const { nextCounterCodes } = await import("@/lib/sheets/counter");
+    const { appendSheetRow, readSheetAsObjects } = await import(
+      "@/lib/sheets/dal"
+    );
+    const { qty3, validateStep } = await import("@/lib/business-rules");
+    const { writeAudit } = await import("@/lib/sheets/audit");
+
+    const ngayDat =
+      toSheetDate(order.orderDate) || ymdDate(new Date());
+    const maNcc = order.supplierId;
+    const isDuyenHa = ["dha", "btay"].includes(
+      String(maNcc || "").toLowerCase()
+    );
+
+    const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(
+      () => [] as Record<string, string>[]
+    );
+    const hhById = new Map<string, Record<string, string>>();
+    for (const r of hhRows) {
+      const id = String(r.MaHH || r.MaHh || "").trim();
+      if (id) hhById.set(id, r);
+    }
+
+    for (const d of details) {
+      if (!d.vehicleId || !d.productId || !d.regionId) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Thiếu xe / hàng / khu vực.",
+        };
+      }
+      if (!d.deliveries?.length) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Mỗi xe cần ≥1 dòng kế hoạch giao.",
+        };
+      }
+      const product = hhById.get(String(d.productId).trim());
+      const tlCH =
+        Number(product?.TyleChiahet || product?.TyleChiaHet || 0) || 0;
+      const tenHH = product?.TenHangHoa || d.productId;
+      for (const dl of d.deliveries) {
+        if (!dl.customerId) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: "Thiếu khách hàng trên dòng giao.",
+          };
+        }
+        const khg = qty3(Number(dl.plannedQty) || 0);
+        if (!(khg > 0)) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: "KH giao phải > 0.",
+          };
+        }
+        if (!validateStep(khg, tlCH)) {
+          throw {
+            code: "VALIDATION_ERROR",
+            message: `Kế hoạch giao ${tenHH} phải chia hết cho ${tlCH} tấn (hiện ${khg}).`,
+          };
+        }
+      }
+    }
+
+    const detailIds = await nextCounterCodes("CT", ngayDat, {
+      count: details.length,
+      email: user.email,
+      year: y,
+    });
+    const totalGh = details.reduce(
+      (s, d) => s + (d.deliveries?.length || 0),
+      0
+    );
+    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
+      count: totalGh,
+      email: user.email,
+      year: y,
+    });
+
+    const now = new Date().toISOString();
+    let ghIndex = 0;
+    const createdCt: string[] = [];
+
+    for (let idx = 0; idx < details.length; idx++) {
+      const d = details[idx];
+      const idCt = detailIds[idx];
+      const khTotal = qty3(
+        (d.deliveries || []).reduce(
+          (s, x) => s + (Number(x.plannedQty) || 0),
+          0
+        )
+      );
+
+      await appendSheetRow(
+        SHEETS.CT,
+        {
+          ID_Chitiet: idCt,
+          NgayDatHang: ngayDat,
+          MaDon: orderId,
+          MaNCC: maNcc,
+          MaXe: d.vehicleId,
+          MaHH: d.productId,
+          SoLuong: khTotal,
+          Khuvuc: d.regionId,
+          KhoXuat: "",
+          GhiChu: d.note || "",
+          TrangThaiXe: STATUS_CT.NEW,
+          TimeChange: now,
+          NgayNhanHang: "",
+          ThucNhan: 0,
+          User: user.email,
+          MaHTVT: d.transportTypeId || "",
+          TenHTVT: d.transportTypeName || "",
+          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
+        },
+        y
+      );
+      createdCt.push(idCt);
+
+      for (const dl of d.deliveries || []) {
+        const idGh = deliveryIds[ghIndex++];
+        await appendSheetRow(
+          SHEETS.GH,
+          {
+            ID_Giaohang: idGh,
+            ID_Chitiet: idCt,
+            MaKh: dl.customerId,
+            ChitietKh: dl.customerDetail || "",
+            KHgiao: qty3(Number(dl.plannedQty) || 0),
+            ThucGiao: 0,
+            Ngaygiao: "",
+            Ghichu: "",
+            Deleted: false,
+            DeletedAt: "",
+            DeletedBy: "",
+          },
+          y
+        );
+      }
+    }
+
+    // Cập nhật TongSoChitiet
+    const newTong = active.length + details.length;
+    await updateSheetRowByKey(
+      SHEETS.DH,
+      "MaDon",
+      orderId,
+      {
+        TongSoChitiet: newTong,
+        // đơn đã gửi → bật gửi lại nếu có LanGui
+        ...(Number(order.sendCount || 0) > 0 || order.resendMail
+          ? { GuiLaimail: true, ChoGuiMail: true }
+          : {}),
+      },
+      y
+    );
+
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "ADD_DETAIL",
+      maDon: orderId,
+      targetId: orderId,
+      newValue: JSON.stringify({ detailIds: createdCt, count: details.length }),
+      year: y,
+    });
+
+    await syncOrderStatusByOrderId(orderId, y).catch(() => null);
+
+    return {
+      orderId,
+      added: details.length,
+      detailIds: createdCt,
+      tongSoChitiet: newTong,
     };
   }
 }
