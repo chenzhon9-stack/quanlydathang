@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
-import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
+import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPatch } from "@/components/ActionPrompt";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -362,7 +362,7 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "plan" ? (
                   <DecimalInput
-                    value={r.plannedQty == null ? "" : String(r.plannedQty).replace(".", ",")}
+                    value={formatDecimalVN(r.plannedQty)}
                     onValueChange={(display, num) => {
                       setRows((prev) =>
                         prev.map((x, i) =>
@@ -387,11 +387,7 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "real" ? (
                   <DecimalInput
-                    value={
-                      r.actualQty == null
-                        ? ""
-                        : String(r.actualQty).replace(".", ",")
-                    }
+                    value={formatDecimalVN(r.actualQty)}
                     onValueChange={(_display, num) => {
                       setRows((prev) =>
                         prev.map((x, i) =>

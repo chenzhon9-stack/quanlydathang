@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
-import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
+import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
@@ -170,7 +170,7 @@ export function OrderManageModal({
                     customerId: g.customerId || "",
                     customerName: g.customerName || g.customerId || "",
                     customerDetail: g.customerDetail || "",
-                    plannedQty: String(g.plannedQty ?? "").replace(".", ","),
+                    plannedQty: formatDecimalVN(g.plannedQty ?? ""),
                     actualQty: Number(g.actualQty) || 0,
                   }))
                 : [emptyGh()],

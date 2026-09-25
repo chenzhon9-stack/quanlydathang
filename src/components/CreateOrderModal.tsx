@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
-import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
+import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 
 /** datetime-local value from Date (local) */
