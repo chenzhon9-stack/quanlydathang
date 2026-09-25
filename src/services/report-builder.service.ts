@@ -16,6 +16,7 @@ import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import {
+import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
   dynamicGroupBy,
   applyDynamicSort,
   REPORT_SCHEMAS,
@@ -216,6 +217,8 @@ export class ReportBuilderService {
     details = details.filter((d) => {
       if (!d.detailId || seen.has(d.detailId)) return false;
       seen.add(d.detailId);
+      // V21: skip Xóa xe; Hủy xe (và status CANCEL/DELETE) — không vào sản lượng
+      if (isExcludedDetailStatus(d.status)) return false;
       return (d.actualReceived || 0) > 0;
     });
 
@@ -398,6 +401,7 @@ export class ReportBuilderService {
       if (params.fromDate && dt && dt < params.fromDate) continue;
       if (params.toDate && dt && dt > params.toDate) continue;
       const ct = detMap.get(g.detailId);
+      if (ct && isExcludedDetailStatus(ct.status)) continue;
       const vehicleId = ct?.vehicleId || "";
       const productId = ct?.productId || "";
       const xe = xeExtra[vehicleId];
@@ -433,6 +437,10 @@ export class ReportBuilderService {
     let dels = (
       await Promise.all(years.map((y) => ReportRepository.getDeliveries(y)))
     ).flat();
+
+    details = details.filter((d) => !isExcludedDetailStatus(d.status));
+    const activeCtIds = new Set(details.map((d) => d.detailId));
+    dels = dels.filter((g) => !g.deleted && activeCtIds.has(g.detailId));
 
     if (scope.scopeType === "MANAGEMENT") {
       const allowed = await resolveAllowedSupplierIds(scope);
@@ -510,6 +518,7 @@ export class ReportBuilderService {
       if (params.fromDate && dt && dt < params.fromDate) continue;
       if (params.toDate && dt && dt > params.toDate) continue;
       const ct = detMap.get(g.detailId);
+      if (ct && isExcludedDetailStatus(ct.status)) continue;
       const vehicleId = ct?.vehicleId || "";
       const productId = ct?.productId || "";
       const xe = xeExtra[vehicleId] || {
@@ -580,6 +589,7 @@ export class ReportBuilderService {
     const byDon: Record<string, Agg> = {};
     const detailToOrder: Record<string, string> = {};
     for (const d of details) {
+      if (isExcludedDetailStatus(d.status)) continue;
       const mid = d.orderId || "";
       if (!mid) continue;
       detailToOrder[d.detailId] = mid;

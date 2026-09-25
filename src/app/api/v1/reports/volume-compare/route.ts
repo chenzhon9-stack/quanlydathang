@@ -3,6 +3,7 @@ import { getCurrentUser, resolveScope, hasPermission } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
+import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
@@ -238,6 +239,7 @@ export async function GET(req: NextRequest) {
       }
 
       for (const d of allDetails) {
+        if (isExcludedDetailStatus(d.status)) continue;
         const qty = d.actualReceived || 0;
         if (qty <= 0) continue;
         if (!isMainPhanLoai(d.productId, d.phanLoai)) continue;
@@ -276,7 +278,17 @@ export async function GET(req: NextRequest) {
           phanLoai: d.phanLoai,
         };
       }
-      allDels = allDels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
+      // Map status từ CT để loại Hủy/Xóa xe
+      const statusByCt: Record<string, string> = {};
+      for (const ct of allDet) {
+        statusByCt[ct.detailId] = String(ct.status || "");
+      }
+      allDels = allDels.filter(
+        (d) =>
+          !d.deleted &&
+          (d.actualQty || 0) > 0 &&
+          !isExcludedDetailStatus(statusByCt[d.detailId])
+      );
 
       for (const d of allDels) {
         const qty = d.actualQty || 0;

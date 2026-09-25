@@ -1,3 +1,4 @@
+import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
 import type {
   ReportFilter,
   PaginatedResult,
@@ -93,8 +94,11 @@ export class ReportService {
       );
     }
 
-    // Chỉ dòng có thực nhận > 0 (V21 getReportThucNhan)
-    details = details.filter((d) => (d.actualReceived || 0) > 0);
+    // Chỉ dòng có thực nhận > 0; loại Hủy xe / Xóa xe (V21 + yêu cầu)
+    details = details.filter(
+      (d) =>
+        !isExcludedDetailStatus(d.status) && (d.actualReceived || 0) > 0
+    );
 
     if (scope.scopeType === "MANAGEMENT") {
       const allowed = await resolveAllowedSupplierIds(scope);
@@ -236,7 +240,7 @@ export class ReportService {
 
     let openingsScoped = openings.filter((o) => o.active !== false);
     let detailsScoped = details.filter((d) => {
-      if (d.status === "DELETE") return false;
+      if (isExcludedDetailStatus(d.status)) return false;
       if ((d.actualReceived || 0) <= 0) return false;
       const dt = (d.receivedDate || "").slice(0, 10);
       if (!dt) return false;
