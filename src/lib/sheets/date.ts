@@ -220,11 +220,85 @@ export function normalizeSheetDate(
   return ymdDate(raw);
 }
 
-/** Ghi Sheet / API — luôn yyyy-MM-dd */
+/**
+ * Đổi yyyy-MM-dd (API) → serial Date Google Sheets (00:00:00) — parity V21 setValue(Date).
+ * Sheets epoch: 1899-12-30.
+ */
+export function toSheetSerialDate(
+  value: string | number | Date | null | undefined
+): number | "" {
+  const ymd = ymdDate(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "";
+  const [y, m, d] = ymd.split("-").map(Number);
+  const ms = Date.UTC(y, m - 1, d);
+  const epoch = Date.UTC(1899, 11, 30);
+  return (ms - epoch) / 86400000;
+}
+
+/**
+ * DateTime → serial Sheets (có phần giờ) — TimeChange / NgayDatHang full.
+ * Chuỗi chỉ ngày → 00:00:00.
+ */
+export function toSheetSerialDateTime(
+  value: string | number | Date | null | undefined
+): number | "" {
+  if (value === null || value === undefined || value === "") return "";
+  // pure date
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return toSheetSerialDate(value);
+  }
+  const d = parseLocalDate(value);
+  if (!d) return "";
+  // Lấy wall HCM nếu Date live
+  let y: number, mo: number, day: number, hh: number, mi: number, ss: number;
+  if (value instanceof Date || (typeof value === "string" && /Z$|[+-]\d{2}:\d{2}$/.test(value))) {
+    const ymd = ymdInTz(d);
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: TZ,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      })
+        .formatToParts(d)
+        .map((p) => [p.type, p.value])
+    );
+    [y, mo, day] = ymd.split("-").map(Number);
+    hh = Number(parts.hour || 0);
+    mi = Number(parts.minute || 0);
+    ss = Number(parts.second || 0);
+  } else {
+    y = d.getUTCFullYear();
+    mo = d.getUTCMonth() + 1;
+    day = d.getUTCDate();
+    hh = d.getUTCHours();
+    mi = d.getUTCMinutes();
+    ss = d.getUTCSeconds();
+  }
+  const daySerial = toSheetSerialDate(
+    `${y}-${String(mo).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+  );
+  if (daySerial === "") return "";
+  return (daySerial as number) + (hh * 3600 + mi * 60 + ss) / 86400;
+}
+
+/** Ghi Sheet ngày — serial Date 00:00:00 (API vẫn yyyy-MM-dd) */
 export function toSheetDate(
   value: string | number | Date | null | undefined
-): string {
-  return ymdDate(value);
+): number | "" {
+  return toSheetSerialDate(value);
+}
+
+/** Tên cột ngày (chỉ ngày, không giờ) trên Sheet V21 */
+export function isSheetDateOnlyField(field: string): boolean {
+  const f = String(field || "").trim();
+  if (!f) return false;
+  // Ngày nghiệp vụ điểm ngày
+  if (/^Ngay(NhanHang|giao|Giao|DatHang|CT|Chot)?$/i.test(f)) return true;
+  if (/^(TuNgay|DenNgay|NgayTao|NgayCapNhat)$/i.test(f)) return true;
+  if (/^Ngay/i.test(f) && !/time/i.test(f)) return true;
+  return false;
 }
 
 /** Hiển thị dd/MM/yyyy — parity _fmtDate */

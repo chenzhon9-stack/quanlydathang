@@ -1,3 +1,4 @@
+import { isSheetDateOnlyField, toSheetSerialDate, toSheetSerialDateTime, ymdDate } from "./date";
 import { getSheetsClient, getSpreadsheetId } from "./client";
 
 /** Read a sheet range and return rows as objects keyed by header (row 1). */
@@ -81,6 +82,38 @@ export async function batchReadSheets(
 }
 
 
+
+function coerceWriteValue(
+  field: string,
+  val: string | number | boolean
+): string | number | boolean {
+  if (typeof val === "boolean") return val ? "TRUE" : "FALSE";
+  if (typeof val === "number") return val;
+  const s = String(val ?? "").trim();
+  if (!s) return "";
+  // Date-only business fields → Sheets serial (Date 00:00:00)
+  if (isSheetDateOnlyField(field) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    // pure date or date+time string
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const serial = toSheetSerialDate(s);
+      return serial === "" ? s : serial;
+    }
+    const serial = toSheetSerialDateTime(s);
+    return serial === "" ? s : serial;
+  }
+  // TimeChange / DeletedAt as datetime serial if looks like date
+  if (
+    /^(TimeChange|DeletedAt|UpdatedAt|CreatedAt|ApprovedAt|LastLogin|NgayTao|NgayCapNhat)$/i.test(
+      field
+    ) &&
+    (/^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s))
+  ) {
+    const serial = toSheetSerialDateTime(s);
+    return serial === "" ? s : serial;
+  }
+  return val;
+}
+
 /** Ghi đè một dòng theo khóa (cột keyField = keyValue). Trả về row index 1-based hoặc -1. */
 export async function updateSheetRowByKey(
   sheetName: string,
@@ -123,8 +156,7 @@ export async function updateSheetRowByKey(
       (h) => h.toLowerCase() === field.toLowerCase()
     );
     if (ci < 0) return;
-    if (typeof val === "boolean") row[ci] = val ? "TRUE" : "FALSE";
-    else row[ci] = val as string | number;
+    row[ci] = coerceWriteValue(field, val as string | number | boolean);
   });
 
   const a1Row = rowIndex + 1; // 1-based
@@ -156,8 +188,7 @@ export async function appendSheetRow(
   const row = headers.map((h) => {
     const v = data[h];
     if (v === undefined || v === null) return "";
-    if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
-    return v;
+    return coerceWriteValue(h, v as string | number | boolean);
   });
   await sheets.spreadsheets.values.append({
     spreadsheetId,

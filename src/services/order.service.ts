@@ -338,7 +338,7 @@ export class OrderService {
       seen.add(key);
     }
 
-    const { ymdDate, toSheetDate } = await import("@/lib/sheets/date");
+    const { ymdDate } = await import("@/lib/sheets/date");
     const { generateUniqueMaDon } = await import("@/lib/sheets/ma-don");
     const { nextCounterCodes } = await import("@/lib/sheets/counter");
     const { appendSheetRow, readSheetAsObjects } = await import(
@@ -346,13 +346,13 @@ export class OrderService {
     );
     const { qty3, validateStep } = await import("@/lib/business-rules");
 
-    // Giữ full datetime nếu client gửi (V21 NgayDatHang có giờ)
+    // API/logic: yyyy-MM-dd hoặc datetime local; DAL ghi Sheet → serial Date (V21)
     const ngayDatRaw = String(payload.orderDate || "").trim();
     let ngayDat = "";
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ngayDatRaw)) {
       ngayDat = ngayDatRaw.length === 16 ? ngayDatRaw + ":00" : ngayDatRaw.slice(0, 19);
     } else {
-      ngayDat = toSheetDate(ngayDatRaw) || ymdDate(new Date());
+      ngayDat = ymdDate(ngayDatRaw) || ymdDate(new Date()) || "";
     }
     const y =
       payload.year ??
@@ -669,7 +669,7 @@ export class OrderService {
       seen.add(key);
     }
 
-    const { ymdDate, toSheetDate } = await import("@/lib/sheets/date");
+    const { ymdDate } = await import("@/lib/sheets/date");
     const { nextCounterCodes } = await import("@/lib/sheets/counter");
     const { appendSheetRow, readSheetAsObjects } = await import(
       "@/lib/sheets/dal"
@@ -678,7 +678,7 @@ export class OrderService {
     const { writeAudit } = await import("@/lib/sheets/audit");
 
     const ngayDat =
-      toSheetDate(order.orderDate) || ymdDate(new Date());
+      ymdDate(order.orderDate) || ymdDate(new Date()) || "";
     const maNcc = order.supplierId;
     const isDuyenHa = ["dha", "btay"].includes(
       String(maNcc || "").toLowerCase()
