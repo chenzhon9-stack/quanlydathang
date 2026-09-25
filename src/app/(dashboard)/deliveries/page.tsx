@@ -227,7 +227,7 @@ export default function DeliveriesPage() {
                 {g.items.map((d) => (
                   <div
                     key={d.deliveryId}
-                    className={`rounded-2xl border border-slate-300/70 p-4 shadow-sm ${statusRowClass(d.detailStatus || d.status || "")}`}
+                    className={`rounded-2xl border border-slate-300/70 p-4 shadow-sm ${statusRowClass(d.detailStatus || "")}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-xs text-slate-500">Ngày đặt</div>
@@ -315,7 +315,7 @@ export default function DeliveriesPage() {
                         </tr>
                       )}
                       {g.items.map((d) => (
-                        <tr key={d.deliveryId} className={`border-t border-slate-200/80 ${statusRowClass(d.detailStatus || d.status || "")}`}>
+                        <tr key={d.deliveryId} className={`border-t border-slate-200/80 ${statusRowClass(d.detailStatus || "")}`}>
                           <td className="px-3 py-2.5 font-mono text-xs">{d.deliveryId}</td>
                           <td className="px-3 py-2.5 text-blue-700 text-xs font-mono">{d.detailId}</td>
                           <td className="px-3 py-2.5">
