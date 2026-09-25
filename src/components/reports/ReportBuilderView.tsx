@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportSubNav } from "@/components/ReportSubNav";
 import { REPORT_SCHEMAS, type ReportType } from "@/lib/reports/dynamic-group";
-import {
-  ColumnCustomizer,
-  ValueFilterBar,
-} from "@/components/ColumnCustomizer";
+import { ColumnCustomizer } from "@/components/ColumnCustomizer";
+import { HeaderFilterTh } from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -153,13 +151,15 @@ export function ReportBuilderView({
     return true;
   });
 
-  const filterOptions = groupBy.map((k) => {
-    const d = schema.dimensions.find((x) => x.key === k);
-    const values = [
-      ...new Set(items.map((r) => String(r[k] ?? "")).filter(Boolean)),
-    ].sort();
-    return { key: k, label: d?.header || k, values };
-  });
+  const colUnique = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const k of groupBy) {
+      map[k] = [
+        ...new Set(items.map((r) => String(r[k] ?? "")).filter(Boolean)),
+      ].sort();
+    }
+    return map;
+  }, [items, groupBy]);
 
   return (
     <div className="space-y-4 max-w-full">
@@ -215,12 +215,6 @@ export function ReportBuilderView({
             Tùy chỉnh cột
           </button>
         </div>
-        <ValueFilterBar
-          filters={valFilters}
-          options={filterOptions}
-          onChange={setValFilters}
-        />
-
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
             Nhóm theo (Group by) — giống V21
@@ -262,14 +256,17 @@ export function ReportBuilderView({
               <thead>
                 <tr className="bg-slate-100 text-slate-600 text-xs">
                   {displayCols.map((c) => (
-                    <th
+                    <HeaderFilterTh
                       key={c.key}
-                      className={`px-3 py-2.5 font-semibold whitespace-nowrap ${
-                        c.isMeasure ? "text-right" : "text-left"
-                      }`}
-                    >
-                      {c.header}
-                    </th>
+                      label={c.header}
+                      align={c.isMeasure ? "right" : "left"}
+                      filterable={!c.isMeasure}
+                      values={colUnique[c.key] || []}
+                      selected={valFilters[c.key] || []}
+                      onChange={(next) =>
+                        setValFilters((f) => ({ ...f, [c.key]: next }))
+                      }
+                    />
                   ))}
                 </tr>
               </thead>

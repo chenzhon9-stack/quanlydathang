@@ -6,8 +6,12 @@ export type ColumnDef = {
   key: string;
   label: string;
   defaultVisible?: boolean;
-  /** Cột có thể lọc giá trị */
+  /** Cột có thể lọc giá trị trên header (V21 filter icon) */
   filterable?: boolean;
+  /** Dimension — báo cáo groupBy / filterType */
+  dimension?: boolean;
+  /** align for th */
+  align?: "left" | "right";
 };
 
 export type ColumnState = {

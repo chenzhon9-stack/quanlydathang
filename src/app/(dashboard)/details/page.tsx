@@ -17,10 +17,8 @@ import {
   summaryFromDetail,
 } from "@/components/DeliveryEditorModal";
 import { statusRowClass } from "@/lib/status-styles";
-import {
-  ColumnCustomizer,
-  ValueFilterBar,
-} from "@/components/ColumnCustomizer";
+import { ColumnCustomizer } from "@/components/ColumnCustomizer";
+import { HeaderFilterTh } from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -32,13 +30,16 @@ import type { Delivery, OrderDetail } from "@/types";
 
 const DETAIL_COLUMNS: ColumnDef[] = [
   { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
-  { key: "id", label: "ID", defaultVisible: true },
+  { key: "id", label: "ID", defaultVisible: true, filterable: true },
+  { key: "orderId", label: "Mã đơn", defaultVisible: false, filterable: true },
+  { key: "supplier", label: "NCC", defaultVisible: false, filterable: true },
   { key: "product", label: "Hàng hóa", defaultVisible: true, filterable: true },
-  { key: "qty", label: "KH đặt", defaultVisible: true },
-  { key: "recvDate", label: "Ngày nhận", defaultVisible: true },
-  { key: "actualRecv", label: "Thực nhận", defaultVisible: true },
-  { key: "actualDel", label: "Thực giao", defaultVisible: true },
-  { key: "remain", label: "Tồn", defaultVisible: true },
+  { key: "region", label: "Khu vực", defaultVisible: false, filterable: true },
+  { key: "qty", label: "KH đặt", defaultVisible: true, align: "right" },
+  { key: "recvDate", label: "Ngày nhận", defaultVisible: true, filterable: true },
+  { key: "actualRecv", label: "Thực nhận", defaultVisible: true, align: "right" },
+  { key: "actualDel", label: "Thực giao", defaultVisible: true, align: "right" },
+  { key: "remain", label: "Tồn", defaultVisible: true, align: "right" },
   { key: "status", label: "Trạng thái", defaultVisible: true, filterable: true },
   { key: "note", label: "Ghi chú", defaultVisible: true },
   { key: "actions", label: "Hành động", defaultVisible: true },
@@ -404,39 +405,50 @@ export default function DetailsPage() {
 
   const filteredCols = useMemo(() => {
     return filtered.filter((d) => {
-      if (valFilters.status?.length) {
-        const st = STATUS_LABEL[d.status] || d.status;
-        if (!valFilters.status.includes(st) && !valFilters.status.includes(d.status))
-          return false;
-      }
-      if (valFilters.product?.length) {
-        const p = d.productName || d.productId || "";
-        if (!valFilters.product.includes(p)) return false;
-      }
-      if (valFilters.plate?.length) {
-        const pl = d.vehiclePlate || d.vehicleId || "";
-        if (!valFilters.plate.includes(pl)) return false;
+      const checks: [string, string][] = [
+        ["status", STATUS_LABEL[d.status] || d.status || ""],
+        ["product", d.productName || d.productId || ""],
+        ["plate", d.vehiclePlate || d.vehicleId || ""],
+        ["id", d.detailId || ""],
+        ["orderId", d.orderId || ""],
+        ["supplier", d.supplierName || d.supplierId || ""],
+        ["region", d.regionName || d.regionId || ""],
+        ["recvDate", String(d.receivedDate || "").slice(0, 10)],
+      ];
+      for (const [key, val] of checks) {
+        const sel = valFilters[key];
+        if (sel?.length && !sel.includes(val)) return false;
       }
       return true;
     });
   }, [filtered, valFilters]);
 
-  const filterOptions = useMemo(() => {
-    const plates = new Set<string>();
-    const products = new Set<string>();
-    const statuses = new Set<string>();
+  const colUnique = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    const buckets: Record<string, Set<string>> = {
+      plate: new Set(),
+      id: new Set(),
+      orderId: new Set(),
+      supplier: new Set(),
+      product: new Set(),
+      region: new Set(),
+      recvDate: new Set(),
+      status: new Set(),
+    };
     for (const d of filtered) {
-      if (d.vehiclePlate || d.vehicleId)
-        plates.add(d.vehiclePlate || d.vehicleId);
-      if (d.productName || d.productId)
-        products.add(d.productName || d.productId);
-      statuses.add(STATUS_LABEL[d.status] || d.status);
+      buckets.plate?.add(d.vehiclePlate || d.vehicleId || "");
+      buckets.id?.add(d.detailId || "");
+      buckets.orderId?.add(d.orderId || "");
+      buckets.supplier?.add(d.supplierName || d.supplierId || "");
+      buckets.product?.add(d.productName || d.productId || "");
+      buckets.region?.add(d.regionName || d.regionId || "");
+      if (d.receivedDate) buckets.recvDate?.add(String(d.receivedDate).slice(0, 10));
+      buckets.status?.add(STATUS_LABEL[d.status] || d.status || "");
     }
-    return [
-      { key: "plate", label: "Biển số", values: [...plates].sort() },
-      { key: "product", label: "Hàng hóa", values: [...products].sort() },
-      { key: "status", label: "Trạng thái", values: [...statuses].sort() },
-    ];
+    for (const [k, set] of Object.entries(buckets)) {
+      map[k] = [...set].filter(Boolean).sort();
+    }
+    return map;
   }, [filtered]);
 
 
@@ -641,11 +653,6 @@ export default function DetailsPage() {
         </div>
       </div>
 
-      <ValueFilterBar
-        filters={valFilters}
-        options={filterOptions}
-        onChange={setValFilters}
-      />
       <ListToolbar
         search={search}
         onSearch={setSearch}
@@ -738,18 +745,24 @@ export default function DetailsPage() {
                 <thead>
                   <tr className="bg-[#d9e5f0] text-slate-800 text-xs">
                     {visibleCols.map((c) => (
-                      <th
+                      <HeaderFilterTh
                         key={c.key}
-                        className={`px-2 py-2 font-bold ${
-                          ["qty", "actualRecv", "actualDel", "remain"].includes(c.key)
-                            ? "text-right"
-                            : c.key === "actions"
-                              ? "text-right"
-                              : "text-left"
-                        }`}
-                      >
-                        {c.label}
-                      </th>
+                        label={c.label}
+                        align={
+                          c.align ||
+                          (["qty", "actualRecv", "actualDel", "remain", "actions"].includes(
+                            c.key
+                          )
+                            ? "right"
+                            : "left")
+                        }
+                        filterable={!!c.filterable}
+                        values={colUnique[c.key] || []}
+                        selected={valFilters[c.key] || []}
+                        onChange={(next) =>
+                          setValFilters((f) => ({ ...f, [c.key]: next }))
+                        }
+                      />
                     ))}
                   </tr>
                 </thead>
@@ -787,6 +800,24 @@ export default function DetailsPage() {
                               return (
                                 <td key={c.key} className="px-2 py-2 font-mono text-[11px] text-blue-700">
                                   {d.detailId}
+                                </td>
+                              );
+                            if (c.key === "orderId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.orderId}
+                                </td>
+                              );
+                            if (c.key === "supplier")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.supplierName || d.supplierId}
+                                </td>
+                              );
+                            if (c.key === "region")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.regionName || d.regionId}
                                 </td>
                               );
                             if (c.key === "product")

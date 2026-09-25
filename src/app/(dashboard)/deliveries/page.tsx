@@ -10,10 +10,8 @@ import {
 import type { Delivery } from "@/types";
 import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
 import { statusRowClass } from "@/lib/status-styles";
-import {
-  ColumnCustomizer,
-  ValueFilterBar,
-} from "@/components/ColumnCustomizer";
+import { ColumnCustomizer } from "@/components/ColumnCustomizer";
+import { HeaderFilterTh } from "@/components/HeaderFilterTh";
 import {
   type ColumnDef,
   type ColumnState,
@@ -36,14 +34,14 @@ function fmtDateVN(ymd: string) {
 
 
 const DELIVERY_COLUMNS: ColumnDef[] = [
-  { key: "id", label: "ID Giao hàng", defaultVisible: true },
-  { key: "detailId", label: "ID Chi tiết", defaultVisible: true },
+  { key: "id", label: "ID Giao hàng", defaultVisible: true, filterable: true },
+  { key: "detailId", label: "ID Chi tiết", defaultVisible: true, filterable: true },
   { key: "plate", label: "Biển số", defaultVisible: true, filterable: true },
   { key: "status", label: "Trạng thái xe", defaultVisible: true, filterable: true },
   { key: "customer", label: "Khách hàng", defaultVisible: true, filterable: true },
-  { key: "planned", label: "KH giao", defaultVisible: true },
-  { key: "actual", label: "Thực giao", defaultVisible: true },
-  { key: "date", label: "Ngày giao", defaultVisible: true },
+  { key: "planned", label: "KH giao", defaultVisible: true, align: "right" },
+  { key: "actual", label: "Thực giao", defaultVisible: true, align: "right" },
+  { key: "date", label: "Ngày giao", defaultVisible: true, filterable: true },
   { key: "actions", label: "Hành động", defaultVisible: true },
 ];
 
@@ -164,37 +162,45 @@ export default function DeliveriesPage() {
 
   const filteredCols = useMemo(() => {
     return filtered.filter((d) => {
-      if (valFilters.status?.length) {
-        const st = String(d.detailStatus || "");
-        if (!valFilters.status.includes(st)) return false;
-      }
-      if (valFilters.customer?.length) {
-        const c = d.customerName || d.customerDetail || d.customerId || "";
-        if (!valFilters.customer.includes(c)) return false;
-      }
-      if (valFilters.plate?.length) {
-        const pl = d.vehiclePlate || "";
-        if (!valFilters.plate.includes(pl)) return false;
+      const checks: [string, string][] = [
+        ["status", String(d.detailStatus || "")],
+        ["customer", d.customerName || d.customerDetail || d.customerId || ""],
+        ["plate", d.vehiclePlate || ""],
+        ["id", d.deliveryId || ""],
+        ["detailId", d.detailId || ""],
+        ["date", String(d.deliveryDate || "").slice(0, 10)],
+      ];
+      for (const [key, val] of checks) {
+        const sel = valFilters[key];
+        if (sel?.length && !sel.includes(val)) return false;
       }
       return true;
     });
   }, [filtered, valFilters]);
 
-  const filterOptions = useMemo(() => {
-    const plates = new Set<string>();
-    const customers = new Set<string>();
-    const statuses = new Set<string>();
+  const colUnique = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    const buckets: Record<string, Set<string>> = {
+      id: new Set(),
+      detailId: new Set(),
+      plate: new Set(),
+      status: new Set(),
+      customer: new Set(),
+      date: new Set(),
+    };
     for (const d of filtered) {
-      if (d.vehiclePlate) plates.add(d.vehiclePlate);
+      buckets.id?.add(d.deliveryId || "");
+      buckets.detailId?.add(d.detailId || "");
+      if (d.vehiclePlate) buckets.plate?.add(d.vehiclePlate);
+      if (d.detailStatus) buckets.status?.add(String(d.detailStatus));
       const c = d.customerName || d.customerDetail || d.customerId;
-      if (c) customers.add(c);
-      if (d.detailStatus) statuses.add(String(d.detailStatus));
+      if (c) buckets.customer?.add(c);
+      if (d.deliveryDate) buckets.date?.add(String(d.deliveryDate).slice(0, 10));
     }
-    return [
-      { key: "plate", label: "Biển số", values: [...plates].sort() },
-      { key: "customer", label: "Khách hàng", values: [...customers].sort() },
-      { key: "status", label: "Trạng thái xe", values: [...statuses].sort() },
-    ];
+    for (const [k, set] of Object.entries(buckets)) {
+      map[k] = [...set].filter(Boolean).sort();
+    }
+    return map;
   }, [filtered]);
 
 
@@ -255,12 +261,7 @@ export default function DeliveriesPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <ValueFilterBar
-          filters={valFilters}
-          options={filterOptions}
-          onChange={setValFilters}
-        />
+      <div className="flex justify-end">
         <button
           type="button"
           onClick={() => setColOpen(true)}
@@ -269,7 +270,7 @@ export default function DeliveriesPage() {
           Tùy chỉnh cột
         </button>
       </div>
-      <ListToolbar
+<ListToolbar
         search={search}
         onSearch={setSearch}
         searchPlaceholder="Tìm mã GH, CT, khách, biển số…"
@@ -378,18 +379,22 @@ export default function DeliveriesPage() {
                 <thead>
                   <tr className="bg-slate-100 text-slate-700 text-xs">
                     {visibleCols.map((c) => (
-                      <th
+                      <HeaderFilterTh
                         key={c.key}
-                        className={`px-3 py-2.5 font-semibold ${
-                          ["planned", "actual"].includes(c.key)
-                            ? "text-right"
-                            : c.key === "actions"
-                              ? "text-right"
-                              : "text-left"
-                        }`}
-                      >
-                        {c.label}
-                      </th>
+                        label={c.label}
+                        align={
+                          c.align ||
+                          (["planned", "actual", "actions"].includes(c.key)
+                            ? "right"
+                            : "left")
+                        }
+                        filterable={!!c.filterable}
+                        values={colUnique[c.key] || []}
+                        selected={valFilters[c.key] || []}
+                        onChange={(next) =>
+                          setValFilters((f) => ({ ...f, [c.key]: next }))
+                        }
+                      />
                     ))}
                   </tr>
                 </thead>
