@@ -61,6 +61,8 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
   if (!order) return null;
 
   async function submit() {
+    if (!order) return;
+    const orderId = order.orderId;
     setErr(null);
     setBusy(true);
     try {
@@ -79,7 +81,7 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
         })),
       };
       const json = await apiPost(
-        `/api/v1/orders/${encodeURIComponent(order.orderId)}/details`,
+        `/api/v1/orders/${encodeURIComponent(orderId)}/details`,
         body
       );
       if (!json.success) {
