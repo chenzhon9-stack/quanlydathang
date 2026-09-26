@@ -17,7 +17,7 @@ import {
   DeliveryEditorModal,
   summaryFromDetail,
 } from "@/components/DeliveryEditorModal";
-import { statusRowClass } from "@/lib/status-styles";
+import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
   HeaderFilterTh,
@@ -32,6 +32,7 @@ import {
 } from "@/lib/column-prefs";
 import { DETAILS_COLUMN_DEFS } from "@/lib/column-definitions";
 import type { Delivery, OrderDetail } from "@/types";
+
 
 const DETAIL_COLUMNS = DETAILS_COLUMN_DEFS;
 
@@ -245,6 +246,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
   );
 }
 
+
 function normCtStatus(raw: string): string {
   const s = String(raw || "").trim();
   const u = s.toUpperCase();
@@ -258,7 +260,6 @@ function normCtStatus(raw: string): string {
   if (u === "NEW" || fold.includes("moi tao") || fold.includes("khoi tao")) return "NEW";
   return u || fold;
 }
-
 function statusLabelVN(raw: string): string {
   const map: Record<string, string> = {
     NEW: "Mới tạo", ORDERED: "Đặt hàng", RECEIVED: "Đã nhận",
@@ -266,19 +267,16 @@ function statusLabelVN(raw: string): string {
   };
   return map[normCtStatus(raw)] || (raw ? String(raw) : "—");
 }
-
 function canReceiveDetail(d: { status?: string; actualReceived?: number }): boolean {
   const st = normCtStatus(String(d.status || ""));
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
   return true;
 }
-
 function canDeliverDetail(d: { status?: string; actualReceived?: number }): boolean {
   const st = normCtStatus(String(d.status || ""));
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
   return st === "RECEIVED" || st === "DELIVERING" || (Number(d.actualReceived) || 0) > 0;
 }
-
 function canCancelDetail(d: { status?: string; actualReceived?: number }): boolean {
   const st = normCtStatus(String(d.status || ""));
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
@@ -538,6 +536,7 @@ export default function DetailsPage() {
     }
     return map;
   }, [filtered]);
+
 
   function detailSortVal(d: OrderDetail, key: string): string | number {
     switch (key) {
@@ -840,61 +839,75 @@ export default function DetailsPage() {
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải…</div>
       ) : (
         <>
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3 pb-20">
+          {/* Mobile cards — parity V21 */}
+          <div className="md:hidden space-y-3 pb-24">
             {displayGroups.map((g) => (
-              <div key={g.key} className="space-y-2">
+              <div key={g.key} className="space-y-2.5">
                 {groupByDate && (
-                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3 py-2 text-sm font-semibold shadow">
-                    📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
-                    <span className="ml-2 text-xs font-normal text-slate-300">
-                      ({g.items.length})
+                  <div className={DATE_GROUP_HEADER + " flex items-center gap-2"}>
+                    <span>📅</span>
+                    <span className="flex-1">
+                      Ngày đặt lệnh: {fmtDateVN(g.key)}
+                      <span className="ml-1.5 text-xs font-normal text-slate-300">
+                        ({g.items.length})
+                      </span>
                     </span>
                   </div>
                 )}
-                {g.items.map((d) => (
-                  <div
-                    key={d.detailId}
-                    className={`rounded-2xl border border-slate-300/70 p-4 shadow-sm ${statusRowClass(d.status)}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                        <div className="text-[10px] mt-1 opacity-80">
-                          {transportSub(d)}
+                {g.items.map((d) => {
+                  const st = d.status || "";
+                  const row = (k: string, v: string | number, vClass = "") => (
+                    <div className="flex items-start justify-between gap-3 py-1 text-sm">
+                      <span className="text-[13px] opacity-80 shrink-0">{k}</span>
+                      <span className={`text-right font-medium leading-snug break-words max-w-[62%] ${vClass}`}>
+                        {v}
+                      </span>
+                    </div>
+                  );
+                  return (
+                    <div
+                      key={d.detailId}
+                      className={`rounded-2xl border-2 p-3.5 shadow-sm ${statusRowClass(st)}`}
+                    >
+                      {row("Ngày đặt", fmtDateVN(d.orderDate || ""))}
+                      <div className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-[13px] opacity-80">Biển số</span>
+                        <span className={PLATE_CLASS}>
+                          {d.vehiclePlate || d.vehicleId || "—"}
+                        </span>
+                      </div>
+                      {row("ID Chi tiết", d.detailId, "font-mono text-[12px]")}
+                      {row("Hàng hóa", d.productName || d.productId || "—")}
+                      {row("NCC", d.supplierName || d.supplierId || "—")}
+                      {row("KH đặt", fmtNum(d.quantity))}
+                      {row("Thực nhận", fmtNum(d.actualReceived))}
+                      {row("Tồn", fmtNum(tonConLai(d)))}
+                      {d.receivedDate
+                        ? row("Ngày nhận", fmtDateVN(d.receivedDate))
+                        : null}
+                      <div className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-[13px] opacity-80">Trạng thái</span>
+                        <span
+                          className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
+                        >
+                          {statusLabelVN(st)}
+                        </span>
+                      </div>
+                      <div className="pt-2 mt-1 border-t border-black/10">
+                        <div className="flex flex-wrap gap-2 [&_button]:min-h-[40px] [&_button]:px-3 [&_button]:rounded-xl">
+                          <DetailActions d={d} h={handlers} />
                         </div>
-                        <div className="text-xs font-mono mt-1 opacity-70">
-                          {d.detailId}
-                        </div>
-                      </div>
-                      <StatusBadge status={statusLabelVN(d.status)} />
-                    </div>
-                    <div className="mt-2 text-sm font-medium">
-                      {d.productName || d.productId}
-                    </div>
-                    <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
-                      <div>
-                        <div className="opacity-60">KH đặt</div>
-                        <div className="font-semibold tabular-nums">{fmtNum(d.quantity)}</div>
-                      </div>
-                      <div>
-                        <div className="opacity-60">Thực nhận</div>
-                        <div className="font-semibold tabular-nums">{fmtNum(d.actualReceived)}</div>
-                      </div>
-                      <div>
-                        <div className="opacity-60">Tồn</div>
-                        <div className="font-semibold tabular-nums">{fmtNum(tonConLai(d))}</div>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-slate-200/80">
-                      <div className="flex flex-wrap gap-2 justify-stretch [&_button]:flex-1 [&_button]:min-w-[30%]">
-                        <DetailActions d={d} h={handlers} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
+            {filteredCols.length === 0 && !err && (
+              <div className="text-center py-12 text-slate-400 text-sm">
+                Không có chi tiết
+              </div>
+            )}
           </div>
 
           {/* Desktop table — cột như V21 */}
@@ -992,6 +1005,7 @@ export default function DetailsPage() {
                                   {d.regionName || d.regionId}
                                 </td>
                               );
+
                             if (c.key === "vehicleId")
                               return (
                                 <td key={c.key} className="px-2 py-2 font-mono text-[11px]">

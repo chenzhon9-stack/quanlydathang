@@ -9,7 +9,7 @@ import {
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
 import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
-import { statusRowClass } from "@/lib/status-styles";
+import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
   HeaderFilterTh,
@@ -36,6 +36,7 @@ function fmtDateVN(ymd: string) {
   if (p.length === 3) return `${p[2]}/${p[1]}/${p[0]}`;
   return ymd;
 }
+
 
 const DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
 
@@ -97,6 +98,7 @@ function modeFromDelivery(d: Delivery): DeliveryModalMode {
   if (label === "Sửa") return "plan";
   return "real";
 }
+
 
 export default function DeliveriesPage() {
   const [items, setItems] = useState<Delivery[]>([]);
@@ -276,6 +278,7 @@ export default function DeliveriesPage() {
     return map;
   }, [filtered]);
 
+
   function delSortVal(d: Delivery, key: string): string | number {
     const planned = Number(d.plannedQty) || 0;
     const actual = Number(d.actualQty) || 0;
@@ -350,7 +353,9 @@ export default function DeliveriesPage() {
       .map((k) => ({ key: k, items: byDate[k] }));
   }, [sortedFiltered, groupByDate]);
 
+
   return (
+
     <div className="space-y-4 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -400,8 +405,7 @@ export default function DeliveriesPage() {
           Tùy chỉnh cột
         </button>
       </div>
-
-      <ListToolbar
+<ListToolbar
         search={search}
         onSearch={setSearch}
         searchPlaceholder="Tìm mã GH, CT, khách, biển số…"
@@ -432,15 +436,15 @@ export default function DeliveriesPage() {
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải giao hàng...</div>
       ) : (
         <>
-          {/* Mobile cards — header ngày đặt lệnh sticky */}
-          <div className="md:hidden space-y-3 pb-20">
+          {/* Mobile cards — parity V21 */}
+          <div className="md:hidden space-y-3 pb-24">
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2.5">
                 {groupByDate && (
-                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3.5 py-2.5 text-sm font-semibold shadow-md flex items-center gap-2">
-                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-white/15 text-xs">📅</span>
+                  <div className={DATE_GROUP_HEADER + " flex items-center gap-2"}>
+                    <span>📅</span>
                     <span className="flex-1">
-                      Ngày đặt: {fmtDateVN(g.key)}
+                      Ngày đặt lệnh: {fmtDateVN(g.key)}
                       <span className="ml-1.5 text-xs font-normal text-slate-300">
                         ({g.items.length})
                       </span>
@@ -450,110 +454,111 @@ export default function DeliveriesPage() {
                 {g.items.map((d) => {
                   const label = actionLabel(d);
                   const viewOnly = isViewOnly(d);
+                  const st = d.detailStatus || "";
                   const khName = d.customerName || d.customerId || "—";
-                  const missingKh =
-                    !d.customerId ||
-                    /chưa xác định|chua xac dinh/i.test(khName);
+                  const planned = Number(d.plannedQty) || 0;
+                  const actual = Number(d.actualQty) || 0;
+                  const diff = Math.round((planned - actual) * 1000) / 1000;
+                  const row = (k: string, v: string | number, vClass = "") => (
+                    <div className="flex items-start justify-between gap-3 py-1 text-sm">
+                      <span className="text-[13px] opacity-80 shrink-0">{k}</span>
+                      <span className={`text-right font-medium leading-snug break-words max-w-[62%] ${vClass}`}>
+                        {v}
+                      </span>
+                    </div>
+                  );
                   return (
                     <div
                       key={d.deliveryId}
-                      className={`rounded-2xl border bg-white p-3.5 shadow-sm ${statusRowClass(d.detailStatus || "")}`}
+                      className={`rounded-2xl border-2 p-3.5 shadow-sm ${statusRowClass(st)}`}
                     >
-                      {/* Hàng 1: biển số + trạng thái */}
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-amber-400 text-slate-900 text-xs font-extrabold tracking-wide shadow-sm">
-                          {d.vehiclePlate || d.vehicleId || "—"}
-                        </span>
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border border-slate-200 bg-white/90 text-slate-700">
-                          {statusLabelVN(d.detailStatus || "")}
-                        </span>
-                      </div>
-
-                      {/* Hàng 2: mã + ngày */}
-                      <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
-                        <span className="font-mono truncate">
-                          {d.deliveryId}
-                          {d.detailId ? (
-                            <span className="text-slate-400"> · {d.detailId}</span>
-                          ) : null}
-                        </span>
-                        <span className="shrink-0 tabular-nums">
-                          {fmtDateVN(d.orderDate || d.deliveryDate || "")}
-                        </span>
-                      </div>
-
-                      {/* Hàng hóa nếu có */}
-                      {(d.productName || d.productId) && (
-                        <div className="mt-1.5 text-sm font-medium text-slate-800 leading-snug">
-                          {d.productName || d.productId}
+                      {row("Ngày đặt", fmtDateVN(d.orderDate || d.deliveryDate || ""))}
+                      <div className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-[13px] opacity-80">Biển số</span>
+                        <div className="flex items-center gap-2">
+                          <span className={PLATE_CLASS}>
+                            {d.vehiclePlate || d.vehicleId || "—"}
+                          </span>
                         </div>
+                      </div>
+                      {row("ID Giao hàng", d.deliveryId, "font-mono text-[12px]")}
+                      {(d.productName || d.productId) &&
+                        row("Hàng hóa", d.productName || d.productId || "")}
+                      {(d as { receivedDate?: string }).receivedDate
+                        ? row(
+                            "Ngày nhận",
+                            fmtDateVN(
+                              String(
+                                (d as { receivedDate?: string }).receivedDate ||
+                                  ""
+                              )
+                            )
+                          )
+                        : null}
+                      {row(
+                        "Tên khách hàng",
+                        khName,
+                        /chưa xác định|chua xac dinh/i.test(khName)
+                          ? "text-amber-900 font-semibold"
+                          : ""
                       )}
-
-                      {/* Khách */}
-                      <div
-                        className={`mt-2 text-sm leading-snug break-words ${
-                          missingKh
-                            ? "text-amber-800 font-semibold"
-                            : "text-slate-800 font-medium"
-                        }`}
-                      >
-                        <span className="text-[11px] font-normal text-slate-500 block mb-0.5">
-                          Khách hàng
+                      {row(
+                        "KH giao",
+                        planned.toLocaleString("vi-VN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })
+                      )}
+                      {row(
+                        "Ngày giao",
+                        d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"
+                      )}
+                      {row(
+                        "Thực giao",
+                        actual.toLocaleString("vi-VN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })
+                      )}
+                      {row(
+                        "Chênh lệch",
+                        diff.toLocaleString("vi-VN", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        }),
+                        diff > 0.001
+                          ? "text-emerald-700 font-bold"
+                          : diff < -0.001
+                            ? "text-red-700 font-bold"
+                            : ""
+                      )}
+                      <div className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-[13px] opacity-80">Trạng thái</span>
+                        <span
+                          className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
+                        >
+                          {statusLabelVN(st)}
                         </span>
-                        {khName}
                       </div>
-
-                      {/* Số lượng */}
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
-                            KH giao
-                          </div>
-                          <div className="text-base font-bold tabular-nums text-slate-800">
-                            {Number(d.plannedQty || 0).toLocaleString("vi-VN", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </div>
-                        </div>
-                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
-                          <div className="text-[10px] uppercase tracking-wide text-emerald-700 font-semibold">
-                            Thực giao
-                          </div>
-                          <div className="text-base font-bold tabular-nums text-emerald-800">
-                            {d.actualQty != null
-                              ? Number(d.actualQty).toLocaleString("vi-VN", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })
-                              : "—"}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Nút hành động full-width, dễ bấm */}
-                      <div className="mt-3 pt-3 border-t border-slate-100">
+                      <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-black/10">
+                        <span className="text-[13px] opacity-80">Hành động</span>
                         <button
                           type="button"
-                          onClick={() => {
+                          onClick={() =>
                             setModalTarget({
                               delivery: d,
                               mode: modeFromDelivery(d),
-                            });
-                          }}
-                          className={`w-full min-h-[44px] rounded-xl text-sm font-bold shadow-sm active:scale-[0.98] transition ${
+                            })
+                          }
+                          className={`min-h-[40px] min-w-[88px] px-4 rounded-xl text-sm font-bold border-2 shadow-sm active:scale-[0.98] ${
                             viewOnly
-                              ? "bg-white text-slate-700 border-2 border-slate-300"
+                              ? "bg-white/90 text-slate-700 border-slate-400"
                               : label === "Sửa"
-                                ? "bg-white text-slate-800 border-2 border-slate-400"
-                                : "bg-sky-600 text-white border-2 border-sky-700"
+                                ? "bg-white/90 text-slate-800 border-slate-500"
+                                : "bg-sky-600 text-white border-sky-700"
                           }`}
                         >
-                          {label === "Giao"
-                            ? "Giao hàng"
-                            : label === "Sửa"
-                              ? "Sửa kế hoạch"
-                              : "Xem chi tiết"}
+                          {label}
                         </button>
                       </div>
                     </div>
@@ -786,7 +791,6 @@ export default function DeliveriesPage() {
           )}
         </>
       )}
-
       {modalTarget && (
         <DeliveryEditorModal
           mode={modalTarget.mode}
@@ -795,7 +799,6 @@ export default function DeliveriesPage() {
           onSaved={() => load(page)}
         />
       )}
-
       <ColumnCustomizer
         open={colOpen}
         tabKey="delivery"
