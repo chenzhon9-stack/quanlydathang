@@ -101,6 +101,9 @@ export interface Delivery {
   /** Trạng thái CT (enrich) */
   detailStatus?: string;
   actualReceived?: number;
+  /** Ngày nhận từ CT — khóa ngày giao */
+  receivedDate?: string;
+  isDuyenHa?: boolean;
 }
 
 export interface ProductionPlan {

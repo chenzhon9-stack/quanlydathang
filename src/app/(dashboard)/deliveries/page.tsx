@@ -9,7 +9,7 @@ import {
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
 import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
-import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER } from "@/lib/status-styles";
+import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER, matchStatusFilter } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
   HeaderFilterTh,
@@ -162,36 +162,9 @@ export default function DeliveriesPage() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    const norm = (s: string) =>
-      String(s || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase()
-        .trim();
-    const STATUS_ALIASES: Record<string, string[]> = {
-      "moi tao": ["moi tao", "new"],
-      "dat hang": ["dat hang", "ordered"],
-      "da nhan": ["da nhan", "received"],
-      "dang giao": ["dang giao", "delivering"],
-      "hoan thanh": ["hoan thanh", "done"],
-      "huy xe": ["huy xe", "huy", "cancel"],
-      "xoa xe": ["xoa xe", "xoa", "delete"],
-    };
-    return items.filter((d) => {
-      if (d.deleted && !(statuses.includes("Xóa xe") || statuses.includes("ALL") || statuses.length === 0)) {
-        // vẫn cho xem nếu chọn Xóa xe / ALL
-      }
-      if (!(statuses.length === 0 || statuses.includes("ALL"))) {
-        const stRaw = String(d.detailStatus || "");
-        const stN = norm(stRaw);
-        const ok = statuses.some((sel) => {
-          const sn = norm(sel);
-          if (stN === sn || stRaw === sel) return true;
-          const aliases = STATUS_ALIASES[sn] || [sn];
-          return aliases.some((a) => stN === a || stN.includes(a));
-        });
-        if (!ok) return false;
-      }
+        return items.filter((d) => {
+      // Chip trạng thái — so khớp EN/VN (ORDERED ↔ Đặt hàng)
+      if (!matchStatusFilter(d.detailStatus, statuses)) return false;
       const hay = [
         d.deliveryId,
         d.detailId,

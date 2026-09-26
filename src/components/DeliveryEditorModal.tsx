@@ -437,26 +437,32 @@ export function DeliveryEditorModal({
                       isDuyenHa: !!summary.isDuyenHa,
                     });
                     return (
-                      <input
-                        type="date"
-                        value={r.deliveryDate || ""}
-                        min={bounds.min}
-                        max={bounds.max}
-                        onChange={(e) => {
-                          const v = clampYmd(e.target.value, bounds.min, bounds.max);
-                          setRows((prev) =>
-                            prev.map((x, i) =>
-                              i === idx ? { ...x, deliveryDate: v } : x
-                            )
-                          );
-                        }}
-                        className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg"
-                        title={
-                          bounds.min
+                      <>
+                        <input
+                          type="date"
+                          value={r.deliveryDate || ""}
+                          min={bounds.min || undefined}
+                          max={bounds.max}
+                          onChange={(e) => {
+                            const v = clampYmd(
+                              e.target.value,
+                              bounds.min,
+                              bounds.max
+                            );
+                            setRows((prev) =>
+                              prev.map((x, i) =>
+                                i === idx ? { ...x, deliveryDate: v } : x
+                              )
+                            );
+                          }}
+                          className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg"
+                        />
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {bounds.min
                             ? `Từ ${bounds.min} đến ${bounds.max}`
-                            : `Đến ${bounds.max} (cần có ngày nhận)`
-                        }
-                      />
+                            : `Đến ${bounds.max} (cần ngày nhận để khóa min)`}
+                        </div>
+                      </>
                     );
                   })()
                 ) : (

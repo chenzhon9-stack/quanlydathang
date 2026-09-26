@@ -76,6 +76,8 @@ export class DeliveryService {
           productId: ct.productId,
           status: ct.status,
           actualReceived: ct.actualReceived,
+          receivedDate: ct.receivedDate,
+          isDuyenHa: !!(ct as { isDuyenHa?: boolean }).isDuyenHa,
         },
       ])
     );
@@ -98,6 +100,8 @@ export class DeliveryService {
           ct?.productId,
         detailStatus: ct?.status,
         actualReceived: ct?.actualReceived,
+        receivedDate: ct?.receivedDate,
+        isDuyenHa: ct?.isDuyenHa,
       };
     });
     // Sort mới → cũ theo ngày đặt lệnh

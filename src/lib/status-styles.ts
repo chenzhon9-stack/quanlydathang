@@ -94,3 +94,17 @@ export const PLATE_CLASS =
 
 export const DATE_GROUP_HEADER =
   "sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3.5 py-2.5 text-sm font-semibold shadow-md";
+
+
+/** Lọc chip trạng thái: so khớp EN/VN qua normalizeStatusKey */
+export function matchStatusFilter(
+  rowStatus: string | undefined | null,
+  selected: string[]
+): boolean {
+  if (!selected.length || selected.includes("ALL")) return true;
+  const rowKey = normalizeStatusKey(String(rowStatus || ""));
+  return selected.some((sel) => {
+    if (sel === "ALL") return true;
+    return normalizeStatusKey(sel) === rowKey;
+  });
+}

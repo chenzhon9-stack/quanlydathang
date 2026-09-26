@@ -17,7 +17,7 @@ import {
   DeliveryEditorModal,
   summaryFromDetail,
 } from "@/components/DeliveryEditorModal";
-import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER } from "@/lib/status-styles";
+import {statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER, matchStatusFilter} from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
   HeaderFilterTh,
@@ -439,7 +439,7 @@ export default function DetailsPage() {
 
   const filtered = useMemo(() => {
     return items.filter((d) => {
-      if (!matchStatuses(d.status, statuses)) return false;
+      if (!matchStatusFilter(d.status, statuses)) return false;
       const hay = [
         d.detailId,
         d.orderId,

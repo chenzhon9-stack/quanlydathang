@@ -10,7 +10,7 @@ type Props = {
   onSearch: (v: string) => void;
   searchPlaceholder?: string;
   statuses: StatusOption[];
-  selectedStatuses: string[]; // empty or includes ALL → all
+  selectedStatuses: string[];
   onToggleStatus: (key: string) => void;
   groupByDate: boolean;
   onGroupByDate: (v: boolean) => void;
@@ -57,14 +57,13 @@ export function ListToolbar({
           )}
         </div>
       </div>
-      {/* Chip trạng thái — scroll ngang trên mobile, không grayscale mờ */}
-      <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+      <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1">
         <button
           type="button"
           onClick={() => onToggleStatus("ALL")}
           className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${
             allOn
-              ? "bg-sky-600 text-white border-sky-700 shadow-sm"
+              ? "bg-sky-600 text-white border-sky-700 shadow-md ring-2 ring-offset-1 ring-sky-300"
               : "bg-white text-slate-600 border-slate-300 hover:border-sky-400"
           }`}
         >
@@ -80,10 +79,10 @@ export function ListToolbar({
                 key={s.key}
                 type="button"
                 onClick={() => onToggleStatus(s.key)}
-                className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${
+                className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${chip} ${
                   on
-                    ? `${chip} shadow-md ring-2 ring-offset-1 ring-sky-300`
-                    : `bg-white text-slate-600 border-slate-300 hover:border-slate-400`
+                    ? "shadow-md ring-2 ring-offset-1 ring-slate-400 scale-[1.03] opacity-100"
+                    : "opacity-70 hover:opacity-100"
                 }`}
               >
                 {s.label}
@@ -95,7 +94,6 @@ export function ListToolbar({
   );
 }
 
-/** Multi-select status helper */
 export function toggleStatus(current: string[], key: string): string[] {
   if (key === "ALL") return ["ALL"];
   const withoutAll = current.filter((k) => k !== "ALL");
