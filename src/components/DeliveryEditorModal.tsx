@@ -96,12 +96,8 @@ export function DeliveryEditorModal({
   onSaved,
 }: Props) {
   const [rows, setRows] = useState<Delivery[]>(initialRows || []);
-<<<<<<< HEAD
-  /** Chuỗi đang gõ (giữ dấu phẩy) — key p-{idx} / a-{idx} */
-=======
   /** Chuỗi đang gõ (giữ dấu phẩy). Key: p-{idx} KH giao, a-{idx} Thực giao */
   const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
->>>>>>> 7255262 (feat: lock receive/delivery date pickers to V21 bounds)
   const [loading, setLoading] = useState(!initialRows);
   const [busy, setBusy] = useState(false);
 
