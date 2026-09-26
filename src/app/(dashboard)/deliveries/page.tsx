@@ -437,77 +437,139 @@ export default function DeliveriesPage() {
       ) : (
         <>
           {/* Mobile cards — header ngày đặt lệnh sticky */}
-          <div className="md:hidden space-y-4">
+          <div className="md:hidden space-y-3 pb-20">
             {displayGroups.map((g) => (
-              <div key={g.key} className="space-y-2">
+              <div key={g.key} className="space-y-2.5">
                 {groupByDate && (
-                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3 py-2.5 text-sm font-semibold shadow-md">
-                    📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
-                    <span className="ml-2 text-xs font-normal text-slate-300">
-                      ({g.items.length})
+                  <div className="sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3.5 py-2.5 text-sm font-semibold shadow-md flex items-center gap-2">
+                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-white/15 text-xs">📅</span>
+                    <span className="flex-1">
+                      Ngày đặt: {fmtDateVN(g.key)}
+                      <span className="ml-1.5 text-xs font-normal text-slate-300">
+                        ({g.items.length})
+                      </span>
                     </span>
                   </div>
                 )}
-                {g.items.map((d) => (
-                  <div
-                    key={d.deliveryId}
-                    className={`rounded-2xl border border-slate-300/70 p-4 shadow-sm ${statusRowClass(d.detailStatus || "")}`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="text-xs text-slate-500">Ngày đặt</div>
-                      <div className="text-sm font-medium text-slate-800">
-                        {fmtDateVN(d.orderDate || d.deliveryDate || "")}
-                      </div>
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-xs text-slate-500">Trạng thái xe</span>
-                      <StatusBadge status={statusLabelVN(d.detailStatus || "")} />
-                    </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-xs text-slate-500">Biển số</span>
-                      <PlateBadge plate={d.vehiclePlate} />
-                    </div>
-                    <div className="mt-2 flex justify-between gap-2 text-sm">
-                      <span className="text-slate-500">ID Giao hàng</span>
-                      <span className="font-mono text-xs text-slate-700">{d.deliveryId}</span>
-                    </div>
-                    <div className="mt-2 flex justify-between gap-2 text-sm">
-                      <span className="text-slate-500">Khách hàng</span>
-                      <span className="font-medium text-right truncate max-w-[60%]">
-                        {d.customerName || d.customerDetail || d.customerId}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex justify-between text-sm">
-                      <span className="text-slate-500">KH / Thực giao</span>
-                      <span className="tabular-nums font-medium">
-                        {d.plannedQty.toFixed(2)} /{" "}
-                        <span className="text-emerald-700">
-                          {d.actualQty?.toFixed(2) ?? "—"}
+                {g.items.map((d) => {
+                  const label = actionLabel(d);
+                  const viewOnly = isViewOnly(d);
+                  const khName =
+                    d.customerName || d.customerId || "—";
+                  const missingKh =
+                    !d.customerId ||
+                    /chưa xác định|chua xac dinh/i.test(khName);
+                  return (
+                    <div
+                      key={d.deliveryId}
+                      className={`rounded-2xl border bg-white p-3.5 shadow-sm ${statusRowClass(d.detailStatus || "")}`}
+                    >
+                      {/* Hàng 1: biển số + trạng thái */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-amber-400 text-slate-900 text-xs font-extrabold tracking-wide shadow-sm">
+                          {d.vehiclePlate || d.vehicleId || "—"}
                         </span>
-                      </span>
-                    </div>
-                    <div className="mt-3 pt-3 border-t border-slate-200/80 flex justify-end">
-                      <button
-                        onClick={() => {
-                          setModalTarget({ delivery: d, mode: modeFromDelivery(d) });
-                        }}
-                        className={`px-3 py-1.5 text-[11px] font-bold rounded border shadow-sm ${
-                          isViewOnly(d)
-                            ? "bg-white text-slate-600 border-slate-300"
-                            : actionLabel(d) === "Sửa"
-                              ? "bg-white text-slate-700 border-slate-300"
-                              : "bg-sky-500 text-white border-sky-600"
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border border-slate-200 bg-white/90 text-slate-700">
+                          {statusLabelVN(d.detailStatus || "")}
+                        </span>
+                      </div>
+
+                      {/* Hàng 2: mã + ngày */}
+                      <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                        <span className="font-mono truncate">
+                          {d.deliveryId}
+                          {d.detailId ? (
+                            <span className="text-slate-400"> · {d.detailId}</span>
+                          ) : null}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {fmtDateVN(d.orderDate || d.deliveryDate || "")}
+                        </span>
+                      </div>
+
+                      {/* Hàng hóa nếu có */}
+                      {(d.productName || d.productId) && (
+                        <div className="mt-1.5 text-sm font-medium text-slate-800 leading-snug">
+                          {d.productName || d.productId}
+                        </div>
+                      )}
+
+                      {/* Khách */}
+                      <div
+                        className={`mt-2 text-sm leading-snug break-words ${
+                          missingKh
+                            ? "text-amber-800 font-semibold"
+                            : "text-slate-800 font-medium"
                         }`}
                       >
-                        {actionLabel(d)}
-                      </button>
+                        <span className="text-[11px] font-normal text-slate-500 block mb-0.5">
+                          Khách hàng
+                        </span>
+                        {khName}
+                      </div>
+
+                      {/* Số lượng */}
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">
+                            KH giao
+                          </div>
+                          <div className="text-base font-bold tabular-nums text-slate-800">
+                            {Number(d.plannedQty || 0).toLocaleString("vi-VN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </div>
+                        </div>
+                        <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+                          <div className="text-[10px] uppercase tracking-wide text-emerald-700 font-semibold">
+                            Thực giao
+                          </div>
+                          <div className="text-base font-bold tabular-nums text-emerald-800">
+                            {d.actualQty != null
+                              ? Number(d.actualQty).toLocaleString("vi-VN", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })
+                              : "—"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Nút hành động full-width, dễ bấm */}
+                      <div className="mt-3 pt-3 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalTarget({
+                              delivery: d,
+                              mode: modeFromDelivery(d),
+                            });
+                          }}
+                          className={`w-full min-h-[44px] rounded-xl text-sm font-bold shadow-sm active:scale-[0.98] transition ${
+                            viewOnly
+                              ? "bg-white text-slate-700 border-2 border-slate-300"
+                              : label === "Sửa"
+                                ? "bg-white text-slate-800 border-2 border-slate-400"
+                                : "bg-sky-600 text-white border-2 border-sky-700"
+                          }`}
+                        >
+                          {label === "Giao"
+                            ? "Giao hàng"
+                            : label === "Sửa"
+                              ? "Sửa kế hoạch"
+                              : "Xem chi tiết"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
             {filteredCols.length === 0 && !err && (
-              <div className="text-center py-12 text-slate-400 text-sm">Không có lượt giao</div>
+              <div className="text-center py-12 text-slate-400 text-sm">
+                Không có lượt giao
+              </div>
             )}
           </div>
 
