@@ -4,9 +4,12 @@
  */
 
 function foldStatus(raw: string): string {
+  // Đ/đ không tách được bằng NFD → thay thủ công thành D/d
   return String(raw || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
     .toLowerCase()
     .trim();
 }

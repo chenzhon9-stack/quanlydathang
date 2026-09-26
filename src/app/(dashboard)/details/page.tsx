@@ -301,7 +301,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
 function normCtStatus(raw: string): string {
   const s = String(raw || "").trim();
   const u = s.toUpperCase();
-  const fold = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const fold = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/gi, "d").toLowerCase();
   if (u === "CANCEL" || fold.includes("huy xe") || fold === "huy") return "CANCEL";
   if (u === "DELETE" || fold.includes("xoa xe") || fold === "xoa") return "DELETE";
   if (u === "DONE" || fold.includes("hoan thanh")) return "DONE";
@@ -332,6 +332,10 @@ function canCancelDetail(d: { status?: string; actualReceived?: number }): boole
   const st = normCtStatus(String(d.status || ""));
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
   return (Number(d.actualReceived) || 0) <= 0;
+}
+
+function isColVisible(visibleCols: { key: string }[], key: string): boolean {
+  return visibleCols.some((c) => c.key === key);
 }
 
 export default function DetailsPage() {
@@ -890,7 +894,7 @@ export default function DetailsPage() {
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải…</div>
       ) : (
         <>
-          {/* Mobile cards — parity V21 */}
+          {/* Mobile cards — parity V21 + tùy cột */}
           <div className="md:hidden space-y-3 pb-24">
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2.5">
@@ -907,6 +911,7 @@ export default function DetailsPage() {
                 )}
                 {g.items.map((d) => {
                   const st = d.status || "";
+                  const show = (key: string) => isColVisible(visibleCols, key);
                   const row = (k: string, v: string | number, vClass = "") => (
                     <div className="flex items-start justify-between gap-3 py-1 text-sm">
                       <span className="text-[13px] opacity-80 shrink-0">{k}</span>
@@ -920,30 +925,44 @@ export default function DetailsPage() {
                       key={d.detailId}
                       className={`rounded-2xl border-2 p-3.5 shadow-sm ${statusRowClass(st)}`}
                     >
-                      {row("Ngày đặt", fmtDateVN(d.orderDate || ""))}
-                      <div className="flex items-center justify-between gap-2 py-1">
-                        <span className="text-[13px] opacity-80">Biển số</span>
-                        <span className={PLATE_CLASS}>
-                          {d.vehiclePlate || d.vehicleId || "—"}
-                        </span>
-                      </div>
-                      {row("ID Chi tiết", d.detailId, "font-mono text-[12px]")}
-                      {row("Hàng hóa", d.productName || d.productId || "—")}
-                      {row("NCC", d.supplierName || d.supplierId || "—")}
-                      {row("KH đặt", fmtNum(d.quantity))}
-                      {row("Thực nhận", fmtNum(d.actualReceived))}
-                      {row("Tồn", fmtNum(tonConLai(d)))}
-                      {d.receivedDate
-                        ? row("Ngày nhận", fmtDateVN(d.receivedDate))
-                        : null}
-                      <div className="flex items-center justify-between gap-2 py-1">
-                        <span className="text-[13px] opacity-80">Trạng thái</span>
-                        <span
-                          className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
-                        >
-                          {statusLabelVN(st)}
-                        </span>
-                      </div>
+                      {show("orderDate") &&
+                        row("Ngày đặt", fmtDateVN(d.orderDate || ""))}
+                      {show("plate") && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Biển số</span>
+                          <span className={PLATE_CLASS}>
+                            {d.vehiclePlate || d.vehicleId || "—"}
+                          </span>
+                        </div>
+                      )}
+                      {show("id") &&
+                        row("ID Chi tiết", d.detailId, "font-mono text-[12px]")}
+                      {show("product") &&
+                        row("Hàng hóa", d.productName || d.productId || "—")}
+                      {show("qty") && row("KH đặt", fmtNum(d.quantity))}
+                      {show("actualRecv") &&
+                        row("Thực nhận", fmtNum(d.actualReceived))}
+                      {show("actualDel") &&
+                        row(
+                          "Thực giao",
+                          fmtNum((d as { actualDelivered?: number }).actualDelivered)
+                        )}
+                      {show("remain") && row("Tồn", fmtNum(tonConLai(d)))}
+                      {show("recvDate") &&
+                        row(
+                          "Ngày nhận",
+                          d.receivedDate ? fmtDateVN(d.receivedDate) : "—"
+                        )}
+                      {show("status") && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Trạng thái</span>
+                          <span
+                            className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
+                          >
+                            {statusLabelVN(st)}
+                          </span>
+                        </div>
+                      )}
                       <div className="pt-2 mt-1 border-t border-black/10">
                         <div className="flex flex-wrap gap-2 [&_button]:min-h-[40px] [&_button]:px-3 [&_button]:rounded-xl">
                           <DetailActions d={d} h={handlers} />
