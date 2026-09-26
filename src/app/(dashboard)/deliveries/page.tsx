@@ -37,7 +37,6 @@ function fmtDateVN(ymd: string) {
   return ymd;
 }
 
-
 const DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
 
 /** Chuẩn hóa trạng thái CT (EN/VN) */
@@ -98,7 +97,6 @@ function modeFromDelivery(d: Delivery): DeliveryModalMode {
   if (label === "Sửa") return "plan";
   return "real";
 }
-
 
 export default function DeliveriesPage() {
   const [items, setItems] = useState<Delivery[]>([]);
@@ -278,7 +276,6 @@ export default function DeliveriesPage() {
     return map;
   }, [filtered]);
 
-
   function delSortVal(d: Delivery, key: string): string | number {
     const planned = Number(d.plannedQty) || 0;
     const actual = Number(d.actualQty) || 0;
@@ -353,9 +350,7 @@ export default function DeliveriesPage() {
       .map((k) => ({ key: k, items: byDate[k] }));
   }, [sortedFiltered, groupByDate]);
 
-
   return (
-
     <div className="space-y-4 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -405,7 +400,8 @@ export default function DeliveriesPage() {
           Tùy chỉnh cột
         </button>
       </div>
-<ListToolbar
+
+      <ListToolbar
         search={search}
         onSearch={setSearch}
         searchPlaceholder="Tìm mã GH, CT, khách, biển số…"
@@ -454,8 +450,7 @@ export default function DeliveriesPage() {
                 {g.items.map((d) => {
                   const label = actionLabel(d);
                   const viewOnly = isViewOnly(d);
-                  const khName =
-                    d.customerName || d.customerId || "—";
+                  const khName = d.customerName || d.customerId || "—";
                   const missingKh =
                     !d.customerId ||
                     /chưa xác định|chua xac dinh/i.test(khName);
@@ -791,6 +786,7 @@ export default function DeliveriesPage() {
           )}
         </>
       )}
+
       {modalTarget && (
         <DeliveryEditorModal
           mode={modalTarget.mode}
@@ -799,6 +795,7 @@ export default function DeliveriesPage() {
           onSaved={() => load(page)}
         />
       )}
+
       <ColumnCustomizer
         open={colOpen}
         tabKey="delivery"
