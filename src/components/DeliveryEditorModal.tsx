@@ -94,7 +94,6 @@ export function DeliveryEditorModal({
 }: Props) {
   const [rows, setRows] = useState<Delivery[]>(initialRows || []);
   /** Chuỗi đang gõ (giữ dấu phẩy) — key p-{idx} / a-{idx} */
-  const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(!initialRows);
   const [busy, setBusy] = useState(false);
   /**
