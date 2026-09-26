@@ -32,37 +32,40 @@ export function ListToolbar({
     selectedStatuses.length === 0 || selectedStatuses.includes("ALL");
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+    <div className="space-y-2.5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <input
           value={search}
           onChange={(e) => onSearch(e.target.value)}
           placeholder={searchPlaceholder}
-          className="flex-1 min-w-0 px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white shadow-sm"
+          className="flex-1 min-w-0 px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-sky-400 focus:outline-none"
         />
-        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2 border border-slate-300 rounded-lg bg-white cursor-pointer select-none shadow-sm">
-          <input
-            type="checkbox"
-            checked={groupByDate}
-            onChange={(e) => onGroupByDate(e.target.checked)}
-            className="accent-sky-600"
-          />
-          Nhóm theo ngày
-        </label>
-        {countLabel && (
-          <span className="text-xs text-slate-500 shrink-0 font-medium">
-            {countLabel}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2.5 border border-slate-300 rounded-xl bg-white cursor-pointer select-none shadow-sm flex-1 sm:flex-none">
+            <input
+              type="checkbox"
+              checked={groupByDate}
+              onChange={(e) => onGroupByDate(e.target.checked)}
+              className="accent-sky-600 w-4 h-4"
+            />
+            Nhóm theo ngày
+          </label>
+          {countLabel && (
+            <span className="text-xs text-slate-500 shrink-0 font-semibold tabular-nums px-1">
+              {countLabel}
+            </span>
+          )}
+        </div>
       </div>
-      <div className="flex flex-wrap gap-1.5">
+      {/* Chip trạng thái — scroll ngang trên mobile, không grayscale mờ */}
+      <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
         <button
           type="button"
           onClick={() => onToggleStatus("ALL")}
-          className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition ${
+          className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${
             allOn
-              ? "bg-sky-500 text-white border-sky-600 shadow-sm"
-              : "bg-white text-slate-500 border-slate-200 opacity-50 grayscale hover:opacity-80"
+              ? "bg-sky-600 text-white border-sky-700 shadow-sm"
+              : "bg-white text-slate-600 border-slate-300 hover:border-sky-400"
           }`}
         >
           Tất cả
@@ -71,16 +74,18 @@ export function ListToolbar({
           .filter((s) => s.key !== "ALL")
           .map((s) => {
             const on = !allOn && selectedStatuses.includes(s.key);
-            const chip = STATUS_CHIP[s.key] || "bg-slate-100 text-slate-700 border-slate-300";
+            const chip =
+              STATUS_CHIP[s.key] ||
+              "bg-slate-50 text-slate-700 border-slate-300";
             return (
               <button
                 key={s.key}
                 type="button"
                 onClick={() => onToggleStatus(s.key)}
-                className={`px-3 py-1.5 rounded-full text-xs font-bold border-2 transition ${
+                className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${
                   on
-                    ? `${chip} shadow-sm scale-[1.03]`
-                    : `${chip} opacity-40 grayscale hover:opacity-70`
+                    ? `${chip} shadow-md ring-2 ring-offset-1 ring-sky-300`
+                    : `bg-white text-slate-600 border-slate-300 hover:border-slate-400`
                 }`}
               >
                 {s.label}
@@ -112,6 +117,5 @@ export function matchStatuses(
 }
 
 export function matchSearch(haystack: string, query: string): boolean {
-  // Không dấu tiếng Việt + AND theo khoảng trắng / ; / +
   return matchSearchVn(haystack, query);
 }
