@@ -200,12 +200,22 @@ type Handlers = {
 };
 
 function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
-  const st = d.status;
+  const st = normCtStatus(String(d.status || ""));
   const btn =
     "px-2.5 py-1 text-[11px] font-bold rounded-md border shadow-sm whitespace-nowrap";
+  // V21: Hủy xe / Xóa xe / Hoàn thành → chỉ Xem (không Nhận/Giao/Hủy)
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE") {
+    return (
+      <div className="flex flex-wrap gap-1 justify-end">
+        <button type="button" onClick={() => h.onView(d)} className={`${btn} bg-white text-slate-600 border-slate-300`}>
+          Xem
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap gap-1 justify-end">
-      {st === "ORDERED" && (
+      {(st === "ORDERED" || st === "NEW") && (Number(d.actualReceived) || 0) <= 0 && (
         <button type="button" onClick={() => h.onReceive(d)} className={`${btn} bg-emerald-500 text-white border-emerald-600`}>
           Nhận
         </button>
@@ -232,13 +242,45 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
           Giao
         </button>
       )}
-      {st === "DONE" && (
-        <button type="button" onClick={() => h.onView(d)} className={`${btn} bg-white text-slate-600 border-slate-300`}>
-          Xem
-        </button>
-      )}
     </div>
   );
+}
+
+
+function normCtStatus(raw: string): string {
+  const s = String(raw || "").trim();
+  const u = s.toUpperCase();
+  const fold = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (u === "CANCEL" || fold.includes("huy xe") || fold === "huy") return "CANCEL";
+  if (u === "DELETE" || fold.includes("xoa xe") || fold === "xoa") return "DELETE";
+  if (u === "DONE" || fold.includes("hoan thanh")) return "DONE";
+  if (u === "RECEIVED" || fold.includes("da nhan")) return "RECEIVED";
+  if (u === "DELIVERING" || fold.includes("dang giao")) return "DELIVERING";
+  if (u === "ORDERED" || fold.includes("dat hang")) return "ORDERED";
+  if (u === "NEW" || fold.includes("moi tao") || fold.includes("khoi tao")) return "NEW";
+  return u || fold;
+}
+function statusLabelVN(raw: string): string {
+  const map: Record<string, string> = {
+    NEW: "Mới tạo", ORDERED: "Đặt hàng", RECEIVED: "Đã nhận",
+    DELIVERING: "Đang giao", DONE: "Hoàn thành", CANCEL: "Hủy xe", DELETE: "Xóa xe",
+  };
+  return map[normCtStatus(raw)] || (raw ? String(raw) : "—");
+}
+function canReceiveDetail(d: { status?: string; actualReceived?: number }): boolean {
+  const st = normCtStatus(String(d.status || ""));
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
+  return true;
+}
+function canDeliverDetail(d: { status?: string; actualReceived?: number }): boolean {
+  const st = normCtStatus(String(d.status || ""));
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
+  return st === "RECEIVED" || st === "DELIVERING" || (Number(d.actualReceived) || 0) > 0;
+}
+function canCancelDetail(d: { status?: string; actualReceived?: number }): boolean {
+  const st = normCtStatus(String(d.status || ""));
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE") return false;
+  return (Number(d.actualReceived) || 0) <= 0;
 }
 
 export default function DetailsPage() {
@@ -824,7 +866,7 @@ export default function DetailsPage() {
                           {d.detailId}
                         </div>
                       </div>
-                      <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
+                      <StatusBadge status={statusLabelVN(d.status)} />
                     </div>
                     <div className="mt-2 text-sm font-medium">
                       {d.productName || d.productId}
@@ -1033,7 +1075,7 @@ export default function DetailsPage() {
                             if (c.key === "status")
                               return (
                                 <td key={c.key} className="px-2 py-2">
-                                  <StatusBadge status={STATUS_LABEL[d.status] || d.status} />
+                                  <StatusBadge status={statusLabelVN(d.status)} />
                                 </td>
                               );
                             if (c.key === "note")
