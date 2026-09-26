@@ -392,4 +392,3 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
     </div>
   );
 }
-
