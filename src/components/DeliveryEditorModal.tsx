@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
-import { DecimalInput, formatDecimalVN } from "@/components/DecimalInput";
+import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
+import { deliveryDateBounds, clampYmd } from "@/lib/business-rules";
 import { apiPatch } from "@/components/ActionPrompt";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -74,6 +75,8 @@ type Summary = {
   actualReceived?: number;
   actualDelivered?: number;
   detailId: string;
+  receivedDate?: string;
+  isDuyenHa?: boolean;
 };
 
 type Props = {
@@ -93,15 +96,14 @@ export function DeliveryEditorModal({
   onSaved,
 }: Props) {
   const [rows, setRows] = useState<Delivery[]>(initialRows || []);
+<<<<<<< HEAD
   /** Chuỗi đang gõ (giữ dấu phẩy) — key p-{idx} / a-{idx} */
+=======
+  /** Chuỗi đang gõ (giữ dấu phẩy). Key: p-{idx} KH giao, a-{idx} Thực giao */
+  const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
+>>>>>>> 7255262 (feat: lock receive/delivery date pickers to V21 bounds)
   const [loading, setLoading] = useState(!initialRows);
   const [busy, setBusy] = useState(false);
-  /**
-   * Bộ đệm chuỗi hiển thị cho DecimalInput theo từng dòng.
-   * Key: `p-${idx}` cho KH giao (plannedQty), `a-${idx}` cho Thực giao (actualQty).
-   * Cần thiết để con trỏ không nhảy khi đang gõ dấu phẩy/chấm.
-   */
-  const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (initialRows && initialRows.length) {
@@ -136,12 +138,19 @@ export function DeliveryEditorModal({
         if (cancelled) return;
         setRows(
           mode === "real"
-            ? list.map((r) => ({
-                ...r,
-                actualQty: r.actualQty ?? 0,
-                deliveryDate:
-                  r.deliveryDate || new Date().toISOString().slice(0, 10),
-              }))
+            ? list.map((r) => {
+                const bounds = deliveryDateBounds({
+                  receivedDate: summary.receivedDate,
+                  isDuyenHa: !!summary.isDuyenHa,
+                });
+                const raw =
+                  r.deliveryDate || bounds.max || "";
+                return {
+                  ...r,
+                  actualQty: r.actualQty ?? 0,
+                  deliveryDate: clampYmd(raw, bounds.min, bounds.max),
+                };
+              })
             : list
         );
       } catch {
@@ -426,19 +435,34 @@ export function DeliveryEditorModal({
                   Ngày giao
                 </div>
                 {mode === "real" ? (
-                  <input
-                    type="date"
-                    value={r.deliveryDate || ""}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setRows((prev) =>
-                        prev.map((x, i) =>
-                          i === idx ? { ...x, deliveryDate: v } : x
-                        )
-                      );
-                    }}
-                    className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg"
-                  />
+                  (() => {
+                    const bounds = deliveryDateBounds({
+                      receivedDate: summary.receivedDate,
+                      isDuyenHa: !!summary.isDuyenHa,
+                    });
+                    return (
+                      <input
+                        type="date"
+                        value={r.deliveryDate || ""}
+                        min={bounds.min}
+                        max={bounds.max}
+                        onChange={(e) => {
+                          const v = clampYmd(e.target.value, bounds.min, bounds.max);
+                          setRows((prev) =>
+                            prev.map((x, i) =>
+                              i === idx ? { ...x, deliveryDate: v } : x
+                            )
+                          );
+                        }}
+                        className="w-full px-2 py-2 text-sm border border-slate-300 rounded-lg"
+                        title={
+                          bounds.min
+                            ? `Từ ${bounds.min} đến ${bounds.max}`
+                            : `Đến ${bounds.max} (cần có ngày nhận)`
+                        }
+                      />
+                    );
+                  })()
                 ) : (
                   <div className="text-sm px-2 py-2 rounded-lg bg-slate-100 border border-slate-200 text-center">
                     {r.deliveryDate ? fmtDateVN(r.deliveryDate) : "—"}
@@ -455,16 +479,9 @@ export function DeliveryEditorModal({
                   <button
                     type="button"
                     title="Xóa dòng"
-                    onClick={() => {
-                      setRows((prev) => prev.filter((_, i) => i !== idx));
-                      // Dọn bộ đệm hiển thị của dòng vừa xóa để tránh lệch index
-                      setQtyDisp((prev) => {
-                        const next = { ...prev };
-                        delete next[`p-${idx}`];
-                        delete next[`a-${idx}`];
-                        return next;
-                      });
-                    }}
+                    onClick={() =>
+                      setRows((prev) => prev.filter((_, i) => i !== idx))
+                    }
                     className="w-7 h-7 shrink-0 rounded-lg bg-red-500 text-white text-sm font-bold"
                   >
                     −
@@ -491,9 +508,6 @@ export function DeliveryEditorModal({
                 actualQty: 0,
               } as Delivery,
             ]);
-            // Không cần reset toàn bộ qtyDisp vì dòng mới dùng index mới,
-            // nhưng reset sạch để tránh sót key từ lần xóa trước đó.
-            setQtyDisp({});
           }}
           className="text-sm font-semibold text-sky-600 hover:underline"
         >
@@ -515,17 +529,22 @@ export function summaryFromDetail(d: OrderDetail): Summary {
     quantity: d.quantity,
     actualReceived: d.actualReceived,
     actualDelivered: d.actualDelivered,
+    receivedDate: d.receivedDate,
+    isDuyenHa: !!d.isDuyenHa,
   };
 }
 
 /** Helper: summary từ Delivery (tab giao) */
 export function summaryFromDelivery(d: Delivery): Summary {
+  const any = d as Delivery & { receivedDate?: string; isDuyenHa?: boolean };
   return {
     detailId: d.detailId,
     vehiclePlate: d.vehiclePlate,
     vehicleId: d.vehicleId,
     productName: d.productName,
     productId: d.productId,
+    receivedDate: any.receivedDate,
+    isDuyenHa: !!any.isDuyenHa,
     // quantity/received không có trên GH — modal sẽ hiện sum từ rows
   };
 }
