@@ -202,7 +202,7 @@ type Handlers = {
 function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
   const st = normCtStatus(String(d.status || ""));
   const btn =
-    "px-2.5 py-1 text-[11px] font-bold rounded-md border shadow-sm whitespace-nowrap";
+    "min-h-[40px] px-3 py-2 text-xs font-bold rounded-xl border shadow-sm whitespace-nowrap active:scale-[0.98]";
   // V21: Hủy xe / Xóa xe / Hoàn thành → chỉ Xem (không Nhận/Giao/Hủy)
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") {
     return (
@@ -840,7 +840,7 @@ export default function DetailsPage() {
       ) : (
         <>
           {/* Mobile cards */}
-          <div className="md:hidden space-y-4">
+          <div className="md:hidden space-y-3 pb-20">
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2">
                 {groupByDate && (
@@ -885,8 +885,10 @@ export default function DetailsPage() {
                         <div className="font-semibold tabular-nums">{fmtNum(tonConLai(d))}</div>
                       </div>
                     </div>
-                    <div className="mt-3 pt-3 border-t border-black/10">
-                      <DetailActions d={d} h={handlers} />
+                    <div className="mt-3 pt-3 border-t border-slate-200/80">
+                      <div className="flex flex-wrap gap-2 justify-stretch [&_button]:flex-1 [&_button]:min-w-[30%]">
+                        <DetailActions d={d} h={handlers} />
+                      </div>
                     </div>
                   </div>
                 ))}
