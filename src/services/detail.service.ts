@@ -289,7 +289,14 @@ export class DetailService {
     };
   }
 
-  /** Hủy / Xóa xe — V21 cancelDetail */
+  /**
+   * Hủy / Xóa xe — V21 cancelDetailById
+   * - Chưa gửi NCC (LanGui=0, không timeGuimail/FileDonhang, status NEW):
+   *     → Xóa xe (DELETE) + soft-delete toàn bộ GH của CT
+   * - Đã gửi NCC:
+   *     → Hủy xe (CANCEL), bật GuiLaimail trên đơn, KHÔNG soft-delete GH
+   * mode client chỉ là gợi ý; quyết định cuối theo trạng thái gửi đơn.
+   */
   static async cancelDetail(
     detailId: string,
     mode: "cancel" | "delete",
@@ -310,6 +317,21 @@ export class DetailService {
     const { DeliveryRepository } = await import(
       "@/repositories/delivery.repository"
     );
+    const { OrderRepository } = await import(
+      "@/repositories/order.repository"
+    );
+
+    const ct = await DetailRepository.findById(detailId, y);
+    if (!ct) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+    if ((Number(ct.actualReceived) || 0) > 0) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: `Xe đã nhận ${ct.actualReceived} tấn, không được hủy/xóa.`,
+      };
+    }
+
     const ghs = await DeliveryRepository.findMany({
       year: y,
       detailId,
@@ -324,32 +346,41 @@ export class DetailService {
         message: `Xe đã có ${totalTg} tấn thực giao, không được hủy/xóa.`,
       };
     }
-    // Chặn nếu đã nhận
-    const cts = await DetailRepository.findMany({ year: y });
-    const ct = cts.find((d) => d.detailId === detailId);
-    if (ct && (Number(ct.actualReceived) || 0) > 0) {
-      throw {
-        code: "VALIDATION_ERROR",
-        message: `Xe đã nhận ${ct.actualReceived} tấn, không được hủy/xóa.`,
-      };
-    }
 
-    // Soft-delete GH chưa giao
+    // V21 _isOrderSentForCancel_
+    const order = await OrderRepository.findById(ct.orderId, y).catch(() => null);
+    const orderSent = !!(
+      order &&
+      ((Number(order.sendCount) || 0) > 0 ||
+        !!String(order.mailSentAt || "").trim() ||
+        !!String(order.orderFile || "").trim() ||
+        (String(order.status || "").toUpperCase() !== "NEW" &&
+          String(order.status || "") !== "Khởi tạo" &&
+          String(order.status || "") !== "Mới tạo"))
+    );
+    // Ưu tiên rule nghiệp vụ hơn mode UI
+    const effectiveMode: "cancel" | "delete" = orderSent ? "cancel" : "delete";
+
     const now = formatDateTimeVN();
     let deletedGh = 0;
-    for (const g of ghs) {
-      if ((Number(g.actualQty) || 0) > 0) continue;
-      const r = await updateSheetRowByKey(
-        SHEETS.GH,
-        "ID_Giaohang",
-        g.deliveryId,
-        { Deleted: true, DeletedAt: now, DeletedBy: user.email },
-        y
-      );
-      if (r > 0) deletedGh++;
+
+    // Chỉ soft-delete GH khi Xóa xe (chưa gửi NCC)
+    if (effectiveMode === "delete") {
+      for (const g of ghs) {
+        if ((Number(g.actualQty) || 0) > 0) continue;
+        const r = await updateSheetRowByKey(
+          SHEETS.GH,
+          "ID_Giaohang",
+          g.deliveryId,
+          { Deleted: true, DeletedAt: now, DeletedBy: user.email },
+          y
+        );
+        if (r > 0) deletedGh++;
+      }
     }
 
-    const status = mode === "delete" ? STATUS_CT.DELETE : STATUS_CT.CANCEL;
+    const status =
+      effectiveMode === "delete" ? STATUS_CT.DELETE : STATUS_CT.CANCEL;
     const row = await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",
@@ -362,12 +393,31 @@ export class DetailService {
       },
       y
     );
-    if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    if (row < 0) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+
+    // Sau khi gửi NCC: bật GuiLaimail để gửi lại đơn
+    if (effectiveMode === "cancel" && ct.orderId) {
+      await updateSheetRowByKey(
+        SHEETS.DH,
+        "MaDon",
+        ct.orderId,
+        {
+          GuiLaimail: true,
+          TrangThaiDon: "Đang xử lý",
+        },
+        y
+      ).catch(() => null);
+    }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
     return {
       detailId,
-      status: mode === "delete" ? "DELETE" : "CANCEL",
+      status: effectiveMode === "delete" ? "DELETE" : "CANCEL",
+      mode: effectiveMode === "delete" ? "delete_before_send" : "cancel_after_send",
+      requestedMode: mode,
+      orderSent,
       row,
       deletedGh,
       orderStatus: sync?.status,

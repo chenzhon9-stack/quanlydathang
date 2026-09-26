@@ -277,7 +277,7 @@ export function OrderManageModal({
             carrierId: d.carrierId || undefined,
             deliveries: d.deliveries.map((g) => ({
               customerId: g.customerId,
-              customerDetail: g.customerDetail || g.customerName,
+              customerDetail: g.customerDetail || "",
               plannedQty: parseDecimalVN(g.plannedQty),
             })),
           })),
@@ -331,7 +331,7 @@ export function OrderManageModal({
               deliveries: b.deliveries.map((g) => ({
                 deliveryId: g.isNew ? undefined : g.idGh,
                 customerId: g.customerId,
-                customerDetail: g.customerDetail || g.customerName,
+                customerDetail: g.customerDetail || "",
                 plannedQty: parseDecimalVN(g.plannedQty),
               })),
             }),

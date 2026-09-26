@@ -108,7 +108,7 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
           carrierId: d.carrierId || undefined,
           deliveries: d.deliveries.map((g) => ({
             customerId: g.customerId,
-            customerDetail: g.customerName,
+            customerDetail: g.customerDetail || "",
             plannedQty: parseDecimalVN(g.plannedQty),
           })),
         })),

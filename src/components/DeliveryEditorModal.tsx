@@ -93,6 +93,8 @@ export function DeliveryEditorModal({
   onSaved,
 }: Props) {
   const [rows, setRows] = useState<Delivery[]>(initialRows || []);
+  /** Chuỗi đang gõ (giữ dấu phẩy) — key p-{idx} / a-{idx} */
+  const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(!initialRows);
   const [busy, setBusy] = useState(false);
   /**
@@ -175,7 +177,7 @@ export function DeliveryEditorModal({
             ? undefined
             : r.deliveryId,
           customerId: r.customerId,
-          customerDetail: r.customerName || r.customerDetail,
+          customerDetail: r.customerDetail || "", // không ghi TenKH vào ChitietKh
           plannedQty: Number(r.plannedQty) || 0,
           note: r.note,
         })),
@@ -211,7 +213,7 @@ export function DeliveryEditorModal({
           actualQty: Number(r.actualQty) || 0,
           deliveryDate: r.deliveryDate,
           customerId: r.customerId,
-          customerDetail: r.customerName || r.customerDetail || "",
+          customerDetail: r.customerDetail || "", // ChitietKh = chi tiết mở rộng MaKh, không phải tên
           year: new Date().getFullYear(),
         };
         let json = await apiPatch(
@@ -332,7 +334,7 @@ export function DeliveryEditorModal({
                 </div>
                 {mode === "view" ? (
                   <div className="text-sm font-medium px-2.5 py-2 rounded-lg bg-slate-50 border border-slate-200 whitespace-normal break-words leading-snug min-h-[40px]">
-                    {r.customerName || r.customerDetail || r.customerId || "—"}
+                    {r.customerName || r.customerId || "—"}
                   </div>
                 ) : (
                   <div className="min-w-0">
@@ -340,7 +342,7 @@ export function DeliveryEditorModal({
                       type="KH"
                       value={r.customerId}
                       displayName={
-                        r.customerName || r.customerDetail || r.customerId
+                        r.customerName || r.customerId
                       }
                       onChange={(id, name) => {
                         setRows((prev) =>
@@ -350,7 +352,7 @@ export function DeliveryEditorModal({
                                   ...x,
                                   customerId: id,
                                   customerName: name,
-                                  customerDetail: name,
+                                  // ChitietKh không lưu tên KH
                                 }
                               : x
                           )

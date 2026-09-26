@@ -11,7 +11,7 @@ import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
 import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
-import { DecimalInput, parseDecimalVN } from "@/components/DecimalInput";
+import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import {
   DeliveryEditorModal,
   summaryFromDetail,
@@ -519,10 +519,22 @@ export default function DetailsPage() {
 
   const sortedFiltered = useMemo(() => {
     const rows = [...filteredCols];
-    if (!sortKey || !sortDir) return rows;
-    rows.sort((a, b) =>
-      compareValues(detailSortVal(a, sortKey), detailSortVal(b, sortKey), sortDir)
-    );
+    if (sortKey && sortDir) {
+      rows.sort((a, b) =>
+        compareValues(detailSortVal(a, sortKey), detailSortVal(b, sortKey), sortDir)
+      );
+      return rows;
+    }
+    // Mặc định V21: Ngày đặt DESC → Mã xe ASC → Mã chi tiết ASC
+    rows.sort((a, b) => {
+      const da = String(a.orderDate || "").slice(0, 10);
+      const db = String(b.orderDate || "").slice(0, 10);
+      if (da !== db) return db.localeCompare(da); // DESC
+      const va = String(a.vehicleId || "").toLowerCase();
+      const vb = String(b.vehicleId || "").toLowerCase();
+      if (va !== vb) return va.localeCompare(vb); // ASC
+      return String(a.detailId || "").localeCompare(String(b.detailId || ""));
+    });
     return rows;
   }, [filteredCols, sortKey, sortDir]);
 
