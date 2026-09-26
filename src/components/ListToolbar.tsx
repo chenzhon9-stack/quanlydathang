@@ -1,6 +1,6 @@
 "use client";
 
-import { STATUS_CHIP } from "@/lib/status-styles";
+import { statusChipClass } from "@/lib/status-styles";
 import { matchSearchVn } from "@/lib/vn-search";
 
 export type StatusOption = { key: string; label: string };
@@ -74,9 +74,7 @@ export function ListToolbar({
           .filter((s) => s.key !== "ALL")
           .map((s) => {
             const on = !allOn && selectedStatuses.includes(s.key);
-            const chip =
-              STATUS_CHIP[s.key] ||
-              "bg-slate-50 text-slate-700 border-slate-300";
+            const chip = statusChipClass(s.key);
             return (
               <button
                 key={s.key}
