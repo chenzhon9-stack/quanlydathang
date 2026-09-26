@@ -199,49 +199,100 @@ type Handlers = {
   onCancel: (d: OrderDetail, mode: "cancel" | "delete") => void;
 };
 
+/** V21 Nut hanh dong — tab Chi tiết xe
+ * Mới tạo: Sửa hàng, Sửa KH, Xóa
+ * Đặt hàng: Nhận (nếu chưa GuiLaimail), Sửa hàng, Sửa KH, Hủy
+ * Đã nhận / Đang giao: Giao
+ * Hoàn thành / Hủy xe / Xóa xe: Xem
+ */
 function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
   const st = normCtStatus(String(d.status || ""));
   const btn =
     "min-h-[40px] px-3 py-2 text-xs font-bold rounded-xl border shadow-sm whitespace-nowrap active:scale-[0.98]";
-  // V21: Hủy xe / Xóa xe / Hoàn thành → chỉ Xem (không Nhận/Giao/Hủy)
+  const guiLai = !!(d as { guiLaimail?: boolean }).guiLaimail;
+
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") {
     return (
       <div className="flex flex-wrap gap-1 justify-end">
-        <button type="button" onClick={() => h.onView(d)} className={`${btn} bg-white text-slate-600 border-slate-300`}>
+        <button
+          type="button"
+          onClick={() => h.onView(d)}
+          className={`${btn} bg-white text-slate-600 border-slate-300`}
+        >
           Xem
         </button>
       </div>
     );
   }
-  return (
-    <div className="flex flex-wrap gap-1 justify-end">
-      {(st === "ORDERED" || st === "NEW") && (Number(d.actualReceived) || 0) <= 0 && (
-        <button type="button" onClick={() => h.onReceive(d)} className={`${btn} bg-emerald-500 text-white border-emerald-600`}>
-          Nhận
-        </button>
-      )}
-      {(st === "ORDERED" || st === "NEW") && (
-        <>
-          <button type="button" onClick={() => h.onEdit(d)} className={`${btn} bg-white text-slate-700 border-slate-300`}>
-            Sửa hàng
-          </button>
-          <button type="button" onClick={() => h.onPlan(d)} className={`${btn} bg-white text-slate-700 border-slate-300`}>
-            Sửa KH
-          </button>
-          <button
-            type="button"
-            onClick={() => h.onCancel(d, st === "NEW" ? "delete" : "cancel")}
-            className={`${btn} bg-red-500 text-white border-red-600`}
-          >
-            {st === "NEW" ? "Xóa" : "Hủy"}
-          </button>
-        </>
-      )}
-      {(st === "RECEIVED" || st === "DELIVERING") && (
-        <button type="button" onClick={() => h.onDeliver(d)} className={`${btn} bg-sky-500 text-white border-sky-600`}>
+
+  // Đã nhận / Đang giao → Giao
+  if (st === "RECEIVED" || st === "DELIVERING") {
+    return (
+      <div className="flex flex-wrap gap-1 justify-end">
+        <button
+          type="button"
+          onClick={() => h.onDeliver(d)}
+          className={`${btn} bg-sky-500 text-white border-sky-600`}
+        >
           Giao
         </button>
-      )}
+      </div>
+    );
+  }
+
+  // Mới tạo / Đặt hàng
+  if (st === "NEW" || st === "ORDERED") {
+    return (
+      <div className="flex flex-wrap gap-1 justify-end">
+        {/* V21: Nhận chỉ khi Đặt hàng và không chờ gửi lại */}
+        {st === "ORDERED" && !guiLai && (
+          <button
+            type="button"
+            onClick={() => h.onReceive(d)}
+            className={`${btn} bg-emerald-500 text-white border-emerald-600`}
+          >
+            Nhận
+          </button>
+        )}
+        {st === "ORDERED" && guiLai && (
+          <span className="inline-flex items-center px-2 text-[11px] font-semibold text-amber-700">
+            ⏳ Chờ gửi lại
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => h.onEdit(d)}
+          className={`${btn} bg-white text-slate-700 border-slate-300`}
+        >
+          Sửa hàng
+        </button>
+        <button
+          type="button"
+          onClick={() => h.onPlan(d)}
+          className={`${btn} bg-white text-slate-700 border-slate-300`}
+        >
+          Sửa KH
+        </button>
+        <button
+          type="button"
+          onClick={() => h.onCancel(d, st === "NEW" ? "delete" : "cancel")}
+          className={`${btn} bg-red-500 text-white border-red-600`}
+        >
+          {st === "NEW" ? "Xóa" : "Hủy"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1 justify-end">
+      <button
+        type="button"
+        onClick={() => h.onView(d)}
+        className={`${btn} bg-white text-slate-600 border-slate-300`}
+      >
+        Xem
+      </button>
     </div>
   );
 }
