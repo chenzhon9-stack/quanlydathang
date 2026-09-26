@@ -12,6 +12,7 @@ import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
+import { receiveDateBounds, clampYmd } from "@/lib/business-rules";
 import {
   DeliveryEditorModal,
   summaryFromDetail,
@@ -139,12 +140,18 @@ function InputField({
   onChange,
   type = "text",
   readOnly,
+  min,
+  max,
+  hint,
 }: {
   label: string;
   value: string;
   onChange?: (v: string) => void;
   type?: string;
   readOnly?: boolean;
+  min?: string;
+  max?: string;
+  hint?: string;
 }) {
   const cls = `w-full px-3 py-2.5 rounded-lg text-sm border ${
     readOnly
@@ -165,10 +172,19 @@ function InputField({
           type={type === "number" ? "text" : type}
           value={value}
           readOnly={readOnly}
-          onChange={(e) => onChange?.(e.target.value)}
+          min={min}
+          max={max}
+          onChange={(e) => {
+            let v = e.target.value;
+            if (type === "date") v = clampYmd(v, min, max);
+            onChange?.(v);
+          }}
           className={cls}
         />
       )}
+      {hint ? (
+        <div className="text-[11px] text-slate-500 mt-1">{hint}</div>
+      ) : null}
     </div>
   );
 }
@@ -338,6 +354,18 @@ export default function DetailsPage() {
   const handlers: Handlers = {
     onReceive: (d) => {
       setReceiveTarget(d);
+      {
+        const bounds = receiveDateBounds({
+          orderDate: d.orderDate,
+          isDuyenHa: !!d.isDuyenHa,
+        });
+        const def = clampYmd(
+          (d.receivedDate || bounds.max || "").slice(0, 10),
+          bounds.min,
+          bounds.max
+        );
+        setRecvDate(def);
+      }
       setRecvQty(String(d.quantity || ""));
       setRecvDate(new Date().toISOString().slice(0, 10));
     },
@@ -1084,12 +1112,26 @@ export default function DetailsPage() {
             label="Số lượng kế hoạch đặt"
             value={fmtNum(receiveTarget.quantity)}
           />
-          <InputField
-            label="Ngày nhận"
-            type="date"
-            value={recvDate}
-            onChange={setRecvDate}
-          />
+          {(() => {
+            const bounds = receiveDateBounds({
+              orderDate: receiveTarget.orderDate,
+              isDuyenHa: !!receiveTarget.isDuyenHa,
+            });
+            return (
+              <InputField
+                label="Ngày nhận"
+                type="date"
+                value={recvDate}
+                min={bounds.min}
+                max={bounds.max}
+                onChange={setRecvDate}
+                hint={
+                  `Chọn từ ${bounds.min ? bounds.min.split("-").reverse().join("/") : "—"} đến ${bounds.max.split("-").reverse().join("/")}` +
+                  (receiveTarget.isDuyenHa ? " (Duyên Hà: sau 14h tính ngày mai)" : "")
+                }
+              />
+            );
+          })()}
           <InputField
             label="Số lượng thực nhận"
             type="number"
