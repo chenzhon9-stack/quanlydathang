@@ -59,30 +59,19 @@ export class DeliveryService {
 
     // Enrich tên KH + orderDate/xe/hàng từ CT (gom theo ngày đặt lệnh)
     const year = filter.year ?? currentYearVN();
+    // Enrich từ DonHang_Chitiet (DetailRepository — parity status/ngày nhận)
     const [khMap, xeMap, hhMap, details] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.xeNames(),
       MasterRepository.hhNames(),
-      ReportRepository.getDetails(year).catch(() => [] as Awaited<
-        ReturnType<typeof ReportRepository.getDetails>
-      >),
+      DetailRepository.findMany({ year }).catch(() => []),
     ]);
     const ctById = new Map(
-      details.map((ct) => [
-        ct.detailId,
-        {
-          orderDate: ct.orderDate,
-          vehicleId: ct.vehicleId,
-          productId: ct.productId,
-          status: ct.status,
-          actualReceived: ct.actualReceived,
-          receivedDate: ct.receivedDate,
-          isDuyenHa: !!(ct as { isDuyenHa?: boolean }).isDuyenHa,
-        },
-      ])
+      details.map((ct) => [String(ct.detailId || "").trim(), ct])
     );
     rows = rows.map((d: Delivery) => {
-      const ct = ctById.get(d.detailId);
+      const ct = ctById.get(String(d.detailId || "").trim());
+      const status = ct?.status || d.detailStatus;
       return {
         ...d,
         customerName:
@@ -91,19 +80,26 @@ export class DeliveryService {
         vehicleId: d.vehicleId || ct?.vehicleId,
         vehiclePlate:
           d.vehiclePlate ||
-          (ct?.vehicleId ? xeMap[ct.vehicleId] : undefined) ||
+          (ct?.vehicleId ? xeMap[String(ct.vehicleId)] : undefined) ||
           ct?.vehicleId,
         productId: d.productId || ct?.productId,
         productName:
           d.productName ||
-          (ct?.productId ? hhMap[ct.productId] : undefined) ||
+          (ct?.productId ? hhMap[String(ct.productId)] : undefined) ||
           ct?.productId,
-        detailStatus: ct?.status,
-        actualReceived: ct?.actualReceived,
-        receivedDate: ct?.receivedDate,
-        isDuyenHa: ct?.isDuyenHa,
+        detailStatus: status,
+        actualReceived: ct?.actualReceived ?? d.actualReceived,
+        receivedDate: ct?.receivedDate || d.receivedDate,
+        isDuyenHa: !!(ct as { isDuyenHa?: boolean } | undefined)?.isDuyenHa || d.isDuyenHa,
       };
     });
+    // Debug: thiếu status → chip lọc sẽ không khớp
+    const missingSt = rows.filter((r) => !r.detailStatus).length;
+    if (missingSt > 0) {
+      console.warn(
+        `[DeliveryService] ${missingSt}/${rows.length} GH thiếu detailStatus (CT join miss)`
+      );
+    }
     // Sort mới → cũ theo ngày đặt lệnh
     rows.sort((a, b) => {
       const da = a.orderDate || a.deliveryDate || "";

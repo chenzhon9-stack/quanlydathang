@@ -100,6 +100,11 @@ function modeFromDelivery(d: Delivery): DeliveryModalMode {
 }
 
 
+
+function isColVisible(visibleCols: { key: string }[], key: string): boolean {
+  return visibleCols.some((c) => c.key === key);
+}
+
 export default function DeliveriesPage() {
   const [items, setItems] = useState<Delivery[]>([]);
   const [total, setTotal] = useState(0);
@@ -369,11 +374,11 @@ export default function DeliveriesPage() {
         </div>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex flex-wrap gap-2 justify-end">
         <button
           type="button"
           onClick={() => setColOpen(true)}
-          className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+          className="px-3 py-2.5 text-xs font-bold rounded-xl bg-white border-2 border-slate-300 text-slate-800 shadow-sm active:scale-95"
         >
           Tùy chỉnh cột
         </button>
@@ -409,7 +414,7 @@ export default function DeliveriesPage() {
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải giao hàng...</div>
       ) : (
         <>
-          {/* Mobile cards — parity V21 */}
+          {/* Mobile cards — parity V21 + tùy cột */}
           <div className="md:hidden space-y-3 pb-24">
             {displayGroups.map((g) => (
               <div key={g.key} className="space-y-2.5">
@@ -432,6 +437,7 @@ export default function DeliveriesPage() {
                   const planned = Number(d.plannedQty) || 0;
                   const actual = Number(d.actualQty) || 0;
                   const diff = Math.round((planned - actual) * 1000) / 1000;
+                  const show = (key: string) => isColVisible(visibleCols, key);
                   const row = (k: string, v: string | number, vClass = "") => (
                     <div className="flex items-start justify-between gap-3 py-1 text-sm">
                       <span className="text-[13px] opacity-80 shrink-0">{k}</span>
@@ -445,74 +451,78 @@ export default function DeliveriesPage() {
                       key={d.deliveryId}
                       className={`rounded-2xl border-2 p-3.5 shadow-sm ${statusRowClass(st)}`}
                     >
-                      {row("Ngày đặt", fmtDateVN(d.orderDate || d.deliveryDate || ""))}
-                      <div className="flex items-center justify-between gap-2 py-1">
-                        <span className="text-[13px] opacity-80">Biển số</span>
-                        <div className="flex items-center gap-2">
+                      {show("orderDate") &&
+                        row("Ngày đặt", fmtDateVN(d.orderDate || d.deliveryDate || ""))}
+                      {show("plate") && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Biển số</span>
                           <span className={PLATE_CLASS}>
                             {d.vehiclePlate || d.vehicleId || "—"}
                           </span>
                         </div>
-                      </div>
-                      {row("ID Giao hàng", d.deliveryId, "font-mono text-[12px]")}
-                      {(d.productName || d.productId) &&
+                      )}
+                      {show("id") &&
+                        row("ID Giao hàng", d.deliveryId, "font-mono text-[12px]")}
+                      {show("product") &&
+                        (d.productName || d.productId) &&
                         row("Hàng hóa", d.productName || d.productId || "")}
-                      {(d as { receivedDate?: string }).receivedDate
-                        ? row(
-                            "Ngày nhận",
-                            fmtDateVN(
-                              String(
-                                (d as { receivedDate?: string }).receivedDate ||
-                                  ""
-                              )
-                            )
-                          )
-                        : null}
-                      {row(
-                        "Tên khách hàng",
-                        khName,
-                        /chưa xác định|chua xac dinh/i.test(khName)
-                          ? "text-amber-900 font-semibold"
-                          : ""
-                      )}
-                      {row(
-                        "KH giao",
-                        planned.toLocaleString("vi-VN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })
-                      )}
-                      {row(
-                        "Ngày giao",
-                        d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"
-                      )}
-                      {row(
-                        "Thực giao",
-                        actual.toLocaleString("vi-VN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })
-                      )}
-                      {row(
-                        "Chênh lệch",
-                        diff.toLocaleString("vi-VN", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        }),
-                        diff > 0.001
-                          ? "text-emerald-700 font-bold"
-                          : diff < -0.001
-                            ? "text-red-700 font-bold"
+                      {show("recvDate") &&
+                        row(
+                          "Ngày nhận",
+                          d.receivedDate ? fmtDateVN(d.receivedDate) : "—"
+                        )}
+                      {show("customer") &&
+                        row(
+                          "Tên khách hàng",
+                          khName,
+                          /chưa xác định|chua xac dinh/i.test(khName)
+                            ? "text-amber-900 font-semibold"
                             : ""
+                        )}
+                      {show("planned") &&
+                        row(
+                          "KH giao",
+                          planned.toLocaleString("vi-VN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        )}
+                      {show("date") &&
+                        row(
+                          "Ngày giao",
+                          d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"
+                        )}
+                      {show("actual") &&
+                        row(
+                          "Thực giao",
+                          actual.toLocaleString("vi-VN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        )}
+                      {show("diff") &&
+                        row(
+                          "Chênh lệch",
+                          diff.toLocaleString("vi-VN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          }),
+                          diff > 0.001
+                            ? "text-emerald-700 font-bold"
+                            : diff < -0.001
+                              ? "text-red-700 font-bold"
+                              : ""
+                        )}
+                      {show("status") && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Trạng thái</span>
+                          <span
+                            className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
+                          >
+                            {statusLabelVN(st)}
+                          </span>
+                        </div>
                       )}
-                      <div className="flex items-center justify-between gap-2 py-1">
-                        <span className="text-[13px] opacity-80">Trạng thái</span>
-                        <span
-                          className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
-                        >
-                          {statusLabelVN(st)}
-                        </span>
-                      </div>
                       <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-black/10">
                         <span className="text-[13px] opacity-80">Hành động</span>
                         <button
@@ -665,8 +675,8 @@ export default function DeliveriesPage() {
                               );
                             if (c.key === "recvDate")
                               return (
-                                <td key={c.key} className="px-3 py-2.5 text-xs">
-                                  —
+                                <td key={c.key} className="px-3 py-2.5 text-xs tabular-nums">
+                                  {d.receivedDate ? fmtDateVN(d.receivedDate) : "—"}
                                 </td>
                               );
                             if (c.key === "customerId")
