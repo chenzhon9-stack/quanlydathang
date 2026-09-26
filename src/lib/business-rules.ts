@@ -108,6 +108,36 @@ export function businessTodayKey(isDuyenHa?: boolean, now = new Date()): string 
  * - >= ngày đặt
  * - <= business today (Duyên Hà sau 14h = tomorrow)
  */
+
+/** min/max cho <input type="date"> — ngày nhận */
+export function receiveDateBounds(opts: {
+  orderDate?: string;
+  isDuyenHa?: boolean;
+}): { min?: string; max: string } {
+  const min = (opts.orderDate || "").slice(0, 10) || undefined;
+  const max = businessTodayKey(!!opts.isDuyenHa);
+  return { min: min && /^\d{4}-\d{2}-\d{2}$/.test(min) ? min : undefined, max };
+}
+
+/** min/max cho <input type="date"> — ngày giao */
+export function deliveryDateBounds(opts: {
+  receivedDate?: string;
+  isDuyenHa?: boolean;
+}): { min?: string; max: string } {
+  const min = (opts.receivedDate || "").slice(0, 10) || undefined;
+  const max = businessTodayKey(!!opts.isDuyenHa);
+  return { min: min && /^\d{4}-\d{2}-\d{2}$/.test(min) ? min : undefined, max };
+}
+
+/** Kẹp yyyy-MM-dd vào [min, max] */
+export function clampYmd(value: string, min?: string, max?: string): string {
+  let x = (value || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(x)) return x;
+  if (min && /^\d{4}-\d{2}-\d{2}$/.test(min) && x < min) x = min;
+  if (max && /^\d{4}-\d{2}-\d{2}$/.test(max) && x > max) x = max;
+  return x;
+}
+
 export function validateReceiveDate(opts: {
   orderDate?: string;
   receivedDate: string;
