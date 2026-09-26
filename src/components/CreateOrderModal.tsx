@@ -158,7 +158,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
           carrierId: d.carrierId || undefined,
           deliveries: d.deliveries.map((g) => ({
             customerId: g.customerId,
-            customerDetail: g.customerDetail || "",
+            customerDetail: "", // ChitietKh không dùng (không ghi TenKH)
             plannedQty: parseDecimalVN(g.plannedQty),
           })),
         })),
