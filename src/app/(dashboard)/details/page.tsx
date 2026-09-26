@@ -870,3 +870,397 @@ export default function DetailsPage() {
                       <StatusBadge status={statusLabelVN(d.status)} />
                     </div>
                     <div className="mt-2 text-sm font-medium">
+                      {d.productName || d.productId}
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-1 text-xs">
+                      <div>
+                        <div className="opacity-60">KH đặt</div>
+                        <div className="font-semibold tabular-nums">{fmtNum(d.quantity)}</div>
+                      </div>
+                      <div>
+                        <div className="opacity-60">Thực nhận</div>
+                        <div className="font-semibold tabular-nums">{fmtNum(d.actualReceived)}</div>
+                      </div>
+                      <div>
+                        <div className="opacity-60">Tồn</div>
+                        <div className="font-semibold tabular-nums">{fmtNum(tonConLai(d))}</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-3 border-t border-slate-200/80">
+                      <div className="flex flex-wrap gap-2 justify-stretch [&_button]:flex-1 [&_button]:min-w-[30%]">
+                        <DetailActions d={d} h={handlers} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop table — cột như V21 */}
+          <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="bg-[#d9e5f0] text-slate-800 text-xs">
+                    {visibleCols.map((c) => (
+                      <HeaderFilterTh
+                        key={c.key}
+                        label={c.label}
+                        align={
+                          c.align ||
+                          (["qty", "actualRecv", "actualDel", "remain", "actions"].includes(
+                            c.key
+                          )
+                            ? "right"
+                            : "left")
+                        }
+                        filterable={!!c.filterable}
+                        values={colUnique[c.key] || []}
+                        selected={valFilters[c.key] || []}
+                        onChange={(next) =>
+                          setValFilters((f) => ({ ...f, [c.key]: next }))
+                        }
+                        sortable={c.key !== "actions"}
+                        sortDir={sortKey === c.key ? sortDir : null}
+                        onSort={() => {
+                          const n = cycleSort(c.key, sortKey, sortDir);
+                          setSortKey(n.key);
+                          setSortDir(n.dir);
+                        }}
+                      />
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayGroups.map((g) => (
+                    <React.Fragment key={g.key}>
+                      {groupByDate && (
+                        <tr className="bg-[#1a3a5c] text-white">
+                          <td colSpan={11} className="px-3 py-2 text-xs font-bold">
+                            📅 Ngày đặt lệnh: {fmtDateVN(g.key)}
+                            <span className="ml-2 opacity-70 font-normal">
+                              ({g.items.length} xe)
+                            </span>
+                          </td>
+                        </tr>
+                      )}
+                      {g.items.map((d) => (
+                        <tr
+                          key={d.detailId}
+                          className={`border-t border-slate-200/80 ${statusRowClass(d.status)}`}
+                        >
+                          {visibleCols.map((c) => {
+                            if (c.key === "plate")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                  {transportSub(d) && (
+                                    <div className="text-[10px] opacity-70 mt-0.5">
+                                      {transportSub(d)}
+                                    </div>
+                                  )}
+                                </td>
+                              );
+                            if (c.key === "id")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px] text-blue-700">
+                                  {d.detailId}
+                                </td>
+                              );
+                            if (c.key === "orderDate")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {fmtDateVN(d.orderDate)}
+                                </td>
+                              );
+                            if (c.key === "orderId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.orderId}
+                                </td>
+                              );
+                            if (c.key === "supplier")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.supplierName || d.supplierId}
+                                </td>
+                              );
+                            if (c.key === "region")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.regionName || d.regionId}
+                                </td>
+                              );
+                            if (c.key === "vehicleId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.vehicleId}
+                                </td>
+                              );
+                            if (c.key === "productId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.productId}
+                                </td>
+                              );
+                            if (c.key === "regionId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.regionId}
+                                </td>
+                              );
+                            if (c.key === "supplierId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.supplierId}
+                                </td>
+                              );
+                            if (c.key === "htvtId")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
+                                  {d.transportTypeId || "—"}
+                                </td>
+                              );
+                            if (c.key === "htvt")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.transportTypeName || d.transportTypeId || "—"}
+                                </td>
+                              );
+                            if (c.key === "isDuyenHa")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs font-semibold">
+                                  {d.isDuyenHa ? (
+                                    <span className="text-teal-700">Có</span>
+                                  ) : (
+                                    "Không"
+                                  )}
+                                </td>
+                              );
+                            if (c.key === "product")
+                              return (
+                                <td key={c.key} className="px-2 py-2 font-medium">
+                                  {d.productName || d.productId}
+                                </td>
+                              );
+                            if (c.key === "qty")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums">
+                                  {fmtNum(d.quantity)}
+                                </td>
+                              );
+                            if (c.key === "recvDate")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {fmtDateVN(d.receivedDate)}
+                                </td>
+                              );
+                            if (c.key === "actualRecv")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums font-medium">
+                                  {fmtNum(d.actualReceived ?? 0)}
+                                </td>
+                              );
+                            if (c.key === "actualDel")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums">
+                                  {fmtNum(d.actualDelivered ?? 0)}
+                                </td>
+                              );
+                            if (c.key === "remain")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-right tabular-nums font-semibold">
+                                  {fmtNum(tonConLai(d))}
+                                </td>
+                              );
+                            if (c.key === "status")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <StatusBadge status={statusLabelVN(d.status)} />
+                                </td>
+                              );
+                            if (c.key === "note")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs max-w-[120px] truncate">
+                                  {d.note || ""}
+                                </td>
+                              );
+                            if (c.key === "actions")
+                              return (
+                                <td key={c.key} className="px-2 py-2">
+                                  <DetailActions d={d} h={handlers} />
+                                </td>
+                              );
+                            return <td key={c.key} />;
+                          })}
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredCols.length === 0 && !err && (
+              <div className="text-center py-12 text-slate-400 text-sm">
+                Không có chi tiết
+              </div>
+            )}
+          </div>
+
+          {total > pageSize && (
+            <div className="flex items-center justify-center gap-3 text-sm">
+              <button
+                disabled={page <= 1}
+                onClick={() => load(page - 1)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+              >
+                ‹ Trước
+              </button>
+              <span className="text-slate-500 text-xs">
+                Trang {page} / {Math.max(1, Math.ceil(total / pageSize))}
+              </span>
+              <button
+                disabled={!hasMore}
+                onClick={() => load(page + 1)}
+                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+              >
+                Sau ›
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Modal Nhận hàng (V21) ── */}
+      {receiveTarget && (
+        <ModalShell
+          title="Nhận hàng"
+          onClose={() => !busy && setReceiveTarget(null)}
+          footer={
+            <button
+              type="button"
+              disabled={busy}
+              onClick={submitReceive}
+              className={primaryBtn}
+            >
+              {busy ? "Đang lưu…" : "XÁC NHẬN"}
+            </button>
+          }
+        >
+          <ReadonlyField
+            label="Xe / hàng hóa"
+            value={`${receiveTarget.vehiclePlate || receiveTarget.vehicleId} / ${receiveTarget.productName || receiveTarget.productId}`}
+          />
+          <ReadonlyField
+            label="Số lượng kế hoạch đặt"
+            value={fmtNum(receiveTarget.quantity)}
+          />
+          {(() => {
+            const bounds = receiveDateBounds({
+              orderDate: receiveTarget.orderDate,
+              isDuyenHa: !!receiveTarget.isDuyenHa,
+            });
+            return (
+              <InputField
+                label="Ngày nhận"
+                type="date"
+                value={recvDate}
+                min={bounds.min}
+                max={bounds.max}
+                onChange={setRecvDate}
+                hint={
+                  `Chọn từ ${bounds.min ? bounds.min.split("-").reverse().join("/") : "—"} đến ${bounds.max.split("-").reverse().join("/")}` +
+                  (receiveTarget.isDuyenHa ? " (Duyên Hà: sau 14h tính ngày mai)" : "")
+                }
+              />
+            );
+          })()}
+          <InputField
+            label="Số lượng thực nhận"
+            type="number"
+            value={recvQty}
+            onChange={setRecvQty}
+          />
+        </ModalShell>
+      )}
+
+      {/* ── Modal Sửa chi tiết (V21) ── */}
+      {editTarget && (
+        <ModalShell
+          title="Sửa chi tiết"
+          onClose={() => !busy && setEditTarget(null)}
+          footer={
+            <button
+              type="button"
+              disabled={busy}
+              onClick={submitEdit}
+              className={primaryBtn}
+            >
+              {busy ? "Đang lưu…" : "LƯU"}
+            </button>
+          }
+        >
+          <ReadonlyField
+            label="Nhà cung cấp"
+            value={editTarget.supplierName || editTarget.supplierId}
+          />
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">Hàng hóa</div>
+            <MasterPicker
+              type="HH"
+              value={editProductId}
+              displayName={editProduct}
+              supplierId={editTarget.supplierId}
+              onChange={(id, name) => {
+                setEditProductId(id);
+                setEditProduct(name);
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">Khu vực/Công trình</div>
+            <MasterPicker
+              type="KV"
+              value={editRegionId}
+              displayName={editRegion}
+              onChange={(id, name) => {
+                setEditRegionId(id);
+                setEditRegion(name);
+              }}
+            />
+          </div>
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">Ghi chú</div>
+            <textarea
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2.5 rounded-lg text-sm border border-slate-300 focus:ring-2 focus:ring-sky-400 focus:outline-none"
+            />
+          </div>
+        </ModalShell>
+      )}
+
+      {/* ── Modal Giao / Sửa KH / Xem (V21) ── */}
+      {deliveryTarget && (
+        <DeliveryEditorModal
+          mode={deliveryTarget.mode}
+          summary={summaryFromDetail(deliveryTarget.detail)}
+          initialRows={deliveryRows}
+          onClose={() => {
+            if (!busy) setDeliveryTarget(null);
+          }}
+          onSaved={() => load(page)}
+        />
+      )}
+      <ColumnCustomizer
+        open={colOpen}
+        tabKey="details"
+        columns={DETAIL_COLUMNS}
+        onClose={() => setColOpen(false)}
+        onApply={setColState}
+      />
+    </div>
+  );
+}
