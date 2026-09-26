@@ -40,20 +40,52 @@ function fmtDateVN(ymd: string) {
 
 const DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
 
-/** V21 deliveryActionText theo trạng thái CT */
+/** Chuẩn hóa trạng thái CT (EN/VN) */
+function normCtStatus(raw: string): string {
+  const s = String(raw || "").trim();
+  const u = s.toUpperCase();
+  const fold = s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (u === "CANCEL" || fold.includes("huy xe") || fold === "huy") return "CANCEL";
+  if (u === "DELETE" || fold.includes("xoa xe") || fold === "xoa") return "DELETE";
+  if (u === "DONE" || fold.includes("hoan thanh")) return "DONE";
+  if (u === "RECEIVED" || fold.includes("da nhan")) return "RECEIVED";
+  if (u === "DELIVERING" || fold.includes("dang giao")) return "DELIVERING";
+  if (u === "ORDERED" || fold.includes("dat hang")) return "ORDERED";
+  if (u === "NEW" || fold.includes("moi tao") || fold.includes("khoi tao")) return "NEW";
+  return u || fold;
+}
+
+/** Hiển thị trạng thái tiếng Việt — parity V21 STATUS_CT */
+function statusLabelVN(raw: string): string {
+  const n = normCtStatus(raw);
+  const map: Record<string, string> = {
+    NEW: "Mới tạo",
+    ORDERED: "Đặt hàng",
+    RECEIVED: "Đã nhận",
+    DELIVERING: "Đang giao",
+    DONE: "Hoàn thành",
+    CANCEL: "Hủy xe",
+    DELETE: "Xóa xe",
+  };
+  return map[n] || (raw ? String(raw) : "—");
+}
+
+/** V21 deliveryActionText — CANCEL/DELETE/DONE → Xem (không Giao) */
 function actionLabel(d: Delivery) {
-  if (d.deleted) return "Khôi phục";
-  const st = String(d.detailStatus || "").toUpperCase();
-  if (st === "DONE" || st === "HOÀN THÀNH") return "Xem";
-  if (st === "RECEIVED" || st === "DELIVERING" || st === "ĐÃ NHẬN" || st === "ĐANG GIAO")
-    return "Giao";
-  if (st === "NEW" || st === "ORDERED" || st === "MỚI TẠO" || st === "ĐẶT HÀNG")
-    return "Sửa";
-  // fallback: chưa giao hết → Giao
+  if (d.deleted) return "Xem";
+  const st = normCtStatus(String(d.detailStatus || ""));
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE") return "Xem";
+  if (st === "RECEIVED" || st === "DELIVERING") return "Giao";
+  if (st === "NEW" || st === "ORDERED") return "Sửa";
+  // fallback: đã giao đủ KH → Xem; còn lại Giao chỉ khi đã nhận
   const planned = Number(d.plannedQty) || 0;
   const actual = Number(d.actualQty) || 0;
   if (planned > 0 && actual + 0.0001 >= planned) return "Xem";
-  return "Giao";
+  if ((Number(d.actualReceived) || 0) > 0) return "Giao";
+  return "Xem";
 }
 
 function isViewOnly(d: Delivery) {
@@ -429,7 +461,7 @@ export default function DeliveriesPage() {
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-slate-500">Trạng thái xe</span>
-                      <StatusBadge status={String(d.detailStatus || "—")} />
+                      <StatusBadge status={statusLabelVN(d.detailStatus || "")} />
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-slate-500">Biển số</span>
@@ -547,7 +579,7 @@ export default function DeliveriesPage() {
                             if (c.key === "status")
                               return (
                                 <td key={c.key} className="px-3 py-2.5">
-                                  <StatusBadge status={String(d.detailStatus || "—")} />
+                                  <StatusBadge status={statusLabelVN(d.detailStatus || "")} />
                                 </td>
                               );
                             if (c.key === "customer")
