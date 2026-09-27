@@ -79,7 +79,22 @@ function OrderActions({
       {isNew && (
         <>
           <button
-            onClick={() => toast("Gửi mail NCC — POST /orders/:id/send")}
+            onClick={async () => {
+              if (!confirm(`Gửi đơn ${o.orderId} tới NCC?`)) return;
+              const json = await apiPost(
+                `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+                { year: new Date().getFullYear() }
+              );
+              if (!json.success) {
+                alert(json.error?.message || "Gửi đơn thất bại");
+                return;
+              }
+              const msg =
+                (json.data as { message?: string } | undefined)?.message ||
+                "Đã gửi đơn";
+              alert(msg);
+              onChanged?.();
+            }}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500"
           >
             Gửi
@@ -112,7 +127,19 @@ function OrderActions({
       )}
       {o.resendMail && (
         <button
-          onClick={() => toast("Gửi lại mail")}
+          onClick={async () => {
+            if (!confirm(`Gửi lại đơn ${o.orderId}?`)) return;
+            const json = await apiPost(
+              `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+              { year: new Date().getFullYear() }
+            );
+            if (!json.success) {
+              alert(json.error?.message || "Gửi lại thất bại");
+              return;
+            }
+            alert((json.data as { message?: string })?.message || "Đã gửi lại");
+            onChanged?.();
+          }}
           className="px-2.5 py-1 text-[11px] font-medium rounded bg-violet-600 text-white hover:bg-violet-500"
         >
           Gửi lại

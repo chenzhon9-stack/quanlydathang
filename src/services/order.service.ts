@@ -10,6 +10,8 @@ import { MasterRepository } from "@/repositories/master.repository";
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
+import { writeAudit } from "@/lib/sheets/audit";
+import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
 
@@ -845,4 +847,184 @@ export class OrderService {
       tongSoChitiet: newTong,
     };
   }
+
+  /**
+   * Gửi đơn NCC — Strangler V21:
+   * - Tăng LanGui, timeGuimail, clear ChoGuiMail/GuiLaimail
+   * - CT "Mới tạo" → "Đặt hàng"
+   * - Snapshot DonHang_Snapshot
+   * - LogGuiMail
+   * - AuditLog
+   * - PDF/mail thật: gọi GAS webhook nếu env GAS_SEND_ORDER_URL (tuỳ chọn)
+   */
+  static async sendOrder(
+    orderId: string,
+    user: UserContext,
+    year?: number
+  ) {
+    if (
+      !hasPermission(user, "ORDER_SEND") &&
+      !hasPermission(user, "ORDER_UPDATE") &&
+      !hasPermission(user, "*")
+    ) {
+      // fallback: purchase/admin thường có ORDER_UPDATE
+      if (!["ADMIN", "PURCHASE", "MANAGER", "DISPATCHER"].includes(String(user.role || "").toUpperCase())) {
+        throw { code: "PERMISSION_DENIED", message: "Không có quyền gửi đơn" };
+      }
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
+    }
+    const y = year ?? currentYearVN();
+    const orders = await OrderRepository.findMany({ year: y });
+    const order = orders.find(
+      (o) => String(o.orderId).toUpperCase() === String(orderId).toUpperCase()
+    );
+    if (!order) {
+      throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
+    }
+
+    const lanGui = (Number(order.sendCount) || 0) + 1;
+    const nowIso = new Date().toISOString();
+    const timeLabel = formatDateTimeVN(new Date());
+
+    // 1) Cập nhật DonHang
+    await updateSheetRowByKey(
+      SHEETS.DH,
+      "MaDon",
+      orderId,
+      {
+        LanGui: lanGui,
+        timeGuimail: timeLabel,
+        ChoGuiMail: false,
+        GuiLaimail: false,
+        TrangThaiDon: STATUS_DON.PROCESSING,
+        FileDonhang: order.orderFile || "",
+      },
+      y
+    );
+
+    // 2) CT Mới tạo → Đặt hàng
+    const { DetailRepository } = await import("@/repositories/detail.repository");
+    const details = await DetailRepository.findMany({ year: y, orderId });
+    let ctUpdated = 0;
+    for (const ct of details) {
+      const st = String(ct.status || "").toUpperCase();
+      if (
+        st === "NEW" ||
+        st === "" ||
+        String(ct.status) === STATUS_CT.NEW ||
+        String(ct.status).includes("Mới")
+      ) {
+        await updateSheetRowByKey(
+          SHEETS.CT,
+          "ID_Chitiet",
+          ct.detailId,
+          {
+            TrangThaiXe: STATUS_CT.ORDERED,
+            TimeChange: timeLabel,
+          },
+          y
+        );
+        ctUpdated++;
+      }
+    }
+
+    // 3) Snapshot
+    try {
+      const snap = {
+        maDon: orderId,
+        lanGui,
+        at: nowIso,
+        by: user.email,
+        order,
+        details: details.map((d) => ({
+          id: d.detailId,
+          xe: d.vehicleId,
+          hh: d.productId,
+          sl: d.quantity,
+          st: d.status,
+        })),
+      };
+      await appendSheetRow(
+        SHEETS.SNAPSHOT,
+        {
+          MaDon: orderId,
+          LanGui: lanGui,
+          SnapshotJSON: JSON.stringify(snap),
+          ThoiGianLuu: timeLabel,
+        },
+        y
+      );
+    } catch (e) {
+      console.warn("[sendOrder] snapshot skip", e);
+    }
+
+    // 4) LogGuiMail
+    try {
+      const nccName =
+        order.supplierName || order.supplierId || "";
+      await appendSheetRow(
+        SHEETS.LOG_GUI_MAIL,
+        {
+          "Thời gian": timeLabel,
+          MaDon: orderId,
+          NCC: nccName,
+          Email: "",
+          "Lần gửi": lanGui,
+          "Ghi chú": "Gửi từ Vercel (Strangler)",
+          "Link PDF": order.orderFile || "",
+        },
+        y
+      );
+    } catch (e) {
+      console.warn("[sendOrder] LogGuiMail skip", e);
+    }
+
+    // 5) Optional GAS webhook for real email/PDF
+    let gas: { ok?: boolean; error?: string } | null = null;
+    const gasUrl = process.env.GAS_SEND_ORDER_URL || process.env.GAS_WEBHOOK_URL;
+    if (gasUrl) {
+      try {
+        const res = await fetch(gasUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "sendOrder",
+            maDon: orderId,
+            year: y,
+            email: user.email,
+            lanGui,
+          }),
+        });
+        gas = { ok: res.ok };
+        if (!res.ok) gas.error = await res.text().catch(() => res.statusText);
+      } catch (e) {
+        gas = { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "SEND_ORDER",
+      maDon: orderId,
+      targetId: orderId,
+      newValue: JSON.stringify({ lanGui, ctUpdated, gas }),
+      year: y,
+    });
+
+    return {
+      orderId,
+      lanGui,
+      ctUpdated,
+      gas,
+      message: gasUrl
+        ? gas?.ok
+          ? "Đã gửi đơn + gọi GAS mail/PDF"
+          : "Đã cập nhật Sheet; GAS mail/PDF lỗi — xem gas.error"
+        : "Đã cập nhật trạng thái gửi trên Sheet (chưa cấu hình GAS_SEND_ORDER_URL cho mail/PDF thật)",
+    };
+  }
+
 }
