@@ -848,34 +848,115 @@ export class OrderService {
     };
   }
 
-  /**
-   * Gửi đơn NCC — Strangler V21:
-   * - Tăng LanGui, timeGuimail, clear ChoGuiMail/GuiLaimail
-   * - CT "Mới tạo" → "Đặt hàng"
-   * - Snapshot DonHang_Snapshot
-   * - LogGuiMail
-   * - AuditLog
-   * - PDF/mail thật: gọi GAS webhook nếu env GAS_SEND_ORDER_URL (tuỳ chọn)
+    /**
+   * Gửi đơn NCC — Strangler V21.
+   *
+   * Có GAS_SEND_ORDER_URL:
+   *   → Uỷ quyền toàn bộ cho GAS `sendOrderEmail` (PDF + mail/Zalo + cập nhật Sheet).
+   *   Không ghi Sheet phía Vercel (tránh tăng LanGui 2 lần).
+   *
+   * Không có GAS:
+   *   → Chỉ cập nhật Sheet nội bộ (status/CT/snapshot/log) — không mail/PDF.
+   *
+   * sendAction: '' | 'send' | 'reset' | 'cancel' | 'markSent' (parity modal late-send V21)
    */
   static async sendOrder(
     orderId: string,
     user: UserContext,
-    year?: number
+    year?: number,
+    sendAction?: string
   ) {
     if (
       !hasPermission(user, "ORDER_SEND") &&
       !hasPermission(user, "ORDER_UPDATE") &&
       !hasPermission(user, "*")
     ) {
-      // fallback: purchase/admin thường có ORDER_UPDATE
-      if (!["ADMIN", "PURCHASE", "MANAGER", "DISPATCHER"].includes(String(user.role || "").toUpperCase())) {
+      if (
+        !["ADMIN", "PURCHASE", "MANAGER", "DISPATCHER"].includes(
+          String(user.role || "").toUpperCase()
+        )
+      ) {
         throw { code: "PERMISSION_DENIED", message: "Không có quyền gửi đơn" };
       }
     }
+
+    const y = year ?? currentYearVN();
+    const action = String(sendAction || "").trim();
+    const gasUrl =
+      process.env.GAS_SEND_ORDER_URL || process.env.GAS_WEBHOOK_URL || "";
+
+    // ─── Nhánh 1: Uỷ quyền GAS (mail/PDF/Zalo + ghi Sheet) ───
+    if (gasUrl) {
+      const secret = process.env.GAS_WEBHOOK_SECRET || "";
+      const res = await fetch(gasUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "sendOrderEmail",
+          maDon: orderId,
+          email: user.email,
+          sendAction: action,
+          year: y,
+          secret: secret || undefined,
+        }),
+      });
+      let gasBody: Record<string, unknown> = {};
+      try {
+        gasBody = (await res.json()) as Record<string, unknown>;
+      } catch {
+        gasBody = { success: false, error: await res.text().catch(() => res.statusText) };
+      }
+
+      // needConfirm LATE_FIRST_SEND — UI hiện modal
+      if (gasBody.needConfirm) {
+        return {
+          orderId,
+          via: "gas" as const,
+          needConfirm: true,
+          confirmType: gasBody.confirmType || "LATE_FIRST_SEND",
+          isDuyenHa: !!gasBody.isDuyenHa,
+          dayDiff: gasBody.dayDiff,
+          message: String(gasBody.error || gasBody.message || "Cần xác nhận gửi muộn"),
+          gas: gasBody,
+        };
+      }
+
+      if (!res.ok || gasBody.success === false) {
+        throw {
+          code: "GAS_SEND_FAILED",
+          message: String(gasBody.error || gasBody.message || `GAS HTTP ${res.status}`),
+          gas: gasBody,
+        };
+      }
+
+      await writeAudit({
+        email: user.email,
+        role: user.role,
+        action: "SEND_ORDER_GAS",
+        maDon: orderId,
+        targetId: orderId,
+        newValue: JSON.stringify({
+          sendAction: action,
+          notifiedNcc: gasBody.notifiedNcc,
+          message: gasBody.message,
+        }),
+        year: y,
+      });
+
+      return {
+        orderId,
+        via: "gas" as const,
+        needConfirm: false,
+        notifiedNcc: gasBody.notifiedNcc !== false,
+        message: String(gasBody.message || "Đã gửi đơn qua GAS (mail/PDF/Zalo)"),
+        gas: gasBody,
+      };
+    }
+
+    // ─── Nhánh 2: Không GAS — chỉ Sheet (không mail/PDF) ───
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
     }
-    const y = year ?? currentYearVN();
     const orders = await OrderRepository.findMany({ year: y });
     const order = orders.find(
       (o) => String(o.orderId).toUpperCase() === String(orderId).toUpperCase()
@@ -885,10 +966,8 @@ export class OrderService {
     }
 
     const lanGui = (Number(order.sendCount) || 0) + 1;
-    const nowIso = new Date().toISOString();
     const timeLabel = formatDateTimeVN(new Date());
 
-    // 1) Cập nhật DonHang
     await updateSheetRowByKey(
       SHEETS.DH,
       "MaDon",
@@ -904,7 +983,6 @@ export class OrderService {
       y
     );
 
-    // 2) CT Mới tạo → Đặt hàng
     const { DetailRepository } = await import("@/repositories/detail.repository");
     const details = await DetailRepository.findMany({ year: y, orderId });
     let ctUpdated = 0;
@@ -930,28 +1008,18 @@ export class OrderService {
       }
     }
 
-    // 3) Snapshot
     try {
-      const snap = {
-        maDon: orderId,
-        lanGui,
-        at: nowIso,
-        by: user.email,
-        order,
-        details: details.map((d) => ({
-          id: d.detailId,
-          xe: d.vehicleId,
-          hh: d.productId,
-          sl: d.quantity,
-          st: d.status,
-        })),
-      };
       await appendSheetRow(
         SHEETS.SNAPSHOT,
         {
           MaDon: orderId,
           LanGui: lanGui,
-          SnapshotJSON: JSON.stringify(snap),
+          SnapshotJSON: JSON.stringify({
+            maDon: orderId,
+            lanGui,
+            at: new Date().toISOString(),
+            by: user.email,
+          }),
           ThoiGianLuu: timeLabel,
         },
         y
@@ -960,19 +1028,16 @@ export class OrderService {
       console.warn("[sendOrder] snapshot skip", e);
     }
 
-    // 4) LogGuiMail
     try {
-      const nccName =
-        order.supplierName || order.supplierId || "";
       await appendSheetRow(
         SHEETS.LOG_GUI_MAIL,
         {
           "Thời gian": timeLabel,
           MaDon: orderId,
-          NCC: nccName,
+          NCC: order.supplierName || order.supplierId || "",
           Email: "",
           "Lần gửi": lanGui,
-          "Ghi chú": "Gửi từ Vercel (Strangler)",
+          "Ghi chú": "Gửi Sheet-only (chưa cấu hình GAS_SEND_ORDER_URL)",
           "Link PDF": order.orderFile || "",
         },
         y
@@ -981,50 +1046,27 @@ export class OrderService {
       console.warn("[sendOrder] LogGuiMail skip", e);
     }
 
-    // 5) Optional GAS webhook for real email/PDF
-    let gas: { ok?: boolean; error?: string } | null = null;
-    const gasUrl = process.env.GAS_SEND_ORDER_URL || process.env.GAS_WEBHOOK_URL;
-    if (gasUrl) {
-      try {
-        const res = await fetch(gasUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "sendOrder",
-            maDon: orderId,
-            year: y,
-            email: user.email,
-            lanGui,
-          }),
-        });
-        gas = { ok: res.ok };
-        if (!res.ok) gas.error = await res.text().catch(() => res.statusText);
-      } catch (e) {
-        gas = { ok: false, error: e instanceof Error ? e.message : String(e) };
-      }
-    }
-
     await writeAudit({
       email: user.email,
       role: user.role,
-      action: "SEND_ORDER",
+      action: "SEND_ORDER_SHEET_ONLY",
       maDon: orderId,
       targetId: orderId,
-      newValue: JSON.stringify({ lanGui, ctUpdated, gas }),
+      newValue: JSON.stringify({ lanGui, ctUpdated }),
       year: y,
     });
 
     return {
       orderId,
+      via: "sheet" as const,
       lanGui,
       ctUpdated,
-      gas,
-      message: gasUrl
-        ? gas?.ok
-          ? "Đã gửi đơn + gọi GAS mail/PDF"
-          : "Đã cập nhật Sheet; GAS mail/PDF lỗi — xem gas.error"
-        : "Đã cập nhật trạng thái gửi trên Sheet (chưa cấu hình GAS_SEND_ORDER_URL cho mail/PDF thật)",
+      needConfirm: false,
+      notifiedNcc: false,
+      message:
+        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL để uỷ quyền GAS sendOrderEmail.",
     };
   }
+
 
 }

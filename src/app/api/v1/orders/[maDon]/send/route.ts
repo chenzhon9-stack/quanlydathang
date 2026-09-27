@@ -5,7 +5,7 @@ import { success, error, jsonResponse } from "@/lib/api";
 
 type Ctx = { params: Promise<{ maDon: string }> };
 
-/** POST /api/v1/orders/:maDon/send — Gửi đơn NCC (Sheet + snapshot; GAS mail optional) */
+/** POST /api/v1/orders/:maDon/send — body: { year?, sendAction?: ''|'send'|'reset'|'cancel'|'markSent' } */
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const token =
@@ -16,13 +16,20 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
     const { maDon } = await ctx.params;
     let year: number | undefined;
+    let sendAction = "";
     try {
       const body = await req.json();
       if (body?.year) year = Number(body.year);
+      if (body?.sendAction != null) sendAction = String(body.sendAction);
+      if (body?.action && body.action !== "sendOrderEmail") {
+        // tương thích action = send|reset|cancel|markSent
+        const a = String(body.action);
+        if (["send", "reset", "cancel", "markSent", ""].includes(a)) sendAction = a;
+      }
     } catch {
       /* empty body */
     }
-    const data = await OrderService.sendOrder(maDon, user, year);
+    const data = await OrderService.sendOrder(maDon, user, year, sendAction);
     return jsonResponse(success(data));
   } catch (e: unknown) {
     const err = e as { code?: string; message?: string };

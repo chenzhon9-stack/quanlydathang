@@ -83,16 +83,39 @@ function OrderActions({
               if (!confirm(`Gửi đơn ${o.orderId} tới NCC?`)) return;
               const json = await apiPost(
                 `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-                { year: new Date().getFullYear() }
+                { year: new Date().getFullYear(), sendAction: "" }
               );
               if (!json.success) {
                 alert(json.error?.message || "Gửi đơn thất bại");
                 return;
               }
-              const msg =
-                (json.data as { message?: string } | undefined)?.message ||
-                "Đã gửi đơn";
-              alert(msg);
+              const data = json.data as {
+                needConfirm?: boolean;
+                message?: string;
+                isDuyenHa?: boolean;
+              };
+              if (data?.needConfirm) {
+                const choice = window.prompt(
+                  (data.message || "Đơn gửi muộn.") +
+                    "\n\nNhập: send | reset | cancel | markSent",
+                  "send"
+                );
+                if (!choice) return;
+                const json2 = await apiPost(
+                  `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+                  { year: new Date().getFullYear(), sendAction: choice.trim() }
+                );
+                if (!json2.success) {
+                  alert(json2.error?.message || "Thao tác thất bại");
+                  return;
+                }
+                alert(
+                  (json2.data as { message?: string })?.message || "OK"
+                );
+                onChanged?.();
+                return;
+              }
+              alert(data?.message || "Đã gửi đơn");
               onChanged?.();
             }}
             className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500"
