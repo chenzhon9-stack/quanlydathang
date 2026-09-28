@@ -20,6 +20,7 @@ export const DETAILS_COLUMN_DEFS: ColumnDef[] = [
   { key: "note", label: "Ghi chú", defaultVisible: true },
   // mở rộng
   { key: "orderId", label: "Mã đơn", defaultVisible: false, filterable: true },
+  { key: "orderFile", label: "File đơn hàng (PDF)", defaultVisible: false },
   { key: "supplierId", label: "Mã NCC", defaultVisible: false, filterable: true },
   { key: "supplier", label: "Nhà cung cấp", defaultVisible: false, filterable: true },
   { key: "vehicleId", label: "Mã xe", defaultVisible: false, filterable: true },
@@ -29,6 +30,7 @@ export const DETAILS_COLUMN_DEFS: ColumnDef[] = [
   { key: "htvtId", label: "Mã HTVT", defaultVisible: false, filterable: true },
   { key: "htvt", label: "Hình thức VT", defaultVisible: false, filterable: true },
   { key: "isDuyenHa", label: "Duyên Hà", defaultVisible: false, filterable: true },
+  { key: "orderFile", label: "File đơn hàng (PDF)", defaultVisible: false },
   { key: "actions", label: "Hành động", defaultVisible: true },
 ];
 
@@ -50,6 +52,7 @@ export const DELIVERY_COLUMN_DEFS: ColumnDef[] = [
   { key: "status", label: "Trạng thái", defaultVisible: true, filterable: true },
   // mở rộng / export-style
   { key: "detailId", label: "ID Chi tiết", defaultVisible: false, filterable: true },
+  { key: "orderFile", label: "File đơn hàng (PDF)", defaultVisible: false },
   { key: "orderId", label: "Mã đơn", defaultVisible: false, filterable: true },
   { key: "supplierId", label: "Mã NCC", defaultVisible: false, filterable: true },
   { key: "productId", label: "Mã HH", defaultVisible: false, filterable: true },

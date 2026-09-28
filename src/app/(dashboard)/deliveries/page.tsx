@@ -484,19 +484,23 @@ export default function DeliveriesPage() {
                       )}
                       {show("id") &&
                         row("ID Giao hàng", d.deliveryId, "font-mono text-[12px]")}
-                      {d.orderFile ? (
+                      {(show("orderFile") || d.orderFile) && (
                         <div className="flex items-center justify-between gap-2 py-1">
-                          <span className="text-[13px] opacity-80">PDF</span>
-                          <a
-                            href={d.orderFile}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-red-600 text-sm font-semibold"
-                          >
-                            📄 Mở PDF
-                          </a>
+                          <span className="text-[13px] opacity-80">File đơn</span>
+                          {d.orderFile ? (
+                            <a
+                              href={d.orderFile}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-red-600 text-sm font-semibold"
+                            >
+                              📄 Mở PDF
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 text-xs">Chưa có</span>
+                          )}
                         </div>
-                      ) : null}
+                      )}
                       {show("product") &&
                         (d.productName || d.productId) &&
                         row("Hàng hóa", d.productName || d.productId || "")}
@@ -652,7 +656,60 @@ export default function DeliveriesPage() {
                             if (c.key === "plate")
                               return (
                                 <td key={c.key} className="px-3 py-2.5">
-                                  <PlateBadge plate={d.vehiclePlate} />
+                                  <div className="flex flex-col gap-0.5">
+                                    {d.orderId ? (
+                                      <Link
+                                        href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                                        className="inline-flex"
+                                      >
+                                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                      </Link>
+                                    ) : (
+                                      <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                    )}
+                                    {d.orderFile ? (
+                                      <a
+                                        href={d.orderFile}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] text-red-600 font-semibold"
+                                      >
+                                        📄 PDF
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              );
+                            if (c.key === "orderId")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 font-mono text-[11px]">
+                                  {d.orderId ? (
+                                    <Link
+                                      href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                                      className="text-blue-700 underline"
+                                    >
+                                      {d.orderId}
+                                    </Link>
+                                  ) : (
+                                    "—"
+                                  )}
+                                </td>
+                              );
+                            if (c.key === "orderFile")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs">
+                                  {d.orderFile ? (
+                                    <a
+                                      href={d.orderFile}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-red-600 font-semibold"
+                                    >
+                                      📄 PDF
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
                                 </td>
                               );
                             if (c.key === "status")

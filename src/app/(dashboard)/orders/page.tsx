@@ -191,11 +191,9 @@ function OrderActions({
       )}
       {o.orderFile && (
         <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            toast("Mở PDF");
-          }}
+          href={o.orderFile}
+          target="_blank"
+          rel="noopener noreferrer"
           className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
         >
           PDF

@@ -959,19 +959,23 @@ export default function DetailsPage() {
                       )}
                       {show("id") &&
                         row("ID Chi tiết", d.detailId, "font-mono text-[12px]")}
-                      {d.orderFile ? (
+                      {(show("orderFile") || d.orderFile) && (
                         <div className="flex items-center justify-between gap-2 py-1">
-                          <span className="text-[13px] opacity-80">PDF</span>
-                          <a
-                            href={d.orderFile}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-red-600 text-sm font-semibold"
-                          >
-                            📄 Mở PDF
-                          </a>
+                          <span className="text-[13px] opacity-80">File đơn</span>
+                          {d.orderFile ? (
+                            <a
+                              href={d.orderFile}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-red-600 text-sm font-semibold"
+                            >
+                              📄 Mở PDF
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 text-xs">Chưa có</span>
+                          )}
                         </div>
-                      ) : null}
+                      )}
                       {show("product") &&
                         row("Hàng hóa", d.productName || d.productId || "—")}
                       {show("qty") && row("KH đặt", fmtNum(d.quantity))}
@@ -1072,7 +1076,28 @@ export default function DetailsPage() {
                             if (c.key === "plate")
                               return (
                                 <td key={c.key} className="px-2 py-2">
-                                  <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                  <div className="flex flex-col gap-0.5">
+                                    {d.orderId ? (
+                                      <Link
+                                        href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                                        className="inline-flex"
+                                      >
+                                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                      </Link>
+                                    ) : (
+                                      <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
+                                    )}
+                                    {d.orderFile ? (
+                                      <a
+                                        href={d.orderFile}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-[10px] text-red-600 font-semibold"
+                                      >
+                                        📄 PDF
+                                      </a>
+                                    ) : null}
+                                  </div>
                                   {transportSub(d) && (
                                     <div className="text-[10px] opacity-70 mt-0.5">
                                       {transportSub(d)}
@@ -1095,7 +1120,33 @@ export default function DetailsPage() {
                             if (c.key === "orderId")
                               return (
                                 <td key={c.key} className="px-2 py-2 font-mono text-[11px]">
-                                  {d.orderId}
+                                  {d.orderId ? (
+                                    <Link
+                                      href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                                      className="text-blue-700 underline"
+                                    >
+                                      {d.orderId}
+                                    </Link>
+                                  ) : (
+                                    "—"
+                                  )}
+                                </td>
+                              );
+                            if (c.key === "orderFile")
+                              return (
+                                <td key={c.key} className="px-2 py-2 text-xs">
+                                  {d.orderFile ? (
+                                    <a
+                                      href={d.orderFile}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-red-600 font-semibold"
+                                    >
+                                      📄 PDF
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
                                 </td>
                               );
                             if (c.key === "supplier")
