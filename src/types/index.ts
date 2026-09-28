@@ -53,6 +53,8 @@ export interface Order {
   mailSentAt?: string;
   resendMail: boolean;
   createdBy: string;
+  /** Có thể reset đơn theo rule V21 (ngày + còn xe chưa nhận) */
+  canReset?: boolean;
 }
 
 export interface OrderDetail {

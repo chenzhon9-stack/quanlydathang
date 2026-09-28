@@ -138,12 +138,12 @@ function OrderActions({
           >
             Hủy
           </button>
-          {(isNew || isProcessing) && (
+          {o.canReset && (
             <button
               onClick={async () => {
                 if (
                   !confirm(
-                    `Reset đơn ${o.orderId}?\n• Chưa gửi: sau ≥1 ngày đặt\n• Đã gửi: ≥1 ngày (Duyên Hà) hoặc ≥2 ngày (đơn thường)\n• Xe chưa nhận → mã/đơn mới; xe đã nhận giữ nguyên.`
+                    `Reset đơn ${o.orderId}?\nXe chưa nhận sẽ về mã/đơn mới; xe đã nhận giữ nguyên.`
                   )
                 )
                   return;

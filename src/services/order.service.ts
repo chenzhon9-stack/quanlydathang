@@ -1,6 +1,4 @@
 import {
-  businessDateKey,
-  businessTodayKey,
   todayYmdVN,
   currentYearVN,
   formatDateTimeVN,
@@ -21,6 +19,7 @@ import { writeAudit } from "@/lib/sheets/audit";
 import { generateMaDon, resolveMaDonClock } from "@/lib/sheets/ma-don";
 import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
+import { canResetOrder, isDuyenHaNcc, businessDayDiff } from "@/lib/order-reset";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
 
 export interface OrderListFilter {
@@ -80,10 +79,19 @@ export class OrderService {
     }
 
     const nccMap = await MasterRepository.nccNames();
-    orders = orders.map((o) => ({
-      ...o,
-      supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
-    }));
+    orders = orders.map((o) => {
+      const reset = canResetOrder({
+        status: o.status,
+        orderDate: o.orderDate,
+        supplierId: o.supplierId,
+        sendCount: o.sendCount,
+      });
+      return {
+        ...o,
+        supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
+        canReset: reset.ok,
+      };
+    });
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
@@ -1167,39 +1175,21 @@ export class OrderService {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
     }
 
-    // Duyên Hà: MaNCC dha/btay (parity _isDuyenHaFromNcc_)
-    const nccCode = String(order.supplierId || "").trim().toLowerCase();
-    const isDha = nccCode === "dha" || nccCode === "btay";
-    const threshold = isDha ? 1 : 2; // _lateThresholdDays_
-    const fromKey = businessDateKey(order.orderDate, isDha);
-    const toKey = businessTodayKey(isDha);
-    const dayDiff =
-      fromKey && toKey
-        ? Math.round(
-            (Date.parse(
-              `${toKey.slice(0, 4)}-${toKey.slice(4, 6)}-${toKey.slice(6, 8)}`
-            ) -
-              Date.parse(
-                `${fromKey.slice(0, 4)}-${fromKey.slice(4, 6)}-${fromKey.slice(6, 8)}`
-              )) /
-              86400000
-          )
-        : null;
-
-    const lanGui = Number(order.sendCount) || 0;
-    // V21: (slan>0 && dayDiff < threshold) || (slan===0 && dayDiff < 1)
-    if (
-      dayDiff === null ||
-      (lanGui > 0 && dayDiff < threshold) ||
-      (lanGui === 0 && dayDiff < 1)
-    ) {
-      throw {
-        code: "TOO_EARLY",
-        message: isDha
-          ? "Chỉ được reset đơn Duyên Hà sau 1 ngày (ngày nghiệp vụ) kể từ ngày đặt."
-          : "Chỉ được reset đơn sau 2 ngày (ngày nghiệp vụ) kể từ ngày đặt khi đã gửi; đơn chưa gửi cần đủ 1 ngày.",
-      };
+    // Điều kiện thời gian + status — parity V21 _canResetDuyenHaOrder_
+    const timeCheck = canResetOrder({
+      status: order.status,
+      orderDate: order.orderDate,
+      supplierId: order.supplierId,
+      sendCount: order.sendCount,
+      // hasUnreceived kiểm tra sau khi load CT
+    });
+    if (!timeCheck.ok) {
+      throw { code: "TOO_EARLY", message: timeCheck.error || "Chưa đủ điều kiện reset." };
     }
+    const isDha = isDuyenHaNcc(order.supplierId);
+    const threshold = isDha ? 1 : 2;
+    const dayDiff = businessDayDiff(order.orderDate, isDha);
+    const lanGui = Number(order.sendCount) || 0;
 
     const { DetailRepository } = await import(
       "@/repositories/detail.repository"
