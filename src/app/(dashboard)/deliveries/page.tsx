@@ -95,8 +95,11 @@ function isViewOnly(d: Delivery) {
   return actionLabel(d) === "Xem";
 }
 
-function modeFromDelivery(d: Delivery): DeliveryModalMode {
-  const label = canUpdateDelivery ? actionLabel(d) : "Xem";
+function modeFromDelivery(
+  d: Delivery,
+  canUpdate = true
+): DeliveryModalMode {
+  const label = canUpdate ? actionLabel(d) : "Xem";
   if (label === "Xem") return "view";
   if (label === "Sửa") return "plan";
   return "real";
@@ -571,7 +574,7 @@ export default function DeliveriesPage() {
                           onClick={() =>
                             setModalTarget({
                               delivery: d,
-                              mode: modeFromDelivery(d),
+                              mode: modeFromDelivery(d, canUpdateDelivery),
                             })
                           }
                           className={`min-h-[40px] min-w-[88px] px-4 rounded-xl text-sm font-bold border-2 shadow-sm active:scale-[0.98] ${
@@ -816,7 +819,7 @@ export default function DeliveriesPage() {
                                     onClick={() => {
                                       setModalTarget({
                                         delivery: d,
-                                        mode: modeFromDelivery(d),
+                                        mode: modeFromDelivery(d, canUpdateDelivery),
                                       });
                                     }}
                                     className={`px-2.5 py-1 text-[11px] font-bold rounded border shadow-sm ${
