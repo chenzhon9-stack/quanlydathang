@@ -92,8 +92,27 @@ export class DeliveryService {
         actualReceived: ct?.actualReceived ?? d.actualReceived,
         receivedDate: ct?.receivedDate || d.receivedDate,
         isDuyenHa: !!(ct as { isDuyenHa?: boolean } | undefined)?.isDuyenHa || d.isDuyenHa,
+        orderId: d.orderId || ct?.orderId || undefined,
       };
     });
+
+    // PDF FileDonhang theo MaDon
+    try {
+      const { OrderRepository } = await import("@/repositories/order.repository");
+      const year = filter.year ?? currentYearVN();
+      const orders = await OrderRepository.findMany({ year });
+      const fileByOrder = new Map(
+        orders
+          .filter((o) => o.orderId && o.orderFile)
+          .map((o) => [String(o.orderId).trim(), String(o.orderFile)])
+      );
+      rows = rows.map((d) => ({
+        ...d,
+        orderFile: d.orderFile || (d.orderId ? fileByOrder.get(String(d.orderId).trim()) : undefined),
+      }));
+    } catch {
+      /* ignore */
+    }
     // Debug: thiếu status → chip lọc sẽ không khớp
     const missingSt = rows.filter((r) => !r.detailStatus).length;
     if (missingSt > 0) {

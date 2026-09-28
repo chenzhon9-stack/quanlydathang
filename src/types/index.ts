@@ -81,11 +81,16 @@ export interface OrderDetail {
   transportTypeName?: string;
   isDuyenHa?: boolean;
   phanLoai?: PhanLoaiHH;
+  /** Link PDF đơn (từ DonHang.FileDonhang) */
+  orderFile?: string;
 }
 
 export interface Delivery {
   deliveryId: string;
   detailId: string;
+  /** MaDon từ CT */
+  orderId?: string;
+  orderFile?: string;
   customerId: string;
   customerName?: string;
   customerDetail?: string;

@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ListToolbar,
@@ -207,6 +209,12 @@ function OrderActions({
 export default function OrdersPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
+  // Deep-link /orders?q=MaDon từ tab CT/GH
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (q) setSearch(q);
+  }, []);
   const [groupByDate, setGroupByDate] = useState(true);
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
@@ -361,22 +369,59 @@ export default function OrdersPage() {
                 } border-slate-200`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-blue-700">{o.orderId}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{o.orderDate}</div>
+                  <div className="min-w-0">
+                    <Link
+                      href={`/orders?q=${encodeURIComponent(o.orderId)}`}
+                      className="text-sm font-bold text-blue-700 underline break-all"
+                    >
+                      {o.orderId}
+                    </Link>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {o.orderDate}
+                    </div>
                   </div>
                   <StatusBadge status={STATUS_LABEL[o.status] || o.status} />
                 </div>
-                <div className="mt-3 space-y-1 text-sm">
+                <div className="mt-3 space-y-1.5 text-sm">
                   <div className="flex justify-between gap-2">
-                    <span className="text-slate-500">NCC</span>
-                    <span className="font-medium text-right truncate">
+                    <span className="text-slate-500 shrink-0">NCC</span>
+                    <span className="font-medium text-right">
                       {o.supplierName || o.supplierId}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Số chi tiết</span>
-                    <span className="font-medium">{o.detailCount}</span>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Tổng CT</span>
+                    <span className="font-medium">
+                      {o.detailCount}
+                      {o.cancelledDetailCount
+                        ? ` (hủy ${o.cancelledDetailCount})`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Lần gửi</span>
+                    <span className="font-medium">{o.sendCount ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-slate-500">Người tạo</span>
+                    <span className="font-medium text-right text-xs break-all max-w-[60%]">
+                      {o.createdBy || "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-2 items-center">
+                    <span className="text-slate-500">PDF</span>
+                    {o.orderFile ? (
+                      <a
+                        href={o.orderFile}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-red-600 text-sm font-semibold"
+                      >
+                        📄 Mở PDF
+                      </a>
+                    ) : (
+                      <span className="text-slate-400 text-xs">Chưa có</span>
+                    )}
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/80">

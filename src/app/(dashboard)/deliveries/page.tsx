@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ListToolbar,
@@ -371,18 +373,17 @@ export default function DeliveriesPage() {
           >
             Xuất Excel
           </button>
+          <button
+            type="button"
+            onClick={() => setColOpen(true)}
+            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+          >
+            Tùy chỉnh cột
+          </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 justify-end">
-        <button
-          type="button"
-          onClick={() => setColOpen(true)}
-          className="px-3 py-2.5 text-xs font-bold rounded-xl bg-white border-2 border-slate-300 text-slate-800 shadow-sm active:scale-95"
-        >
-          Tùy chỉnh cột
-        </button>
-      </div>
+      
 <ListToolbar
         search={search}
         onSearch={setSearch}
@@ -453,16 +454,49 @@ export default function DeliveriesPage() {
                     >
                       {show("orderDate") &&
                         row("Ngày đặt", fmtDateVN(d.orderDate || d.deliveryDate || ""))}
+                      {d.orderId && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Mã đơn</span>
+                          <Link
+                            href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                            className="text-right text-sm font-semibold text-blue-700 underline break-all max-w-[62%]"
+                          >
+                            {d.orderId}
+                          </Link>
+                        </div>
+                      )}
                       {show("plate") && (
                         <div className="flex items-center justify-between gap-2 py-1">
                           <span className="text-[13px] opacity-80">Biển số</span>
-                          <span className={PLATE_CLASS}>
-                            {d.vehiclePlate || d.vehicleId || "—"}
-                          </span>
+                          {d.orderId ? (
+                            <Link
+                              href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                              className={PLATE_CLASS + " hover:opacity-90"}
+                            >
+                              {d.vehiclePlate || d.vehicleId || "—"}
+                            </Link>
+                          ) : (
+                            <span className={PLATE_CLASS}>
+                              {d.vehiclePlate || d.vehicleId || "—"}
+                            </span>
+                          )}
                         </div>
                       )}
                       {show("id") &&
                         row("ID Giao hàng", d.deliveryId, "font-mono text-[12px]")}
+                      {d.orderFile ? (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">PDF</span>
+                          <a
+                            href={d.orderFile}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-red-600 text-sm font-semibold"
+                          >
+                            📄 Mở PDF
+                          </a>
+                        </div>
+                      ) : null}
                       {show("product") &&
                         (d.productName || d.productId) &&
                         row("Hàng hóa", d.productName || d.productId || "")}

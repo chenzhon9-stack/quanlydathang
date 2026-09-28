@@ -68,6 +68,24 @@ export class DetailService {
       transportTypeName: d.transportTypeName || htvtMap[d.transportTypeId || ""] || d.transportTypeId,
     })) as typeof rows;
 
+    // PDF FileDonhang
+    try {
+      const { OrderRepository } = await import("@/repositories/order.repository");
+      const year = filter.year ?? currentYearVN();
+      const orders = await OrderRepository.findMany({ year });
+      const fileByOrder = new Map(
+        orders
+          .filter((o) => o.orderId && o.orderFile)
+          .map((o) => [String(o.orderId).trim(), String(o.orderFile)])
+      );
+      rows = rows.map((d) => ({
+        ...d,
+        orderFile: d.orderFile || fileByOrder.get(String(d.orderId || "").trim()),
+      }));
+    } catch {
+      /* ignore */
+    }
+
     // Tổng thực giao theo CT (cho cột Tồn / Thực giao)
     try {
       const { DeliveryRepository } = await import("@/repositories/delivery.repository");

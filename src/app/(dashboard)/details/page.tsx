@@ -927,16 +927,49 @@ export default function DetailsPage() {
                     >
                       {show("orderDate") &&
                         row("Ngày đặt", fmtDateVN(d.orderDate || ""))}
+                      {d.orderId && (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">Mã đơn</span>
+                          <Link
+                            href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                            className="text-right text-sm font-semibold text-blue-700 underline break-all max-w-[62%]"
+                          >
+                            {d.orderId}
+                          </Link>
+                        </div>
+                      )}
                       {show("plate") && (
                         <div className="flex items-center justify-between gap-2 py-1">
                           <span className="text-[13px] opacity-80">Biển số</span>
-                          <span className={PLATE_CLASS}>
-                            {d.vehiclePlate || d.vehicleId || "—"}
-                          </span>
+                          {d.orderId ? (
+                            <Link
+                              href={`/orders?q=${encodeURIComponent(d.orderId)}`}
+                              className={PLATE_CLASS + " hover:opacity-90"}
+                            >
+                              {d.vehiclePlate || d.vehicleId || "—"}
+                            </Link>
+                          ) : (
+                            <span className={PLATE_CLASS}>
+                              {d.vehiclePlate || d.vehicleId || "—"}
+                            </span>
+                          )}
                         </div>
                       )}
                       {show("id") &&
                         row("ID Chi tiết", d.detailId, "font-mono text-[12px]")}
+                      {d.orderFile ? (
+                        <div className="flex items-center justify-between gap-2 py-1">
+                          <span className="text-[13px] opacity-80">PDF</span>
+                          <a
+                            href={d.orderFile}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-red-600 text-sm font-semibold"
+                          >
+                            📄 Mở PDF
+                          </a>
+                        </div>
+                      ) : null}
                       {show("product") &&
                         row("Hàng hóa", d.productName || d.productId || "—")}
                       {show("qty") && row("KH đặt", fmtNum(d.quantity))}
