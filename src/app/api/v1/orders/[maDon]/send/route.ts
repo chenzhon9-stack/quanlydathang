@@ -5,7 +5,7 @@ import { success, error, jsonResponse } from "@/lib/api";
 
 type Ctx = { params: Promise<{ maDon: string }> };
 
-/** POST /api/v1/orders/:maDon/send — body: { year?, sendAction?: ''|'send'|'reset'|'cancel'|'markSent' } */
+/** POST /api/v1/orders/:maDon/send — body: { year?, sendAction? } */
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
     const token =
@@ -15,30 +15,34 @@ export async function POST(req: NextRequest, ctx: Ctx) {
       return jsonResponse(error("UNAUTHORIZED", "Chưa đăng nhập"), 401);
     }
     const { maDon } = await ctx.params;
+    // maDon có thể chứa dấu chấm (No.BT...) — decode
+    const orderId = decodeURIComponent(maDon || "");
     let year: number | undefined;
     let sendAction = "";
     try {
       const body = await req.json();
       if (body?.year) year = Number(body.year);
       if (body?.sendAction != null) sendAction = String(body.sendAction);
-      if (body?.action && body.action !== "sendOrderEmail") {
-        // tương thích action = send|reset|cancel|markSent
+      if (body?.action) {
         const a = String(body.action);
         if (["send", "reset", "cancel", "markSent", ""].includes(a)) sendAction = a;
       }
     } catch {
       /* empty body */
     }
-    const data = await OrderService.sendOrder(maDon, user, year, sendAction);
+    const data = await OrderService.sendOrder(orderId, user, year, sendAction);
     return jsonResponse(success(data));
   } catch (e: unknown) {
-    const err = e as { code?: string; message?: string };
+    const err = e as { code?: string; message?: string; gas?: unknown };
+    console.error("[send route]", err.code, err.message, err.gas);
     const status =
       err.code === "PERMISSION_DENIED"
         ? 403
         : err.code === "NOT_FOUND"
           ? 404
-          : 400;
+          : err.code === "UNAUTHORIZED"
+            ? 401
+            : 400;
     return jsonResponse(
       error(err.code || "SEND_ORDER_FAILED", err.message || String(e)),
       status

@@ -101,9 +101,11 @@ export function DecimalInput({
       disabled={disabled}
       placeholder={placeholder ?? "0"}
       value={focused ? draft : value}
-      onFocus={() => {
+      onFocus={(e) => {
         setFocused(true);
         setDraft(value);
+        // Bôi đen toàn bộ để gõ đè nhanh (Thực nhận / Thực giao)
+        requestAnimationFrame(() => e.target.select());
       }}
       onBlur={handleBlur}
       onChange={(e) => handleChange(e.target.value)}

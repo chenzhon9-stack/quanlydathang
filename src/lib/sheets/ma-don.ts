@@ -2,14 +2,15 @@
  * generateMaDon — parity V21 generateMaDon_ / _generateUniqueMaDon_
  *
  * Format: No.{2 ký tự đầu MaNCC}{YYMMDD}-{HHmmss}
- * Ví dụ: No.SL260924-083512
  *
- * Duyên Hà / btay (IsDuyenHa NCC):
+ * Thời gian lấy từ **Ngày đặt hàng** (user chỉnh được), KHÔNG dùng giờ server.
+ *
+ * Duyên Hà / btay (MaNCC):
  * - ≥ 14h: ngày +1, giờ = giờ − 14
  * - < 14h: giữ ngày, giờ = giờ + 10
  */
 
-import { hcmDateTimeParts, hourVN, parseLocalDate } from "@/lib/sheets/date";
+import { parseLocalDate } from "@/lib/sheets/date";
 import { OrderRepository } from "@/repositories/order.repository";
 
 const DUYEN_HA_NCC = new Set(["dha", "btay"]);
@@ -18,39 +19,111 @@ function isDuyenHaNcc(maNcc: string): boolean {
   return DUYEN_HA_NCC.has(String(maNcc || "").trim().toLowerCase());
 }
 
+type Civil = {
+  y: number;
+  m: number;
+  d: number;
+  hh: number;
+  mi: number;
+  ss: number;
+  hasTime: boolean;
+};
+
+/** Trích ngày-giờ civil từ Ngày đặt hàng (không lệch timezone server). */
+function extractCivil(value: string | number | Date | null | undefined): Civil {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return {
+      y: value.getUTCFullYear(),
+      m: value.getUTCMonth() + 1,
+      d: value.getUTCDate(),
+      hh: value.getUTCHours(),
+      mi: value.getUTCMinutes(),
+      ss: value.getUTCSeconds(),
+      hasTime: true,
+    };
+  }
+
+  const s = String(value ?? "").trim();
+  const iso = s.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/
+  );
+  if (iso) {
+    return {
+      y: Number(iso[1]),
+      m: Number(iso[2]),
+      d: Number(iso[3]),
+      hh: iso[4] != null ? Number(iso[4]) : 0,
+      mi: iso[5] != null ? Number(iso[5]) : 0,
+      ss: iso[6] != null ? Number(iso[6]) : 0,
+      hasTime: iso[4] != null,
+    };
+  }
+
+  const parsed = parseLocalDate(value);
+  if (parsed) {
+    return {
+      y: parsed.getUTCFullYear(),
+      m: parsed.getUTCMonth() + 1,
+      d: parsed.getUTCDate(),
+      hh: parsed.getUTCHours(),
+      mi: parsed.getUTCMinutes(),
+      ss: parsed.getUTCSeconds(),
+      hasTime: parsed.getUTCHours() !== 0 || parsed.getUTCMinutes() !== 0,
+    };
+  }
+
+  const now = new Date();
+  return {
+    y: now.getUTCFullYear(),
+    m: now.getUTCMonth() + 1,
+    d: now.getUTCDate(),
+    hh: 0,
+    mi: 0,
+    ss: 0,
+    hasTime: false,
+  };
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function civilToUtcDate(c: Civil): Date {
+  return new Date(Date.UTC(c.y, c.m - 1, c.d, c.hh, c.mi, c.ss, 0));
+}
+
 /**
- * Tính Date dùng cho phần YYMMDD-HHmmss theo rule Duyên Hà.
+ * Áp dụng rule Duyên Hà trên civil datetime của Ngày đặt hàng.
+ * Không dùng giờ hiện tại server.
  */
 export function resolveMaDonClock(
   maNcc: string,
   ngayDatHang: string | number | Date
 ): Date {
-  const base = parseLocalDate(ngayDatHang) || new Date();
-  if (!isDuyenHaNcc(maNcc)) return base;
+  const c = extractCivil(ngayDatHang);
+  if (!isDuyenHaNcc(maNcc)) {
+    return civilToUtcDate(c);
+  }
 
-  // Lấy giờ HCM từ base (nếu chỉ có date 00:00, dùng giờ hiện tại)
-  const hasTime =
-    ngayDatHang instanceof Date ||
-    (typeof ngayDatHang === "string" && /\d{1,2}:\d{2}/.test(ngayDatHang));
-  const hour = hasTime ? hourVN(base) : hourVN(new Date());
-
-  // Xây Date local từ YMD của base + hour logic V21
-  const y = base.getFullYear();
-  const m = base.getMonth();
-  const d = base.getDate();
-  const mi = base.getMinutes();
-  const ss = base.getSeconds();
-
+  const hour = c.hh;
   if (hour >= 14) {
-    // ngày +1, giờ = hour - 14
-    const next = new Date(y, m, d + 1, hour - 14, mi, ss, 0);
+    const next = civilToUtcDate({ ...c, hh: hour - 14 });
+    next.setUTCDate(next.getUTCDate() + 1);
     return next;
   }
-  // giữ ngày, giờ = hour + 10
-  return new Date(y, m, d, hour + 10, mi, ss, 0);
+  return civilToUtcDate({ ...c, hh: hour + 10 });
 }
 
-/** Sinh 1 mã (có thể trùng — caller dùng generateUniqueMaDon) */
+function formatStamp(d: Date): string {
+  const yy = String(d.getUTCFullYear()).slice(-2);
+  const mm = pad2(d.getUTCMonth() + 1);
+  const dd = pad2(d.getUTCDate());
+  const hh = pad2(d.getUTCHours());
+  const mi = pad2(d.getUTCMinutes());
+  const ss = pad2(d.getUTCSeconds());
+  return `${yy}${mm}${dd}-${hh}${mi}${ss}`;
+}
+
 export function generateMaDon(
   maNcc: string,
   ngayDatHang: string | number | Date
@@ -58,23 +131,18 @@ export function generateMaDon(
   const ncc = String(maNcc || "").trim();
   const prefix = "No." + ncc.substring(0, 2).toUpperCase();
   const clock = resolveMaDonClock(ncc, ngayDatHang);
-  const p = hcmDateTimeParts(clock);
-  return `${prefix}${p.yy}${p.mm}${p.dd}-${p.hh}${p.mi}${p.ss}`;
+  return `${prefix}${formatStamp(clock)}`;
 }
 
-/**
- * Sinh mã không trùng trong DonHang (thử +1s tối đa 60 lần).
- */
 export async function generateUniqueMaDon(
   maNcc: string,
   ngayDatHang: string | number | Date,
   opts?: { year?: number; oldMaDon?: string }
 ): Promise<{ maDon: string; date: Date }> {
-  const base = parseLocalDate(ngayDatHang) || new Date();
-  const year = opts?.year ?? base.getFullYear();
+  const baseClock = resolveMaDonClock(maNcc, ngayDatHang);
+  const year = opts?.year ?? extractCivil(ngayDatHang).y;
   const oldSafe = String(opts?.oldMaDon || "").trim();
 
-  // Load existing MaDon set
   const existing = new Set<string>();
   try {
     const orders = await OrderRepository.findMany({ year });
@@ -82,12 +150,16 @@ export async function generateUniqueMaDon(
       if (o.orderId) existing.add(String(o.orderId).trim());
     }
   } catch {
-    // nếu repo fail, vẫn thử generate
+    /* ignore */
   }
 
+  const ncc = String(maNcc || "").trim();
+  const prefix = "No." + ncc.substring(0, 2).toUpperCase();
+
   for (let i = 0; i < 60; i++) {
-    const d = new Date(base.getTime() + i * 1000);
-    const ma = generateMaDon(maNcc, d);
+    const d = new Date(baseClock.getTime() + i * 1000);
+    // Không gọi generateMaDon lại (tránh áp rule DHA lần 2)
+    const ma = `${prefix}${formatStamp(d)}`;
     if (ma === oldSafe) continue;
     if (!existing.has(ma)) return { maDon: ma, date: d };
   }

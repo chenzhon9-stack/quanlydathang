@@ -21,6 +21,10 @@ type Props = {
   onConfirm: (values: Record<string, string>) => Promise<void> | void;
 };
 
+/**
+ * Modal hành động (Nhận hàng, Hủy…).
+ * Chỉ đóng khi × / Hủy / click backdrop / Escape — không đóng khi rê chuột ra ngoài panel.
+ */
 export function ActionPrompt({
   open,
   title,
@@ -44,7 +48,17 @@ export function ActionPrompt({
     setVals(init);
     setErr("");
     setBusy(false);
-  }, [open, fields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, busy, onCancel]);
 
   if (!open) return null;
 
@@ -68,13 +82,20 @@ export function ActionPrompt({
         if (e.target === e.currentTarget && !busy) onCancel();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
-        {/* Header */}
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200"
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <div className="bg-[#1a3a5c] text-white px-4 py-3 flex items-start justify-between gap-3">
           <div>
-            <h3 className="font-bold text-sm sm:text-base leading-snug">{title}</h3>
+            <h3 className="font-bold text-sm sm:text-base leading-snug">
+              {title}
+            </h3>
             {subtitle && (
-              <p className="text-[11px] text-slate-300 mt-0.5 font-mono">{subtitle}</p>
+              <p className="text-[11px] text-slate-300 mt-0.5 font-mono">
+                {subtitle}
+              </p>
             )}
           </div>
           <button
@@ -88,7 +109,6 @@ export function ActionPrompt({
           </button>
         </div>
 
-        {/* Body */}
         <div className="p-4 space-y-3 bg-slate-50">
           {fields.map((f) => (
             <label key={f.key} className="block">
@@ -96,47 +116,51 @@ export function ActionPrompt({
                 {f.label}
               </span>
               <input
-                type={f.type || "text"}
-                step={f.type === "number" ? "0.01" : undefined}
+                type={f.type === "number" ? "text" : f.type || "text"}
+                inputMode={f.type === "number" ? "decimal" : undefined}
+                className="mt-1 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white"
                 value={vals[f.key] ?? ""}
                 onChange={(e) =>
-                  setVals((v) => ({ ...v, [f.key]: e.target.value }))
+                  setVals((prev) => ({ ...prev, [f.key]: e.target.value }))
                 }
-                className="mt-1 w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
+                onFocus={(e) => {
+                  if (f.type === "number" || f.type === "text") {
+                    e.target.select();
+                  }
+                }}
               />
               {f.hint && (
-                <span className="text-[10px] text-slate-500 mt-0.5 block">
+                <span className="block text-[10px] text-slate-500 mt-0.5">
                   {f.hint}
                 </span>
               )}
             </label>
           ))}
           {err && (
-            <div className="text-xs text-red-700 bg-red-100 border border-red-200 rounded-lg px-3 py-2 font-medium">
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">
               {err}
-            </div>
+            </p>
           )}
         </div>
 
-        {/* Footer */}
         <div className="px-4 py-3 bg-white border-t border-slate-200 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onCancel}
             disabled={busy}
-            className="px-4 py-2 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            onClick={onCancel}
+            className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
           >
             Hủy
           </button>
           <button
             type="button"
-            onClick={submit}
             disabled={busy}
-            className={`px-4 py-2 text-xs font-bold rounded-lg text-white disabled:opacity-50 shadow-sm ${
+            onClick={submit}
+            className={`px-3 py-1.5 text-sm rounded-lg text-white font-medium ${
               danger
                 ? "bg-red-600 hover:bg-red-500"
-                : "bg-sky-500 hover:bg-sky-400 text-slate-900"
-            }`}
+                : "bg-sky-600 hover:bg-sky-500"
+            } disabled:opacity-60`}
           >
             {busy ? "Đang lưu…" : confirmLabel}
           </button>
@@ -146,34 +170,4 @@ export function ActionPrompt({
   );
 }
 
-export async function apiPost(
-  path: string,
-  body?: Record<string, unknown>
-): Promise<{ success: boolean; data?: unknown; error?: { message?: string } }> {
-  const token = localStorage.getItem("token");
-  const res = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body || {}),
-  });
-  return res.json();
-}
-
-export async function apiPatch(
-  path: string,
-  body?: Record<string, unknown>
-): Promise<{ success: boolean; data?: unknown; error?: { message?: string } }> {
-  const token = localStorage.getItem("token");
-  const res = await fetch(path, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body || {}),
-  });
-  return res.json();
-}
+export { apiPost, apiPatch } from "@/lib/api-client";

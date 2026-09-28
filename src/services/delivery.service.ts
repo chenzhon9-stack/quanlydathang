@@ -1,3 +1,4 @@
+import { writeAudit } from "@/lib/sheets/audit";
 import type { AccessScope, Delivery, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import {
@@ -306,6 +307,21 @@ export class DeliveryService {
     }
 
     await syncOrderStatusByDetailId(detailId, y).catch(() => null);
+
+    
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "SAVE_DELIVERY",
+      idGh: deliveryId,
+      targetId: deliveryId,
+      newValue: JSON.stringify({
+        actualQty: payload.actualQty,
+        deliveryDate: payload.deliveryDate,
+        customerId: payload.customerId,
+      }),
+      year: year ?? new Date().getFullYear(),
+    }).catch(() => {});
 
     return {
       deliveryId,

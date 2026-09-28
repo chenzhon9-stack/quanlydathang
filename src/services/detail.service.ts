@@ -1,3 +1,4 @@
+import { writeAudit } from "@/lib/sheets/audit";
 import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
@@ -273,6 +274,17 @@ export class DetailService {
     }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
+    
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "RECEIVE_DETAIL",
+      idCt: detailId,
+      targetId: detailId,
+      newValue: JSON.stringify(payload),
+      year: year ?? new Date().getFullYear(),
+    });
+
     return {
       detailId,
       actualReceived: qty,
@@ -412,6 +424,16 @@ export class DetailService {
     }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
+    
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "CANCEL_DETAIL",
+      idCt: detailId,
+      targetId: detailId,
+      year: year ?? new Date().getFullYear(),
+    });
+
     return {
       detailId,
       status: effectiveMode === "delete" ? "DELETE" : "CANCEL",
