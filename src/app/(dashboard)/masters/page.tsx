@@ -64,7 +64,8 @@ export default function MastersPage() {
       <div>
         <h2 className="text-xl font-bold text-slate-800">Danh mục</h2>
         <p className="text-xs text-slate-500">
-          Master data từ Google Sheet · chỉ đọc (phase hiện tại)
+          Master data từ Google Sheet · chỉ đọc
+          {err && <span className="text-red-600"> · {err}</span>}
         </p>
       </div>
 
@@ -139,7 +140,7 @@ export default function MastersPage() {
           )}
           {!filtered.length && (
             <div className="text-center py-8 text-slate-400 text-sm">
-              Không có dữ liệu
+              Không có dữ liệu — kiểm tra tên tab DM_* trên Sheet và /api/v1/debug/sheets
             </div>
           )}
         </div>

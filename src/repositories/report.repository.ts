@@ -102,8 +102,8 @@ export class ReportRepository {
       }
       return byYear;
     } catch (e) {
-      console.error("[ReportRepository] getPlans failed, fallback mock", e);
-      return getPlansByYear(year);
+      console.error("[ReportRepository] getPlans failed (no mock when Sheets on)", e);
+      return [];
     }
   }
 
@@ -122,8 +122,8 @@ export class ReportRepository {
       // (tránh mất dòng khi parse ngày lỗi)
       return payables;
     } catch (e) {
-      console.error("[ReportRepository] getPayables failed, fallback mock", e);
-      return getPayablesByYear(year);
+      console.error("[ReportRepository] getPayables failed (no mock when Sheets on)", e);
+      return [];
     }
   }
 
@@ -141,8 +141,8 @@ export class ReportRepository {
       if (byYear.length === 0 && opening.length > 0) return opening;
       return byYear;
     } catch (e) {
-      console.error("[ReportRepository] getOpening failed, fallback mock", e);
-      return getOpeningByYear(year);
+      console.error("[ReportRepository] getOpening failed (no mock when Sheets on)", e);
+      return [];
     }
   }
 }

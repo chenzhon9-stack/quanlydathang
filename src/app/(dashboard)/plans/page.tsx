@@ -98,6 +98,7 @@ export default function PlansPage() {
           <h2 className="text-xl font-bold text-slate-800">Kế hoạch sản lượng</h2>
           <p className="text-xs text-slate-500">
             {total} kế hoạch · API /api/v1/planning · sheet KHSANLUONG
+            {err ? ` · Lỗi: ${err}` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">

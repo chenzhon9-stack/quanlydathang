@@ -163,7 +163,20 @@ export class MasterRepository {
     };
     const sheet = map[type.toUpperCase()];
     if (!sheet) return [];
-    if (!isSheetsConfigured()) return [];
-    return readSheetAsObjects(sheet, {});
+    if (!isSheetsConfigured()) {
+      console.warn("[MasterRepository.list] Sheets not configured");
+      return [];
+    }
+    try {
+      const rows = await readSheetAsObjects(sheet, {});
+      console.info(
+        `[MasterRepository.list] ${type} sheet=${sheet} rows=${rows.length}`
+      );
+      return rows;
+    } catch (e) {
+      console.error(`[MasterRepository.list] ${type} sheet=${sheet}`, e);
+      // Không throw — UI hiện rỗng + log Vercel
+      return [];
+    }
   }
 }
