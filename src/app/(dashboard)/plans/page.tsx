@@ -1,57 +1,125 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { statusRowClass } from "@/lib/status-styles";
+import {
+  ACTION,
+  clientHasAny,
+  readClientUser,
+} from "@/lib/nav-access";
 import type { ProductionPlan } from "@/types";
 
-function PlanActions({ p }: { p: ProductionPlan }) {
-  function toast(msg: string) {
-    alert(`[Mock] ${msg}\n(${p.id})`);
-  }
-  const canEdit = p.status !== "Hủy";
-  return (
-    <div className="flex flex-wrap gap-1.5 justify-end">
-      <button
-        onClick={() => toast("Xem chi tiết")}
-        className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-200 text-slate-700"
-      >
-        Xem
-      </button>
-      {canEdit && (
-        <>
-          <button
-            onClick={() => toast("Sửa kế hoạch — PATCH /planning/:id")}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white"
-          >
-            Sửa
-          </button>
-          <button
-            onClick={() => toast("Hủy kế hoạch — DELETE /planning/:id")}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white"
-          >
-            Hủy
-          </button>
-        </>
-      )}
-    </div>
-  );
+type PlanRow = ProductionPlan & { productNames?: string[] };
+
+function fmtNum(n?: number | null, d = 2) {
+  if (n == null || Number.isNaN(Number(n))) return "—";
+  return Number(n).toLocaleString("vi-VN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: d,
+  });
 }
 
-function progressPct(p: ProductionPlan) {
+function fmtDate(ymd?: string) {
+  if (!ymd) return "—";
+  const s = ymd.slice(0, 10);
+  const [y, m, d] = s.split("-");
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y}`;
+}
+
+function progressPct(p: PlanRow) {
   if (!p.plannedQuantity) return 0;
-  return Math.min(100, Math.round((p.actualQuantity / p.plannedQuantity) * 100));
+  return Math.round((Number(p.actualQuantity || 0) / p.plannedQuantity) * 1000) / 10;
+}
+
+function statusTone(st: string) {
+  if (st.includes("Hoàn")) return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  if (st.includes("Hủy")) return "bg-red-100 text-red-700 border-red-200";
+  return "bg-amber-100 text-amber-800 border-amber-200";
 }
 
 export default function PlansPage() {
-  const [items, setItems] = useState<ProductionPlan[]>([]);
+  const user = readClientUser();
+  const canEdit = clientHasAny(user, [...ACTION.planUpdate, "KHSL_UPDATE", "*"]);
+
+  const [items, setItems] = useState<PlanRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [year, setYear] = useState(2026);
+  const [year, setYear] = useState(new Date().getFullYear());
   const pageSize = 50;
+
+  // Filters
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [status, setStatus] = useState("ALL");
+  const [supplierId, setSupplierId] = useState("");
+  const [q, setQ] = useState("");
+  const [nccOptions, setNccOptions] = useState<Array<{ id: string; name: string }>>([]);
+
+  // Modals
+  const [viewPlan, setViewPlan] = useState<PlanRow | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    programName: "",
+    supplierId: "",
+    productIds: [] as string[],
+    fromDate: "",
+    toDate: "",
+    plannedQuantity: "",
+    status: "Đang thực hiện",
+    note: "",
+  });
+  const [hhOptions, setHhOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [busy, setBusy] = useState(false);
+  const [formErr, setFormErr] = useState("");
+
+  const loadNcc = useCallback(async () => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const res = await fetch("/api/v1/masters?type=NCC", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (json.success) {
+        const rows = (json.data.items || []) as Record<string, string>[];
+        setNccOptions(
+          rows
+            .map((r) => ({
+              id: String(r.MaNCC || "").trim(),
+              name: String(r.TenNCC || r.MaNCC || "").trim(),
+            }))
+            .filter((x) => x.id)
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const loadHh = useCallback(async (ncc: string) => {
+    const token = localStorage.getItem("token");
+    if (!token || !ncc) {
+      setHhOptions([]);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/v1/planning/products?supplierId=${encodeURIComponent(ncc)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const json = await res.json();
+      if (json.success) setHhOptions(json.data.items || []);
+      else setHhOptions([]);
+    } catch {
+      setHhOptions([]);
+    }
+  }, []);
 
   const load = useCallback(
     async (p: number) => {
@@ -65,6 +133,12 @@ export default function PlansPage() {
           page: String(p),
           pageSize: String(pageSize),
         });
+        if (fromDate) qs.set("fromDate", fromDate);
+        if (toDate) qs.set("toDate", toDate);
+        if (status && status !== "ALL") qs.set("status", status);
+        if (supplierId) qs.set("supplierId", supplierId);
+        if (q.trim()) qs.set("q", q.trim());
+
         const res = await fetch(`/api/v1/planning?${qs}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -84,21 +158,145 @@ export default function PlansPage() {
         setLoading(false);
       }
     },
-    [year]
+    [year, fromDate, toDate, status, supplierId, q]
   );
+
+  useEffect(() => {
+    loadNcc();
+  }, [loadNcc]);
 
   useEffect(() => {
     load(1);
   }, [load]);
 
+  useEffect(() => {
+    if (form.supplierId) loadHh(form.supplierId);
+    else setHhOptions([]);
+  }, [form.supplierId, loadHh]);
+
+  function openCreate() {
+    setEditId(null);
+    setForm({
+      programName: "",
+      supplierId: "",
+      productIds: [],
+      fromDate: "",
+      toDate: "",
+      plannedQuantity: "",
+      status: "Đang thực hiện",
+      note: "",
+    });
+    setFormErr("");
+    setEditOpen(true);
+  }
+
+  function openEdit(p: PlanRow) {
+    setEditId(p.id);
+    setForm({
+      programName: p.programName || "",
+      supplierId: p.supplierId || "",
+      productIds: [...(p.productIds || [])],
+      fromDate: (p.fromDate || "").slice(0, 10),
+      toDate: (p.toDate || "").slice(0, 10),
+      plannedQuantity: String(p.plannedQuantity ?? ""),
+      status: p.status || "Đang thực hiện",
+      note: p.note || "",
+    });
+    setFormErr("");
+    setEditOpen(true);
+  }
+
+  async function saveForm() {
+    setFormErr("");
+    setBusy(true);
+    const token = localStorage.getItem("token");
+    try {
+      const body = {
+        year,
+        programName: form.programName.trim(),
+        supplierId: form.supplierId,
+        productIds: form.productIds,
+        fromDate: form.fromDate,
+        toDate: form.toDate,
+        plannedQuantity: Number(String(form.plannedQuantity).replace(",", ".")),
+        status: form.status,
+        note: form.note,
+      };
+      const url = editId
+        ? `/api/v1/planning/${encodeURIComponent(editId)}`
+        : "/api/v1/planning";
+      const res = await fetch(url, {
+        method: editId ? "PATCH" : "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setFormErr(json.error?.message || "Lưu thất bại");
+        return;
+      }
+      setEditOpen(false);
+      load(page);
+    } catch {
+      setFormErr("Không kết nối API");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelPlan(p: PlanRow) {
+    if (!confirm(`Hủy kế hoạch ${p.id}?`)) return;
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(
+        `/api/v1/planning/${encodeURIComponent(p.id)}?year=${year}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.error?.message || "Hủy thất bại");
+        return;
+      }
+      load(page);
+    } catch {
+      alert("Không kết nối API");
+    }
+  }
+
+  function toggleProduct(id: string) {
+    setForm((f) => {
+      const has = f.productIds.includes(id);
+      return {
+        ...f,
+        productIds: has
+          ? f.productIds.filter((x) => x !== id)
+          : [...f.productIds, id],
+      };
+    });
+  }
+
+  const productLabel = (p: PlanRow) =>
+    (p.productNames && p.productNames.length
+      ? p.productNames
+      : p.productIds || []
+    ).join(", ");
+
   return (
     <div className="space-y-4 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">Kế hoạch sản lượng</h2>
+          <h2 className="text-xl font-bold text-slate-800">
+            Kế hoạch sản lượng
+          </h2>
           <p className="text-xs text-slate-500">
-            {total} kế hoạch · API /api/v1/planning · sheet KHSANLUONG
-            {err ? ` · Lỗi: ${err}` : ""}
+            {total} kế hoạch · sheet KHSANLUONG
+            {err ? ` · ${err}` : ""}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
@@ -112,15 +310,86 @@ export default function PlansPage() {
           </select>
           <button
             onClick={() => load(page)}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+            className="px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white"
           >
             Tải lại
           </button>
+          {canEdit && (
+            <button
+              onClick={openCreate}
+              className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
+            >
+              + Thêm kế hoạch
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Filters — parity V21 */}
+      <div className="rounded-xl bg-slate-800 text-white p-3 md:p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label className="text-xs space-y-1">
+            <span className="text-slate-300">Từ ngày</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+            />
+          </label>
+          <label className="text-xs space-y-1">
+            <span className="text-slate-300">Đến ngày</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+            />
+          </label>
+          <label className="text-xs space-y-1">
+            <span className="text-slate-300">Trạng thái</span>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+            >
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="Đang thực hiện">Đang thực hiện</option>
+              <option value="Hoàn thành">Hoàn thành</option>
+              <option value="Hủy">Hủy</option>
+            </select>
+          </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr_auto] gap-3 items-end">
+          <label className="text-xs space-y-1">
+            <span className="text-slate-300">Nhà cung cấp</span>
+            <select
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+            >
+              <option value="">Tất cả NCC</option>
+              {nccOptions.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs space-y-1">
+            <span className="text-slate-300">Tìm kiếm</span>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Tên chương trình, NCC, hàng hóa..."
+              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+            />
+          </label>
           <button
-            onClick={() => alert("[Mock] POST /api/v1/planning — Thêm KH")}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
+            onClick={() => load(1)}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-500 hover:bg-blue-400"
           >
-            + Thêm KH
+            Lọc
           </button>
         </div>
       </div>
@@ -132,7 +401,9 @@ export default function PlansPage() {
       )}
 
       {loading ? (
-        <div className="text-center py-12 text-slate-400 text-sm">Đang tải kế hoạch...</div>
+        <div className="text-center py-12 text-slate-400 text-sm">
+          Đang tải kế hoạch...
+        </div>
       ) : (
         <>
           {/* Mobile cards */}
@@ -142,129 +413,192 @@ export default function PlansPage() {
               return (
                 <div
                   key={p.id}
-                  className={`rounded-2xl border border-slate-200 p-4 shadow-sm ${
-                    statusRowClass(p.status)
-                  }`}
+                  className={`rounded-2xl border p-4 shadow-sm ${statusRowClass(p.status)}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex justify-between gap-2 mb-2">
                     <div>
-                      <div className="text-sm font-bold text-slate-800">
-                        {p.programName || p.id}
+                      <div className="text-xs text-slate-500">{p.id}</div>
+                      <div className="font-semibold text-slate-800">
+                        {p.programName}
                       </div>
-                      <div className="text-xs text-slate-500 font-mono mt-0.5">{p.id}</div>
-                    </div>
-                    <StatusBadge status={p.status} />
-                  </div>
-                  <div className="mt-3 space-y-1.5 text-sm">
-                    <div className="flex justify-between gap-2">
-                      <span className="text-slate-500">NCC</span>
-                      <span className="font-medium text-right truncate">
+                      <div className="text-xs text-slate-600">
                         {p.supplierName || p.supplierId}
-                      </span>
+                      </div>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">Thời gian</span>
-                      <span className="text-xs">
-                        {p.fromDate} → {p.toDate}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">KH / TH</span>
-                      <span className="font-medium tabular-nums">
-                        {p.plannedQuantity.toLocaleString("vi-VN")} /{" "}
-                        {p.actualQuantity.toLocaleString("vi-VN")}
-                      </span>
-                    </div>
-                    <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-1">
-                      <div
-                        className="h-full bg-blue-500 rounded-full transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <div className="text-[10px] text-slate-400 text-right">{pct}%</div>
+                    <span
+                      className={`shrink-0 self-start text-[11px] px-2 py-0.5 rounded-full border ${statusTone(p.status)}`}
+                    >
+                      {p.status}
+                    </span>
                   </div>
-                  <div className="mt-3 pt-3 border-t border-slate-200/80">
-                    <PlanActions p={p} />
+                  <div className="text-xs text-slate-600 mb-2 line-clamp-2">
+                    {productLabel(p)}
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs mb-2">
+                    <div className="bg-white/70 rounded-lg p-2">
+                      <div className="text-slate-500">KH</div>
+                      <div className="font-semibold">
+                        {fmtNum(p.plannedQuantity)}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 rounded-lg p-2">
+                      <div className="text-slate-500">Thực</div>
+                      <div className="font-semibold">
+                        {fmtNum(p.actualQuantity)}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 rounded-lg p-2">
+                      <div className="text-slate-500">%</div>
+                      <div className="font-semibold">{pct}%</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      onClick={() => setViewPlan(p)}
+                      className="px-2.5 py-1 text-[11px] rounded bg-slate-200"
+                    >
+                      Xem
+                    </button>
+                    {canEdit && !String(p.status).includes("Hủy") && (
+                      <>
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="px-2.5 py-1 text-[11px] rounded bg-blue-600 text-white"
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          onClick={() => cancelPlan(p)}
+                          className="px-2.5 py-1 text-[11px] rounded bg-red-500 text-white"
+                        >
+                          Hủy
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );
             })}
-            {items.length === 0 && !err && (
-              <div className="text-center py-12 text-slate-400 text-sm">
+            {!items.length && (
+              <div className="text-center py-10 text-slate-400 text-sm">
                 Không có kế hoạch
               </div>
             )}
           </div>
 
           {/* Desktop table */}
-          <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wide">
-                    <th className="px-3 py-2.5 text-left font-semibold">Mã KH</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Chương trình</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">NCC</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">Từ → Đến</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Kế hoạch</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Thực tế</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">%</th>
-                    <th className="px-3 py-2.5 text-left font-semibold">TT</th>
-                    <th className="px-3 py-2.5 text-right font-semibold">Hành động</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((p) => {
-                    const pct = progressPct(p);
-                    return (
-                      <tr
-                        key={p.id}
-                        className={`border-t border-slate-100 ${
-                          statusRowClass(p.status)
-                        }`}
-                      >
-                        <td className="px-3 py-2.5 font-mono text-xs text-slate-600">
-                          {p.id}
-                        </td>
-                        <td className="px-3 py-2.5 font-medium max-w-[180px] truncate">
-                          {p.programName}
-                        </td>
-                        <td className="px-3 py-2.5 max-w-[160px] truncate">
-                          {p.supplierName || p.supplierId}
-                        </td>
-                        <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">
-                          {p.fromDate} → {p.toDate}
-                        </td>
-                        <td className="px-3 py-2.5 text-right tabular-nums">
-                          {p.plannedQuantity.toLocaleString("vi-VN")}
-                        </td>
-                        <td className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
-                          {p.actualQuantity.toLocaleString("vi-VN")}
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2 min-w-[80px]">
-                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-blue-500 rounded-full"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <span className="text-[10px] text-slate-500 w-8">{pct}%</span>
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="bg-sky-500 text-white text-left text-xs uppercase tracking-wide">
+                  <th className="px-3 py-2.5">Mã KH</th>
+                  <th className="px-3 py-2.5">Chương trình</th>
+                  <th className="px-3 py-2.5">Nhà cung cấp</th>
+                  <th className="px-3 py-2.5">Sản phẩm</th>
+                  <th className="px-3 py-2.5">Từ ngày</th>
+                  <th className="px-3 py-2.5">Đến ngày</th>
+                  <th className="px-3 py-2.5 text-right">Kế hoạch (tấn)</th>
+                  <th className="px-3 py-2.5 text-right">Thực hiện (tấn)</th>
+                  <th className="px-3 py-2.5">% HT</th>
+                  <th className="px-3 py-2.5">Trạng thái</th>
+                  <th className="px-3 py-2.5 text-right">Hành động</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((p, idx) => {
+                  const pct = progressPct(p);
+                  const barColor =
+                    pct >= 100
+                      ? "bg-emerald-500"
+                      : pct >= 70
+                        ? "bg-amber-400"
+                        : "bg-red-400";
+                  return (
+                    <tr
+                      key={p.id}
+                      className={`border-t border-slate-100 ${
+                        idx % 2 ? "bg-slate-50/80" : "bg-white"
+                      } ${statusRowClass(p.status)}`}
+                    >
+                      <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
+                        {p.id}
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[12rem]">
+                        {p.programName}
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[11rem]">
+                        {p.supplierName || p.supplierId}
+                      </td>
+                      <td className="px-3 py-2.5 max-w-[14rem] text-xs text-slate-600">
+                        {productLabel(p)}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                        {fmtDate(p.fromDate)}
+                      </td>
+                      <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                        {fmtDate(p.toDate)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {fmtNum(p.plannedQuantity)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {fmtNum(p.actualQuantity)}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5 min-w-[5rem]">
+                          <div className="flex-1 h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                            <div
+                              className={`h-full ${barColor}`}
+                              style={{
+                                width: `${Math.min(100, pct)}%`,
+                              }}
+                            />
                           </div>
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <StatusBadge status={p.status} />
-                        </td>
-                        <td className="px-3 py-2.5">
-                          <PlanActions p={p} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {items.length === 0 && !err && (
+                          <span className="text-[10px] text-slate-500 w-9 text-right">
+                            {pct}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusTone(p.status)}`}
+                        >
+                          {p.status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex flex-wrap gap-1 justify-end">
+                          <button
+                            onClick={() => setViewPlan(p)}
+                            className="px-2 py-1 text-[11px] rounded bg-slate-200 text-slate-700"
+                            title="Xem"
+                          >
+                            Xem
+                          </button>
+                          {canEdit && !String(p.status).includes("Hủy") && (
+                            <>
+                              <button
+                                onClick={() => openEdit(p)}
+                                className="px-2 py-1 text-[11px] rounded bg-blue-600 text-white"
+                              >
+                                Sửa
+                              </button>
+                              <button
+                                onClick={() => cancelPlan(p)}
+                                className="px-2 py-1 text-[11px] rounded bg-red-500 text-white"
+                              >
+                                Hủy
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!items.length && (
               <div className="text-center py-12 text-slate-400 text-sm">
                 Không có kế hoạch
               </div>
@@ -293,6 +627,293 @@ export default function PlansPage() {
             </div>
           )}
         </>
+      )}
+
+      {/* View modal */}
+      {viewPlan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between p-4 border-b">
+              <h3 className="font-semibold text-slate-800 pr-4">
+                {viewPlan.programName}
+              </h3>
+              <button
+                onClick={() => setViewPlan(null)}
+                className="text-slate-400 hover:text-slate-700"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-slate-500">Mã kế hoạch</div>
+                  <div className="font-mono font-medium">{viewPlan.id}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Trạng thái</div>
+                  <span
+                    className={`inline-block text-[11px] px-2 py-0.5 rounded-full border ${statusTone(viewPlan.status)}`}
+                  >
+                    {viewPlan.status}
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Nhà cung cấp</div>
+                  <div>{viewPlan.supplierName || viewPlan.supplierId}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Người tạo</div>
+                  <div className="text-xs break-all">
+                    {viewPlan.createdBy || "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Từ ngày</div>
+                  <div>{fmtDate(viewPlan.fromDate)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Đến ngày</div>
+                  <div>{fmtDate(viewPlan.toDate)}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-slate-500 mb-1">
+                  Hàng hóa áp dụng
+                </div>
+                <div className="text-slate-700">{productLabel(viewPlan)}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-xl bg-slate-50 border p-3">
+                  <div className="text-xs text-slate-500">Kế hoạch</div>
+                  <div className="text-lg font-bold">
+                    {fmtNum(viewPlan.plannedQuantity)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border p-3">
+                  <div className="text-xs text-slate-500">Thực tế</div>
+                  <div className="text-lg font-bold">
+                    {fmtNum(viewPlan.actualQuantity)}
+                  </div>
+                </div>
+                <div className="rounded-xl bg-slate-50 border p-3">
+                  <div className="text-xs text-slate-500">Chênh lệch</div>
+                  <div
+                    className={`text-lg font-bold ${
+                      (viewPlan.plannedQuantity || 0) -
+                        (viewPlan.actualQuantity || 0) >
+                      0
+                        ? "text-red-600"
+                        : "text-emerald-600"
+                    }`}
+                  >
+                    {fmtNum(
+                      (viewPlan.plannedQuantity || 0) -
+                        (viewPlan.actualQuantity || 0)
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                  <div
+                    className={`h-full ${
+                      progressPct(viewPlan) >= 100
+                        ? "bg-emerald-500"
+                        : "bg-sky-500"
+                    }`}
+                    style={{
+                      width: `${Math.min(100, progressPct(viewPlan))}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-center text-xs text-slate-500 mt-1">
+                  {progressPct(viewPlan)}%
+                </div>
+              </div>
+              {viewPlan.note && (
+                <div className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2">
+                  <span className="font-medium">Ghi chú: </span>
+                  {viewPlan.note}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create / Edit modal */}
+      {editOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[92vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-slate-800">
+                {editId ? "Sửa kế hoạch sản lượng" : "Thêm kế hoạch sản lượng"}
+              </h3>
+              <button
+                onClick={() => setEditOpen(false)}
+                className="text-slate-400"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-4 space-y-3 text-sm">
+              {formErr && (
+                <div className="text-xs text-red-600 bg-red-50 rounded-lg px-2 py-1.5">
+                  {formErr}
+                </div>
+              )}
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Tên chương trình</span>
+                <input
+                  value={form.programName}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, programName: e.target.value }))
+                  }
+                  placeholder="VD: Kế hoạch xi măng quý 3/2026"
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Nhà cung cấp</span>
+                <select
+                  value={form.supplierId}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      supplierId: e.target.value,
+                      productIds: [],
+                    }))
+                  }
+                  className="w-full border rounded-lg px-3 py-2"
+                  disabled={!!editId}
+                >
+                  <option value="">Chọn NCC...</option>
+                  {nccOptions.map((n) => (
+                    <option key={n.id} value={n.id}>
+                      {n.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="space-y-1">
+                <span className="text-xs text-slate-600">
+                  Hàng hóa áp dụng (chọn 1 hoặc nhiều)
+                </span>
+                {!form.supplierId ? (
+                  <div className="text-xs text-slate-400 border rounded-lg px-3 py-2 bg-slate-50">
+                    Vui lòng chọn nhà cung cấp trước.
+                  </div>
+                ) : (
+                  <div className="border rounded-lg max-h-36 overflow-y-auto p-2 space-y-1">
+                    {hhOptions.map((h) => (
+                      <label
+                        key={h.id}
+                        className="flex items-center gap-2 text-xs hover:bg-slate-50 rounded px-1 py-0.5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.productIds.includes(h.id)}
+                          onChange={() => toggleProduct(h.id)}
+                        />
+                        <span>
+                          {h.name}{" "}
+                          <span className="text-slate-400">({h.id})</span>
+                        </span>
+                      </label>
+                    ))}
+                    {!hhOptions.length && (
+                      <div className="text-xs text-slate-400">
+                        Không có hàng hóa
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block space-y-1">
+                  <span className="text-xs text-slate-600">Từ ngày</span>
+                  <input
+                    type="date"
+                    value={form.fromDate}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, fromDate: e.target.value }))
+                    }
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs text-slate-600">Đến ngày</span>
+                  <input
+                    type="date"
+                    value={form.toDate}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, toDate: e.target.value }))
+                    }
+                    className="w-full border rounded-lg px-3 py-2"
+                  />
+                </label>
+              </div>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">
+                  Sản lượng kế hoạch (tấn)
+                </span>
+                <input
+                  value={form.plannedQuantity}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      plannedQuantity: e.target.value,
+                    }))
+                  }
+                  inputMode="decimal"
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Trạng thái</span>
+                <select
+                  value={form.status}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, status: e.target.value }))
+                  }
+                  className="w-full border rounded-lg px-3 py-2"
+                >
+                  <option>Đang thực hiện</option>
+                  <option>Hoàn thành</option>
+                  <option>Hủy</option>
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-slate-600">Ghi chú</span>
+                <textarea
+                  value={form.note}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, note: e.target.value }))
+                  }
+                  rows={2}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </label>
+            </div>
+            <div className="flex gap-2 p-4 border-t">
+              <button
+                onClick={() => setEditOpen(false)}
+                className="flex-1 py-2.5 rounded-lg border text-sm font-medium"
+                disabled={busy}
+              >
+                Hủy
+              </button>
+              <button
+                onClick={saveForm}
+                disabled={busy}
+                className="flex-1 py-2.5 rounded-lg bg-sky-500 text-white text-sm font-medium disabled:opacity-50"
+              >
+                {busy ? "Đang lưu..." : "Lưu kế hoạch"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
