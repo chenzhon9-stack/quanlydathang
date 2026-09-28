@@ -79,25 +79,52 @@ export class OrderService {
     }
 
     const nccMap = await MasterRepository.nccNames();
-    orders = orders.map((o) => {
-      const reset = canResetOrder({
-        status: o.status,
-        orderDate: o.orderDate,
-        supplierId: o.supplierId,
-        sendCount: o.sendCount,
-      });
-      return {
-        ...o,
-        supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
-        canReset: reset.ok,
-      };
-    });
+    orders = orders.map((o) => ({
+      ...o,
+      supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
+    }));
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
     const total = orders.length;
     const start = (page - 1) * pageSize;
-    const items = orders.slice(start, start + pageSize);
+    let items = orders.slice(start, start + pageSize);
+
+    // V21: canReset chỉ tính cho trang hiện tại + cần còn xe chưa nhận
+    // Load CT theo năm một lần, gom hasUnreceived theo MaDon
+    const hasUnreceived = new Map<string, boolean>();
+    try {
+      const { DetailRepository } = await import(
+        "@/repositories/detail.repository"
+      );
+      const allCt = await DetailRepository.findMany({ year: filter.year });
+      for (const d of allCt) {
+        const st = String(d.status || "").toUpperCase();
+        if (st === "DELETE") continue;
+        const oid = String(d.orderId || "");
+        if (!oid) continue;
+        const unrecv =
+          (Number(d.actualReceived) || 0) === 0 && st !== "CANCEL";
+        if (unrecv) {
+          hasUnreceived.set(oid, true);
+        } else if (!hasUnreceived.has(oid)) {
+          hasUnreceived.set(oid, false);
+        }
+      }
+    } catch (e) {
+      console.error("[listOrders] canReset CT load", e);
+    }
+
+    items = items.map((o) => {
+      const reset = canResetOrder({
+        status: o.status,
+        orderDate: o.orderDate,
+        supplierId: o.supplierId,
+        sendCount: o.sendCount,
+        hasUnreceivedVehicle: hasUnreceived.get(o.orderId) === true,
+      });
+      return { ...o, canReset: reset.ok };
+    });
 
     return {
       items,
@@ -1175,21 +1202,23 @@ export class OrderService {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
     }
 
-    // Điều kiện thời gian + status — parity V21 _canResetDuyenHaOrder_
-    const timeCheck = canResetOrder({
-      status: order.status,
-      orderDate: order.orderDate,
-      supplierId: order.supplierId,
-      sendCount: order.sendCount,
-      // hasUnreceived kiểm tra sau khi load CT
-    });
-    if (!timeCheck.ok) {
-      throw { code: "TOO_EARLY", message: timeCheck.error || "Chưa đủ điều kiện reset." };
-    }
+    // 1) Thời gian + status (chưa check CT)
     const isDha = isDuyenHaNcc(order.supplierId);
     const threshold = isDha ? 1 : 2;
     const dayDiff = businessDayDiff(order.orderDate, isDha);
     const lanGui = Number(order.sendCount) || 0;
+    if (
+      dayDiff === null ||
+      (lanGui > 0 && dayDiff < threshold) ||
+      (lanGui === 0 && dayDiff < 1)
+    ) {
+      throw {
+        code: "TOO_EARLY",
+        message: isDha
+          ? "Chỉ được reset đơn Duyên Hà sau 1 ngày kể từ ngày đặt."
+          : "Chỉ được reset đơn sau 2 ngày kể từ ngày đặt.",
+      };
+    }
 
     const { DetailRepository } = await import(
       "@/repositories/detail.repository"
@@ -1213,6 +1242,21 @@ export class OrderService {
       throw {
         code: "INVALID_STATE",
         message: "Tất cả các xe đều đã nhận hoặc đã hủy, không cần reset.",
+      };
+    }
+
+    // Chốt đủ 2 điều kiện: quá hạn ngày + còn CT chưa nhận
+    const fullCheck = canResetOrder({
+      status: order.status,
+      orderDate: order.orderDate,
+      supplierId: order.supplierId,
+      sendCount: order.sendCount,
+      hasUnreceivedVehicle: true,
+    });
+    if (!fullCheck.ok) {
+      throw {
+        code: "TOO_EARLY",
+        message: fullCheck.error || "Chưa đủ điều kiện reset đơn.",
       };
     }
 

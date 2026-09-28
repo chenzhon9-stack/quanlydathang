@@ -74,7 +74,8 @@ export function canResetOrder(input: CanResetInput): { ok: boolean; error?: stri
     };
   }
 
-  if (input.hasUnreceivedVehicle === false) {
+  // Bắt buộc còn xe chưa nhận — không truyền / false → không cho reset
+  if (input.hasUnreceivedVehicle !== true) {
     return {
       ok: false,
       error: "Tất cả các xe đều đã nhận hoặc đã hủy, không cần reset.",
