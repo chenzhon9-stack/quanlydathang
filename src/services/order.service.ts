@@ -1,3 +1,4 @@
+import { businessDateKey, businessTodayKey, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
@@ -11,6 +12,7 @@ import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { writeAudit } from "@/lib/sheets/audit";
+import { generateMaDon, resolveMaDonClock } from "@/lib/sheets/ma-don";
 import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
@@ -887,25 +889,66 @@ export class OrderService {
 
     // ─── Nhánh 1: Uỷ quyền GAS (mail/PDF/Zalo + ghi Sheet) ───
     if (gasUrl) {
-      const secret = process.env.GAS_WEBHOOK_SECRET || "";
-      const res = await fetch(gasUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "sendOrderEmail",
-          maDon: orderId,
-          email: user.email,
-          sendAction: action,
-          year: y,
-          secret: secret || undefined,
-        }),
-      });
-      let gasBody: Record<string, unknown> = {};
-      try {
-        gasBody = (await res.json()) as Record<string, unknown>;
-      } catch {
-        gasBody = { success: false, error: await res.text().catch(() => res.statusText) };
+      const secret = (process.env.GAS_WEBHOOK_SECRET || "").trim();
+      const payload = {
+        action: "sendOrderEmail",
+        maDon: orderId,
+        email: user.email,
+        sendAction: action,
+        year: y,
+        ...(secret ? { secret } : {}),
+      };
+      const bodyStr = JSON.stringify(payload);
+
+      // GAS Web App thường 302 → googleusercontent; cần POST lại URL cuối (tránh mất body).
+      async function postGas(url: string, canRedirect = true): Promise<{
+        status: number;
+        body: Record<string, unknown>;
+        raw: string;
+      }> {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: bodyStr,
+          redirect: canRedirect ? "manual" : "follow",
+        });
+        // 3xx — follow bằng POST (Node mặc định có thể đổi thành GET)
+        if (canRedirect && res.status >= 300 && res.status < 400) {
+          const loc = res.headers.get("location");
+          if (loc) {
+            return postGas(loc, false);
+          }
+        }
+        const raw = await res.text();
+        let body: Record<string, unknown> = {};
+        try {
+          body = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          body = {
+            success: false,
+            error:
+              raw.slice(0, 300) ||
+              `GAS HTTP ${res.status} (không phải JSON — kiểm tra Deploy Web App / doPost)`,
+          };
+        }
+        return { status: res.status, body, raw };
       }
+
+      let gasRes: { status: number; body: Record<string, unknown>; raw: string };
+      try {
+        gasRes = await postGas(gasUrl);
+      } catch (e) {
+        throw {
+          code: "GAS_SEND_FAILED",
+          message: `Không gọi được GAS: ${e instanceof Error ? e.message : String(e)}`,
+        };
+      }
+
+      const gasBody = gasRes.body;
+      console.info("[sendOrder] GAS response", gasRes.status, JSON.stringify(gasBody).slice(0, 500));
 
       // needConfirm LATE_FIRST_SEND — UI hiện modal
       if (gasBody.needConfirm) {
@@ -921,10 +964,20 @@ export class OrderService {
         };
       }
 
-      if (!res.ok || gasBody.success === false) {
+      if (gasBody.success === false || (gasRes.status >= 400 && gasBody.success !== true)) {
+        const errMsg = String(
+          gasBody.error || gasBody.message || `GAS HTTP ${gasRes.status}`
+        );
+        // Gợi ý lỗi secret phổ biến
+        const hint =
+          /unauthorized/i.test(errMsg)
+            ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp GAS_WEBHOOK_SECRET (Vercel), hoặc xóa cả hai để thử."
+            : /unknown action/i.test(errMsg)
+              ? " — doPost chưa nhận action sendOrderEmail (deploy bản Web App mới)."
+              : "";
         throw {
           code: "GAS_SEND_FAILED",
-          message: String(gasBody.error || gasBody.message || `GAS HTTP ${res.status}`),
+          message: errMsg + hint,
           gas: gasBody,
         };
       }
@@ -1068,5 +1121,259 @@ export class OrderService {
     };
   }
 
+
+
+  /**
+   * Reset đơn hàng (parity V21 resetDuyenHaOrder — áp dụng mọi NCC).
+   * Ràng buộc thời gian (business day, Duyên Hà cutoff 14h):
+   * - LanGui === 0 (chưa gửi): dayDiff >= 1
+   * - LanGui > 0 (đã gửi): dayDiff >= 1 (Duyên Hà) hoặc >= 2 (đơn thường)
+   * Full: chưa xe nhận → đổi MaDon + ngày, CT → Mới tạo, LanGui=0
+   * Partial: có xe đã nhận → tạo đơn mới, chuyển CT chưa nhận
+   */
+  static async resetOrder(
+    orderId: string,
+    user: UserContext,
+    year?: number
+  ) {
+    const role = String(user.role || "").toUpperCase();
+    if (
+      !["ADMIN", "PURCHASE", "MANAGER"].includes(role) &&
+      !hasPermission(user, "*")
+    ) {
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Chỉ admin/purchase/manager được reset đơn",
+      };
+    }
+    if (!isSheetsConfigured()) {
+      throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
+    }
+    const y = year ?? currentYearVN();
+    const orders = await OrderRepository.findMany({ year: y });
+    const order = orders.find(
+      (o) => String(o.orderId).toUpperCase() === String(orderId).toUpperCase()
+    );
+    if (!order) {
+      throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
+    }
+    if (
+      String(order.status).toUpperCase() === "CANCEL" ||
+      order.status === STATUS_DON.CANCEL
+    ) {
+      throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
+    }
+
+    // Duyên Hà: MaNCC dha/btay (parity _isDuyenHaFromNcc_)
+    const nccCode = String(order.supplierId || "").trim().toLowerCase();
+    const isDha = nccCode === "dha" || nccCode === "btay";
+    const threshold = isDha ? 1 : 2; // _lateThresholdDays_
+    const fromKey = businessDateKey(order.orderDate, isDha);
+    const toKey = businessTodayKey(isDha);
+    const dayDiff =
+      fromKey && toKey
+        ? Math.round(
+            (Date.parse(
+              `${toKey.slice(0, 4)}-${toKey.slice(4, 6)}-${toKey.slice(6, 8)}`
+            ) -
+              Date.parse(
+                `${fromKey.slice(0, 4)}-${fromKey.slice(4, 6)}-${fromKey.slice(6, 8)}`
+              )) /
+              86400000
+          )
+        : null;
+
+    const lanGui = Number(order.sendCount) || 0;
+    // V21: (slan>0 && dayDiff < threshold) || (slan===0 && dayDiff < 1)
+    if (
+      dayDiff === null ||
+      (lanGui > 0 && dayDiff < threshold) ||
+      (lanGui === 0 && dayDiff < 1)
+    ) {
+      throw {
+        code: "TOO_EARLY",
+        message: isDha
+          ? "Chỉ được reset đơn Duyên Hà sau 1 ngày (ngày nghiệp vụ) kể từ ngày đặt."
+          : "Chỉ được reset đơn sau 2 ngày (ngày nghiệp vụ) kể từ ngày đặt khi đã gửi; đơn chưa gửi cần đủ 1 ngày.",
+      };
+    }
+
+    const { DetailRepository } = await import(
+      "@/repositories/detail.repository"
+    );
+    const details = (await DetailRepository.findMany({ year: y, orderId })).filter(
+      (d) => {
+        const st = String(d.status || "").toUpperCase();
+        return st !== "DELETE" && d.status !== STATUS_CT.DELETE;
+      }
+    );
+
+    const chuaNhan = details.filter(
+      (d) =>
+        (Number(d.actualReceived) || 0) === 0 &&
+        String(d.status || "").toUpperCase() !== "CANCEL" &&
+        d.status !== STATUS_CT.CANCEL
+    );
+    const daNhanHoacHuy = details.filter(
+      (d) => !chuaNhan.some((c) => c.detailId === d.detailId)
+    );
+
+    if (!chuaNhan.length) {
+      throw {
+        code: "INVALID_STATE",
+        message: "Tất cả các xe đều đã nhận hoặc đã hủy, không cần reset.",
+      };
+    }
+
+    const now = new Date();
+    const clock = resolveMaDonClock(order.supplierId, now);
+    let newMaDon = generateMaDon(order.supplierId, clock);
+    const existing = new Set(orders.map((o) => String(o.orderId)));
+    for (let i = 0; i < 30 && existing.has(newMaDon); i++) {
+      const d = new Date(clock.getTime() + (i + 1) * 1000);
+      newMaDon = generateMaDon(order.supplierId, d);
+    }
+    if (existing.has(newMaDon)) {
+      throw {
+        code: "MA_DON_CONFLICT",
+        message: "Không tạo được mã đơn mới không trùng.",
+      };
+    }
+
+    const timeLabel = formatDateTimeVN(new Date());
+    const newNgay = todayYmdVN();
+
+    if (daNhanHoacHuy.length === 0) {
+      await updateSheetRowByKey(
+        SHEETS.DH,
+        "MaDon",
+        orderId,
+        {
+          MaDon: newMaDon,
+          NgayDatHang: newNgay,
+          LanGui: 0,
+          TrangThaiDon: STATUS_DON.NEW,
+          ChoGuiMail: true,
+          GuiLaimail: false,
+          timeGuimail: "",
+          FileDonhang: "",
+          TongSoChitiet: chuaNhan.length,
+          ChitietHuy: 0,
+        },
+        y
+      );
+      for (const ct of details) {
+        await updateSheetRowByKey(
+          SHEETS.CT,
+          "ID_Chitiet",
+          ct.detailId,
+          {
+            MaDon: newMaDon,
+            NgayDatHang: newNgay,
+            TrangThaiXe: STATUS_CT.NEW,
+            TimeChange: timeLabel,
+          },
+          y
+        );
+      }
+      await writeAudit({
+        email: user.email,
+        role: user.role,
+        action: "RESET_ORDER_FULL",
+        maDon: newMaDon,
+        targetId: orderId,
+        oldValue: orderId,
+        newValue: newMaDon,
+        lyDo: `Reset toàn bộ đơn (dayDiff=${dayDiff}, threshold=${threshold}, LanGui=${lanGui})`,
+        year: y,
+      });
+      return {
+        mode: "full" as const,
+        oldMaDon: orderId,
+        newMaDon,
+        movedDetails: details.length,
+        dayDiff,
+        threshold,
+        message: `Đã reset đơn: ${orderId} → ${newMaDon}`,
+      };
+    }
+
+    // Partial
+    await appendSheetRow(
+      SHEETS.DH,
+      {
+        MaDon: newMaDon,
+        NgayDatHang: newNgay,
+        MaNCC: order.supplierId,
+        LanGui: 0,
+        TrangThaiDon: STATUS_DON.NEW,
+        TongSoChitiet: chuaNhan.length,
+        ChitietHuy: 0,
+        FileDonhang: "",
+        ChoGuiMail: true,
+        timeGuimail: "",
+        GuiLaimail: false,
+        User: order.createdBy || user.email,
+      },
+      y
+    );
+    for (const ct of chuaNhan) {
+      await updateSheetRowByKey(
+        SHEETS.CT,
+        "ID_Chitiet",
+        ct.detailId,
+        {
+          MaDon: newMaDon,
+          NgayDatHang: newNgay,
+          TrangThaiXe: STATUS_CT.NEW,
+          TimeChange: timeLabel,
+        },
+        y
+      );
+    }
+    await updateSheetRowByKey(
+      SHEETS.DH,
+      "MaDon",
+      orderId,
+      {
+        TongSoChitiet: daNhanHoacHuy.length,
+        ChoGuiMail: false,
+        GuiLaimail: false,
+      },
+      y
+    );
+
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "RESET_ORDER_PARTIAL",
+      maDon: newMaDon,
+      targetId: orderId,
+      oldValue: orderId,
+      newValue: newMaDon,
+      lyDo: `Tách ${chuaNhan.length} xe chưa nhận (dayDiff=${dayDiff})`,
+      year: y,
+    });
+
+    return {
+      mode: "partial" as const,
+      oldMaDon: orderId,
+      newMaDon,
+      movedDetails: chuaNhan.length,
+      keptDetails: daNhanHoacHuy.length,
+      dayDiff,
+      threshold,
+      message: `Đã tách đơn: ${chuaNhan.length} xe → ${newMaDon} (giữ ${orderId})`,
+    };
+  }
+
+  /** @deprecated alias — dùng resetOrder */
+  static async resetDuyenHaOrder(
+    orderId: string,
+    user: UserContext,
+    year?: number
+  ) {
+    return this.resetOrder(orderId, user, year);
+  }
 
 }

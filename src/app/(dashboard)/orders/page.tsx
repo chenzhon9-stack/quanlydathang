@@ -138,12 +138,31 @@ function OrderActions({
           >
             Hủy
           </button>
-          {o.supplierId === "NCC01" && (
+          {(isNew || isProcessing) && (
             <button
-              onClick={() => toast("Reset ĐH — POST /orders/:id/reset-duyen-ha")}
+              onClick={async () => {
+                if (
+                  !confirm(
+                    `Reset đơn ${o.orderId}?\n• Chưa gửi: sau ≥1 ngày đặt\n• Đã gửi: ≥1 ngày (Duyên Hà) hoặc ≥2 ngày (đơn thường)\n• Xe chưa nhận → mã/đơn mới; xe đã nhận giữ nguyên.`
+                  )
+                )
+                  return;
+                const json = await apiPost(
+                  `/api/v1/orders/${encodeURIComponent(o.orderId)}/reset`,
+                  { year: new Date().getFullYear() }
+                );
+                if (!json.success) {
+                  alert(json.error?.message || "Reset thất bại");
+                  return;
+                }
+                alert(
+                  (json.data as { message?: string })?.message || "Đã reset đơn"
+                );
+                onChanged?.();
+              }}
               className="px-2.5 py-1 text-[11px] font-medium rounded bg-amber-500 text-white hover:bg-amber-400"
             >
-              Reset ĐH
+              Reset đơn
             </button>
           )}
         </>
