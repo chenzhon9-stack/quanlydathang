@@ -1163,10 +1163,7 @@ export class OrderService {
     if (!order) {
       throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
     }
-    if (
-      String(order.status).toUpperCase() === "CANCEL" ||
-      order.status === STATUS_DON.CANCEL
-    ) {
+    if (String(order.status).toUpperCase() === "CANCEL") {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
     }
 
@@ -1210,16 +1207,14 @@ export class OrderService {
     const details = (await DetailRepository.findMany({ year: y, orderId })).filter(
       (d) => {
         const st = String(d.status || "").toUpperCase();
-        return st !== "DELETE" && d.status !== STATUS_CT.DELETE;
+        return st !== "DELETE";
       }
     );
 
-    const chuaNhan = details.filter(
-      (d) =>
-        (Number(d.actualReceived) || 0) === 0 &&
-        String(d.status || "").toUpperCase() !== "CANCEL" &&
-        d.status !== STATUS_CT.CANCEL
-    );
+    const chuaNhan = details.filter((d) => {
+      const st = String(d.status || "").toUpperCase();
+      return (Number(d.actualReceived) || 0) === 0 && st !== "CANCEL";
+    });
     const daNhanHoacHuy = details.filter(
       (d) => !chuaNhan.some((c) => c.detailId === d.detailId)
     );
