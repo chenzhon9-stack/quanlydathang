@@ -1,9 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { MobileNav } from "@/components/MobileNav";
 import { Sidebar } from "@/components/Sidebar";
+import {
+  type ClientUser,
+  canAccessPath,
+  firstAllowedPath,
+} from "@/lib/nav-access";
 
 export default function DashboardLayout({
   children,
@@ -11,9 +16,8 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const [user, setUser] = useState<{ hoTen: string; role: string } | null>(
-    null
-  );
+  const pathname = usePathname();
+  const [user, setUser] = useState<ClientUser | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("token");
@@ -22,8 +26,16 @@ export default function DashboardLayout({
       router.push("/");
       return;
     }
-    setUser(JSON.parse(u));
-  }, [router]);
+    try {
+      const parsed = JSON.parse(u) as ClientUser;
+      setUser(parsed);
+      if (pathname && !canAccessPath(parsed, pathname)) {
+        router.replace(firstAllowedPath(parsed));
+      }
+    } catch {
+      router.push("/");
+    }
+  }, [router, pathname]);
 
   function logout() {
     localStorage.removeItem("token");
@@ -41,7 +53,6 @@ export default function DashboardLayout({
 
   return (
     <div className="h-screen bg-slate-50 flex overflow-hidden">
-      {/* Sidebar cố định — không scroll theo content */}
       <div className="hidden md:flex md:flex-col md:w-56 lg:w-60 md:shrink-0 md:h-screen md:sticky md:top-0 border-r border-slate-200 bg-white">
         <Sidebar user={user} onLogout={logout} />
       </div>
@@ -64,7 +75,6 @@ export default function DashboardLayout({
           </button>
         </header>
 
-        {/* Chỉ vùng data scroll */}
         <main className="flex-1 overflow-y-auto p-3 md:p-5 lg:p-6 pb-20 md:pb-6">
           {children}
         </main>

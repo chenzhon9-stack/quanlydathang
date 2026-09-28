@@ -2,68 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-/** Tab visibility = UI projection of Permission Matrix (skill 7.9) */
-const NAV: Array<{
-  href: string;
-  label: string;
-  icon: string;
-  roles?: string[];
-}> = [
-  { href: "/dashboard", label: "Tổng quan", icon: "📊", roles: ["ADMIN", "MANAGER"] },
-  {
-    href: "/orders",
-    label: "Đơn hàng",
-    icon: "📋",
-    roles: ["ADMIN", "PURCHASE", "DISPATCHER"],
-  },
-  {
-    href: "/details",
-    label: "Chi tiết xe",
-    icon: "🚚",
-    roles: ["ADMIN", "PURCHASE", "DISPATCHER"],
-  },
-  { href: "/deliveries", label: "Giao hàng", icon: "📦" },
-  {
-    href: "/plans",
-    label: "Kế hoạch SL",
-    icon: "📈",
-    roles: ["ADMIN", "MANAGER"],
-  },
-  { href: "/reports/receiving", label: "Báo cáo", icon: "📑" },
-  {
-    href: "/payables",
-    label: "Công nợ NCC",
-    icon: "💰",
-    roles: ["ADMIN", "MANAGER", "PURCHASE", "ACCOUNTANT"],
-  },
-  {
-    href: "/masters",
-    label: "Danh mục",
-    icon: "📚",
-    roles: ["ADMIN", "MANAGER", "PURCHASE"],
-  },
-  {
-    href: "/users",
-    label: "User & Quyền",
-    icon: "👤",
-    roles: ["ADMIN"],
-  },
-];
+import { type ClientUser, visibleNavItems } from "@/lib/nav-access";
 
 export function Sidebar({
   user,
   onLogout,
 }: {
-  user: { hoTen: string; role: string };
+  user: ClientUser;
   onLogout: () => void;
 }) {
   const pathname = usePathname();
-  const role = user.role?.toUpperCase() || "";
-
-  const visible = NAV.filter(
-    (item) => !item.roles || item.roles.includes(role) || role === "ADMIN"
-  );
+  const visible = visibleNavItems(user);
 
   return (
     <aside className="flex flex-col w-full h-full bg-slate-900 text-white">
@@ -83,10 +32,9 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
         {visible.map((item) => {
-          const active =
-            item.href === "/reports/receiving"
-              ? pathname.startsWith("/reports")
-              : pathname === item.href || pathname.startsWith(item.href + "/");
+          const active = item.href.startsWith("/reports")
+            ? pathname.startsWith("/reports")
+            : pathname === item.href || pathname.startsWith(item.href + "/");
           return (
             <Link
               key={item.href}
@@ -102,6 +50,11 @@ export function Sidebar({
             </Link>
           );
         })}
+        {visible.length === 0 && (
+          <p className="px-3 py-2 text-xs text-slate-500">
+            Không có mục nào được cấp quyền.
+          </p>
+        )}
       </nav>
 
       <div className="px-4 py-4 border-t border-slate-700">

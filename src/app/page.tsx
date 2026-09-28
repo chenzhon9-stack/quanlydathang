@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { firstAllowedPath, type ClientUser } from "@/lib/nav-access";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,7 +28,8 @@ export default function LoginPage() {
       }
       localStorage.setItem("token", json.data.session.token);
       localStorage.setItem("user", JSON.stringify(json.data.user));
-      router.push("/dashboard");
+      const u = (json.data.user || {}) as ClientUser;
+      router.push(firstAllowedPath(u));
     } catch {
       setError("Không kết nối được máy chủ");
     } finally {

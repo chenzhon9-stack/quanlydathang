@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ACTION, clientHasAny, readClientUser } from "@/lib/nav-access";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -207,7 +208,19 @@ type Handlers = {
  * Đã nhận / Đang giao: Giao
  * Hoàn thành / Hủy xe / Xóa xe: Xem
  */
-function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
+function DetailActions({
+  d,
+  h,
+  canReceive = true,
+  canCancel = true,
+  canDeliver = true,
+}: {
+  d: OrderDetail;
+  h: Handlers;
+  canReceive?: boolean;
+  canCancel?: boolean;
+  canDeliver?: boolean;
+}) {
   const st = normCtStatus(String(d.status || ""));
   const btn =
     "min-h-[40px] px-3 py-2 text-xs font-bold rounded-xl border shadow-sm whitespace-nowrap active:scale-[0.98]";
@@ -231,6 +244,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
   if (st === "RECEIVED" || st === "DELIVERING") {
     return (
       <div className="flex flex-wrap gap-1 justify-end">
+        {canDeliver && (
         <button
           type="button"
           onClick={() => h.onDeliver(d)}
@@ -238,6 +252,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
         >
           Giao
         </button>
+        )}
       </div>
     );
   }
@@ -247,7 +262,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
     return (
       <div className="flex flex-wrap gap-1 justify-end">
         {/* V21: Nhận chỉ khi Đặt hàng và không chờ gửi lại */}
-        {st === "ORDERED" && !guiLai && (
+        {st === "ORDERED" && !guiLai && canReceive && (
           <button
             type="button"
             onClick={() => h.onReceive(d)}
@@ -275,6 +290,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
         >
           Sửa KH
         </button>
+        {canCancel && (
         <button
           type="button"
           onClick={() => h.onCancel(d, st === "NEW" ? "delete" : "cancel")}
@@ -282,6 +298,7 @@ function DetailActions({ d, h }: { d: OrderDetail; h: Handlers }) {
         >
           {st === "NEW" ? "Xóa" : "Hủy"}
         </button>
+        )}
       </div>
     );
   }
@@ -347,6 +364,9 @@ export default function DetailsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const detailUser = readClientUser();
+  const canReceive = clientHasAny(detailUser, [...ACTION.orderReceive]);
+  const canCancelDetail = clientHasAny(detailUser, [...ACTION.orderCancel]);
   const [colOpen, setColOpen] = useState(false);
   const [colState, setColState] = useState<ColumnState>(() =>
     loadColumnState("details", DETAIL_COLUMNS)
@@ -1004,7 +1024,7 @@ export default function DetailsPage() {
                       )}
                       <div className="pt-2 mt-1 border-t border-black/10">
                         <div className="flex flex-wrap gap-2 [&_button]:min-h-[40px] [&_button]:px-3 [&_button]:rounded-xl">
-                          <DetailActions d={d} h={handlers} />
+                          <DetailActions d={d} h={handlers} canReceive={canReceive} canCancel={canCancelDetail} canDeliver={canReceive || canCancelDetail} />
                         </div>
                       </div>
                     </div>
@@ -1259,7 +1279,7 @@ export default function DetailsPage() {
                             if (c.key === "actions")
                               return (
                                 <td key={c.key} className="px-2 py-2">
-                                  <DetailActions d={d} h={handlers} />
+                                  <DetailActions d={d} h={handlers} canReceive={canReceive} canCancel={canCancelDetail} canDeliver={canReceive || canCancelDetail} />
                                 </td>
                               );
                             return <td key={c.key} />;

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ACTION, clientHasAny, readClientUser } from "@/lib/nav-access";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -95,7 +96,7 @@ function isViewOnly(d: Delivery) {
 }
 
 function modeFromDelivery(d: Delivery): DeliveryModalMode {
-  const label = actionLabel(d);
+  const label = canUpdateDelivery ? actionLabel(d) : "Xem";
   if (label === "Xem") return "view";
   if (label === "Sửa") return "plan";
   return "real";
@@ -121,6 +122,8 @@ export default function DeliveriesPage() {
     mode: DeliveryModalMode;
   } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const deliveryUser = readClientUser();
+  const canUpdateDelivery = clientHasAny(deliveryUser, [...ACTION.deliveryUpdate]);
   const [colOpen, setColOpen] = useState(false);
   const [colState, setColState] = useState<ColumnState>(() =>
     loadColumnState("delivery", DELIVERY_COLUMNS)
@@ -431,7 +434,7 @@ export default function DeliveriesPage() {
                   </div>
                 )}
                 {g.items.map((d) => {
-                  const label = actionLabel(d);
+                  const label = canUpdateDelivery ? actionLabel(d) : "Xem";
                   const viewOnly = isViewOnly(d);
                   const st = d.detailStatus || "";
                   const khName = d.customerName || d.customerId || "—";

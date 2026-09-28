@@ -2,28 +2,31 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const TABS = [
-  { href: "/dashboard", label: "Tổng quan", icon: "📊" },
-  { href: "/orders", label: "Đơn", icon: "📋" },
-  { href: "/details", label: "Chi tiết", icon: "🚚" },
-  { href: "/deliveries", label: "Giao", icon: "📦" },
-  { href: "/plans", label: "KH", icon: "📈" },
-  { href: "/reports/receiving", label: "BC", icon: "📑" },
-  { href: "/payables", label: "Nợ", icon: "💰" },
-];
+import { useEffect, useState } from "react";
+import {
+  type ClientUser,
+  readClientUser,
+  visibleNavItems,
+} from "@/lib/nav-access";
 
 export function MobileNav() {
   const pathname = usePathname();
+  const [user, setUser] = useState<ClientUser>({});
+
+  useEffect(() => {
+    setUser(readClientUser());
+  }, []);
+
+  const tabs = visibleNavItems(user);
+  if (!tabs.length) return null;
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-slate-200 safe-area-pb">
       <div className="flex items-center justify-around h-14 overflow-x-auto">
-        {TABS.map((tab) => {
-          const active =
-            tab.href.startsWith("/reports")
-              ? pathname.startsWith("/reports")
-              : pathname === tab.href || pathname.startsWith(tab.href + "/");
+        {tabs.map((tab) => {
+          const active = tab.href.startsWith("/reports")
+            ? pathname.startsWith("/reports")
+            : pathname === tab.href || pathname.startsWith(tab.href + "/");
           return (
             <Link
               key={tab.href}
@@ -33,7 +36,7 @@ export function MobileNav() {
               }`}
             >
               <span className="text-base mb-0.5">{tab.icon}</span>
-              <span>{tab.label}</span>
+              <span className="truncate max-w-[3.5rem]">{tab.label}</span>
             </Link>
           );
         })}
