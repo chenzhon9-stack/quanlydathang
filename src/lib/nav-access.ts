@@ -133,10 +133,15 @@ export function canAccessPath(user: ClientUser, pathname: string): boolean {
 
 export const ACTION = {
   orderCreate: ["ORDER_CREATE", "*"],
+  /** Sửa đơn / thêm xe / batch — STEP 7 ORDER_UPDATE */
+  orderUpdate: ["ORDER_UPDATE", "ORDER_CREATE", "*"],
   orderSend: ["ORDER_SEND", "*"],
   orderCancel: ["ORDER_CANCEL", "*"],
   orderReceive: ["ORDER_RECEIVE", "*"],
   deliveryUpdate: ["DELIVERY_UPDATE", "*"],
+  planUpdate: ["PLAN_UPDATE", "*"],
   payableView: ["PAYABLE_VIEW", "*"],
+  payableCreate: ["PAYABLE_CREATE", "*"],
+  payableCancel: ["PAYABLE_CANCEL", "*"],
   reportView: ["REPORT_VIEW", "*"],
 } as const;

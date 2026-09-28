@@ -8,6 +8,7 @@ import { SHEETS } from "@/lib/sheets/constants";
  * Role = tập Permission; Service chỉ requirePermission, không check role name.
  */
 export const ROLE_PERMISSIONS: Record<Role, string[]> = {
+  /** STEP 7: ORDER_UPDATE / PLAN_UPDATE / PAYABLE_CANCEL — tách khỏi CREATE */
   ADMIN: ["*"],
   MANAGER: [
     "DELIVERY_VIEW",
@@ -23,6 +24,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   PURCHASE: [
     "ORDER_VIEW",
     "ORDER_CREATE",
+    "ORDER_UPDATE",
     "ORDER_RECEIVE",
     "ORDER_SEND",
     "ORDER_CANCEL",
@@ -33,14 +35,18 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "REPORT_VIEW",
     "PAYABLE_VIEW",
     "PAYABLE_CREATE",
+    // PAYABLE_CANCEL — admin only (void)
     "PURCHASE_PRICE_VIEW",
     "PURCHASE_PRICE_UPDATE",
     "KHSL_VIEW",
     "KHSL_UPDATE",
+    "PLAN_VIEW",
+    "PLAN_UPDATE",
   ],
   DISPATCHER: [
     "ORDER_VIEW",
     "ORDER_CREATE",
+    "ORDER_UPDATE",
     "ORDER_SEND",
     "DELIVERY_VIEW",
     "DELIVERY_UPDATE",
@@ -48,6 +54,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "DELIVERY_VIEW_ACTUAL_DELIVER",
     "REPORT_VIEW",
     "KHSL_VIEW",
+    "PLAN_VIEW",
   ],
   SALES: [
     "DELIVERY_VIEW",
@@ -68,6 +75,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "REPORT_VIEW",
     "PAYABLE_VIEW",
     "PAYABLE_CREATE",
+    // không PAYABLE_CANCEL
   ],
   ACCOUNT: ["DELIVERY_VIEW", "REPORT_VIEW"],
 };

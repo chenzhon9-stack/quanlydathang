@@ -338,6 +338,34 @@ export function hasPermission(user: UserContext, permission: string): boolean {
   return user.permissions.includes(permission);
 }
 
+/** STEP 7 — ném PERMISSION_DENIED nếu thiếu quyền */
+export function requirePermission(
+  user: UserContext,
+  permission: string,
+  message?: string
+): void {
+  if (!hasPermission(user, permission)) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || `Không có quyền ${permission}`,
+    };
+  }
+}
+
+/** Cần ≥1 trong danh sách */
+export function requireAnyPermission(
+  user: UserContext,
+  permissions: string[],
+  message?: string
+): void {
+  if (permissions.some((p) => hasPermission(user, p))) return;
+  throw {
+    code: "PERMISSION_DENIED",
+    message: message || `Không có quyền (${permissions.join(" | ")})`,
+  };
+}
+
+
 export function isAdmin(user: UserContext): boolean {
   return user.role === ("ADMIN" as Role);
 }
