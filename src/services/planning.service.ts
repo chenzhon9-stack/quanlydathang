@@ -61,37 +61,56 @@ function requirePlanUpdate(user: UserContext) {
   }
 }
 
-/** Thực nhận trong kỳ KH: cùng NCC + HH ∈ danh sách + NgayNhan trong [from,to] */
-async function computeActualForPlan(
-  plan: ProductionPlan,
-  year: number
-): Promise<number> {
-  try {
-    const details = await ReportRepository.getDetails(year);
-    const from = (plan.fromDate || "").slice(0, 10);
-    const to = (plan.toDate || "").slice(0, 10);
-    const hhSet = new Set(
-      (plan.productIds || []).map((x) => String(x).trim().toUpperCase())
-    );
-    const ncc = String(plan.supplierId || "").trim().toUpperCase();
-    let sum = 0;
-    for (const d of details) {
-      if (isExcludedDetailStatus(String(d.status || ""))) continue;
-      if (String(d.supplierId || "").trim().toUpperCase() !== ncc) continue;
-      if (hhSet.size && !hhSet.has(String(d.productId || "").trim().toUpperCase()))
-        continue;
-      const nd = String(d.receivedDate || "").slice(0, 10);
-      if (!nd) continue;
-      if (from && nd < from) continue;
-      if (to && nd > to) continue;
-      const tn = Number(d.actualReceived) || 0;
-      if (tn > 0) sum += tn;
-    }
-    return Math.round(sum * 1000) / 1000;
-  } catch (e) {
-    console.error("[PlanningService] computeActual", e);
-    return Number(plan.actualQuantity) || 0;
+/** Chuẩn hóa mã HH từ DanhSachHH (bỏ token rác) */
+function normalizeProductIds(ids: string[] | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids || []) {
+    const id = String(raw || "").trim();
+    if (!id || id.length < 2) continue;
+    const up = id.toUpperCase();
+    if (seen.has(up)) continue;
+    seen.add(up);
+    out.push(id);
   }
+  return out;
+}
+
+/**
+ * Thực hiện kế hoạch (parity V21):
+ * Cộng ThucNhan các CT cùng MaNCC + MaHH ∈ DanhSachHH,
+ * ngày nghiệp vụ = NgayNhanHang (ưu tiên) hoặc NgayDatHang nếu đã có ThucNhan,
+ * nằm trong [TuNgay, DenNgay]; loại Hủy/Xóa xe.
+ */
+function computeActualFromDetails(
+  plan: ProductionPlan,
+  details: Awaited<ReturnType<typeof ReportRepository.getDetails>>
+): number {
+  const from = (plan.fromDate || "").slice(0, 10);
+  const to = (plan.toDate || "").slice(0, 10);
+  const hhSet = new Set(
+    normalizeProductIds(plan.productIds).map((x) => x.toUpperCase())
+  );
+  const ncc = String(plan.supplierId || "").trim().toUpperCase();
+  let sum = 0;
+  for (const d of details) {
+    if (isExcludedDetailStatus(String(d.status || ""))) continue;
+    if (String(d.supplierId || "").trim().toUpperCase() !== ncc) continue;
+    const pid = String(d.productId || "").trim().toUpperCase();
+    if (hhSet.size && !hhSet.has(pid)) continue;
+    const tn = Number(d.actualReceived) || 0;
+    if (tn <= 0) continue;
+    // Ngày: ưu tiên nhận; fallback ngày đặt nếu đã nhận
+    let nd = String(d.receivedDate || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nd)) {
+      nd = String(d.orderDate || "").slice(0, 10);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nd)) continue;
+    if (from && nd < from) continue;
+    if (to && nd > to) continue;
+    sum += tn;
+  }
+  return Math.round(sum * 1000) / 1000;
 }
 
 export class PlanningService {
@@ -160,8 +179,9 @@ export class PlanningService {
 
     const nccMap = await MasterRepository.nccNames();
     const hhMap = await MasterRepository.hhNames();
+    // Một lần đọc CT cho cả trang — tính thực hiện
+    const allDetails = await ReportRepository.getDetails(year);
 
-    // Enrich actual + names (giới hạn 80 plan/trang để tránh timeout)
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
     const total = plans.length;
@@ -170,13 +190,24 @@ export class PlanningService {
 
     const items: ProductionPlan[] = [];
     for (const p of slice) {
-      const actual = await computeActualForPlan(p, year);
-      const productNames = (p.productIds || []).map(
-        (id) => hhMap[id] || id
+      const productIds = normalizeProductIds(p.productIds);
+      const computed = computeActualFromDetails(
+        { ...p, productIds },
+        allDetails
+      );
+      // Ưu tiên số tính được; nếu 0 giữ ThucTe trên sheet (V21 có thể đã ghi)
+      const sheetActual = Number(p.actualQuantity) || 0;
+      const actual = computed > 0 ? computed : sheetActual;
+      const productNames = productIds.map((id) =>
+        MasterRepository.resolveName(hhMap, id)
       );
       items.push({
         ...p,
-        supplierName: p.supplierName || nccMap[p.supplierId] || p.supplierId,
+        productIds,
+        supplierName:
+          p.supplierName ||
+          MasterRepository.resolveName(nccMap, p.supplierId) ||
+          p.supplierId,
         actualQuantity: actual,
         productNames,
       } as ProductionPlan & { productNames: string[] });
@@ -214,12 +245,22 @@ export class PlanningService {
 
     const nccMap = await MasterRepository.nccNames();
     const hhMap = await MasterRepository.hhNames();
-    const actual = await computeActualForPlan(p, y);
+    const details = await ReportRepository.getDetails(y);
+    const productIds = normalizeProductIds(p.productIds);
+    const computed = computeActualFromDetails({ ...p, productIds }, details);
+    const sheetActual = Number(p.actualQuantity) || 0;
+    const actual = computed > 0 ? computed : sheetActual;
     return {
       ...p,
-      supplierName: p.supplierName || nccMap[p.supplierId] || p.supplierId,
+      productIds,
+      supplierName:
+        p.supplierName ||
+        MasterRepository.resolveName(nccMap, p.supplierId) ||
+        p.supplierId,
       actualQuantity: actual,
-      productNames: (p.productIds || []).map((id) => hhMap[id] || id),
+      productNames: productIds.map((id) =>
+        MasterRepository.resolveName(hhMap, id)
+      ),
     };
   }
 

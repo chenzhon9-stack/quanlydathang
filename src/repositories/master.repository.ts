@@ -55,6 +55,9 @@ async function loadMap(
         }
       }
       map[id] = name || id;
+      // alias uppercase để tra cứu nhanh
+      const up = id.toUpperCase();
+      if (up !== id && !map[up]) map[up] = name || id;
     }
     cache[key] = { at: Date.now(), map };
     console.info(`[Master] ${key} size=${Object.keys(map).length}`);
@@ -116,8 +119,9 @@ export class MasterRepository {
     return loadMap(
       "hh",
       SHEETS.HH,
-      ["MaHH", "MaHh"],
-      ["TenHangHoa", "TenHH"]
+      ["MaHH", "MaHh", "mahh"],
+      ["TenHangHoa", "TenHH", "TenHang"],
+      false // lấy cả HH tạm khóa để map tên trên KHSL
     );
   }
   static xeNames() {
@@ -150,6 +154,20 @@ export class MasterRepository {
   }
 
   /** Full rows for master admin UI */
+
+  /** Tra cứu tên không phân biệt hoa thường / trim */
+  static resolveName(map: Dict, id: string | undefined | null): string {
+    if (!id) return "";
+    const raw = String(id).trim();
+    if (!raw) return "";
+    if (map[raw]) return map[raw];
+    const up = raw.toUpperCase();
+    for (const [k, v] of Object.entries(map)) {
+      if (k.toUpperCase() === up) return v || raw;
+    }
+    return raw;
+  }
+
   static async list(type: string): Promise<Record<string, string>[]> {
     const map: Record<string, string> = {
       NCC: SHEETS.NCC,

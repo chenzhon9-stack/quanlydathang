@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { StatusBadge } from "@/components/StatusBadge";
+import { useCallback, useEffect, useState } from "react";
 import { statusRowClass } from "@/lib/status-styles";
 import {
   ACTION,
@@ -325,33 +324,33 @@ export default function PlansPage() {
         </div>
       </div>
 
-      {/* Filters — parity V21 */}
-      <div className="rounded-xl bg-slate-800 text-white p-3 md:p-4 space-y-3">
+      {/* Filters — light theme */}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 space-y-3 shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="text-xs space-y-1">
-            <span className="text-slate-300">Từ ngày</span>
+            <span className="text-slate-600 font-medium">Từ ngày</span>
             <input
               type="date"
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             />
           </label>
           <label className="text-xs space-y-1">
-            <span className="text-slate-300">Đến ngày</span>
+            <span className="text-slate-600 font-medium">Đến ngày</span>
             <input
               type="date"
               value={toDate}
               onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             />
           </label>
           <label className="text-xs space-y-1">
-            <span className="text-slate-300">Trạng thái</span>
+            <span className="text-slate-600 font-medium">Trạng thái</span>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             >
               <option value="ALL">Tất cả trạng thái</option>
               <option value="Đang thực hiện">Đang thực hiện</option>
@@ -362,11 +361,11 @@ export default function PlansPage() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr_auto] gap-3 items-end">
           <label className="text-xs space-y-1">
-            <span className="text-slate-300">Nhà cung cấp</span>
+            <span className="text-slate-600 font-medium">Nhà cung cấp</span>
             <select
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
-              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             >
               <option value="">Tất cả NCC</option>
               {nccOptions.map((n) => (
@@ -377,17 +376,17 @@ export default function PlansPage() {
             </select>
           </label>
           <label className="text-xs space-y-1">
-            <span className="text-slate-300">Tìm kiếm</span>
+            <span className="text-slate-600 font-medium">Tìm kiếm</span>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Tên chương trình, NCC, hàng hóa..."
-              className="w-full rounded-lg px-2 py-2 text-sm text-slate-900"
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             />
           </label>
           <button
             onClick={() => load(1)}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-500 hover:bg-blue-400"
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500"
           >
             Lọc
           </button>
