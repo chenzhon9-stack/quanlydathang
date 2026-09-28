@@ -217,15 +217,17 @@ export function OrderManageModal({
     if (!order || !orderId) return;
     setErr(null);
 
-    // Trùng xe+hàng
+    // Trùng xe + hàng (parity V21 Frontend)
     const pairs = new Set<string>();
     for (const b of blocks) {
-      const k = `${b.vehicleId}|${b.productId}`;
-      if (b.vehicleId && b.productId) {
+      const vid = String(b.vehicleId || "").trim().toUpperCase();
+      const pid = String(b.productId || "").trim().toUpperCase();
+      if (vid && pid) {
+        const k = `${vid}|${pid}`;
         if (pairs.has(k)) {
-          setErr(
-            `Trùng xe + hàng: ${b.vehicleName || b.vehicleId} / ${b.productName || b.productId}`
-          );
+          const msg = `Xe "${b.vehicleName || b.vehicleId}" và hàng "${b.productName || b.productId}" xuất hiện 2 lần`;
+          setErr(msg);
+          alert("Lỗi: " + msg);
           return;
         }
         pairs.add(k);
@@ -344,10 +346,14 @@ export function OrderManageModal({
       }
 
       onSaved?.();
-      await load();
       alert("Đã lưu thay đổi đơn " + orderId);
+      // V21: sau khi lưu thành công → đóng modal quản lý đơn
+      onClose();
     } catch (e: unknown) {
-      setErr((e as Error).message);
+      const msg = (e as Error).message || "Lỗi lưu";
+      setErr(msg);
+      // Hiện rõ lỗi trùng từ server
+      if (/trùng|xuất hiện 2/i.test(msg)) alert("Lỗi: " + msg);
     } finally {
       setBusy(false);
     }

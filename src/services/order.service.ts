@@ -370,14 +370,20 @@ export class OrderService {
       };
     }
 
-    // Trùng xe + hàng trong payload
+    // Trùng xe + hàng: trong payload + với CT đang active trên đơn (V21)
+    const pairKey = (v: string, p: string) =>
+      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
     const seen = new Set<string>();
+    for (const d of active) {
+      const k = pairKey(d.vehicleId || "", d.productId || "");
+      if (k !== "|") seen.add(k);
+    }
     for (const d of details) {
-      const key = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
+      const key = pairKey(d.vehicleId, d.productId);
       if (seen.has(key)) {
         throw {
           code: "VALIDATION_ERROR",
-          message: `Trùng xe/hàng trong đơn: ${d.vehicleId} / ${d.productId}`,
+          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
         };
       }
       seen.add(key);

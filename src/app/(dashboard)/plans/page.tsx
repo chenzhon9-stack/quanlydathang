@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { statusRowClass } from "@/lib/status-styles";
 import {
   ACTION,
@@ -59,6 +59,21 @@ export default function PlansPage() {
   const [q, setQ] = useState("");
   const [statusOpen, setStatusOpen] = useState(false);
   const [nccOpen, setNccOpen] = useState(false);
+  const filterBarRef = useRef<HTMLDivElement | null>(null);
+
+  // Đóng multi-check khi click ra ngoài
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      const el = filterBarRef.current;
+      if (!el) return;
+      if (!el.contains(e.target as Node)) {
+        setStatusOpen(false);
+        setNccOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
   const [nccOptions, setNccOptions] = useState<Array<{ id: string; name: string }>>([]);
 
   // Modals
@@ -327,7 +342,7 @@ export default function PlansPage() {
       </div>
 
       {/* Filters — light theme */}
-      <div className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 space-y-3 shadow-sm">
+      <div ref={filterBarRef} className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 space-y-3 shadow-sm">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="text-xs space-y-1">
             <span className="text-slate-600 font-medium">Từ ngày</span>
@@ -440,7 +455,11 @@ export default function PlansPage() {
             />
           </label>
           <button
-            onClick={() => load(1)}
+            onClick={() => {
+              setStatusOpen(false);
+              setNccOpen(false);
+              load(1);
+            }}
             className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-500"
           >
             Lọc
