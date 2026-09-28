@@ -912,13 +912,16 @@ export class OrderService {
       year: y,
     });
 
-    await syncOrderStatusByOrderId(orderId, y).catch(() => null);
+    const synced = await syncOrderStatusByOrderId(orderId, y).catch(() => null);
 
     return {
       orderId,
       added: details.length,
       detailIds: createdCt,
       tongSoChitiet: newTong,
+      /** Trạng thái đơn sau autoUpdateOrderStatus_ */
+      status: synced?.status || order.status,
+      ngayDatHangCt: typeof ngayDatHangCt === "string" ? ngayDatHangCt : String(ngayDatHangCt),
     };
   }
 

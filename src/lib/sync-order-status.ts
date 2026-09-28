@@ -102,8 +102,10 @@ export async function syncOrderStatusByOrderId(
   const tong = list.length;
   const huy = list.filter((d) => isCancel(String(d.status || ""))).length;
 
-  // LanGui / file / mail từ DH
+  // V21 autoUpdateOrderStatus_: đã gửi NCC = LanGui > 0 (chính).
+  // Không coi FileDonhang một mình là đã gửi (tránh sticky → Đang xử lý khi chưa gửi).
   let sent = false;
+  let prevStatus = "";
   try {
     const dhRows = await readSheetAsObjects(SHEETS.DH, { year: y });
     const dh = dhRows.find(
@@ -113,18 +115,19 @@ export async function syncOrderStatusByOrderId(
           .toUpperCase() === String(orderId).trim().toUpperCase()
     );
     if (dh) {
-      sent =
-        (Number(dh.LanGui || dh.SoLanGui || 0) || 0) > 0 ||
-        !!String(dh.timeGuimail || "").trim() ||
-        !!String(dh.FileDonhang || "").trim();
+      const lanGui = Number(dh.LanGui || dh.SoLanGui || 0) || 0;
+      const hasMailTime = !!String(dh.timeGuimail || "").trim();
+      sent = lanGui > 0 || (hasMailTime && lanGui >= 1);
+      prevStatus = String(dh.TrangThaiDon || "").trim();
     }
   } catch {
     /* ignore */
   }
 
-  let status: string = STATUS_DON.PROCESSING;
+  let status: string = STATUS_DON.NEW;
 
   if (!list.length) {
+    // Không còn CT active: chưa gửi → Khởi tạo; đã gửi → Đang xử lý
     status = sent ? STATUS_DON.PROCESSING : STATUS_DON.NEW;
   } else {
     const allCancel = states.every((s) => isCancel(s));
@@ -134,10 +137,15 @@ export async function syncOrderStatusByOrderId(
 
     if (allCancel) status = STATUS_DON.CANCEL;
     else if (allTerminal) status = STATUS_DON.DONE;
+    // Tất cả CT còn "Mới tạo": chỉ sang Đang xử lý khi đã gửi NCC
     else if (allNew) status = sent ? STATUS_DON.PROCESSING : STATUS_DON.NEW;
     else if (hasWorking) status = STATUS_DON.PROCESSING;
-    else status = STATUS_DON.PROCESSING;
+    else status = sent ? STATUS_DON.PROCESSING : STATUS_DON.NEW;
   }
+
+  console.info(
+    `[syncOrderStatus] ${orderId} prev=${prevStatus || "-"} → ${status} sent=${sent} ct=${tong} huy=${huy}`
+  )
 
   await updateSheetRowByKey(
     SHEETS.DH,
