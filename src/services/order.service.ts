@@ -370,14 +370,10 @@ export class OrderService {
       };
     }
 
-    // Trùng xe + hàng: trong payload + với CT đang active trên đơn (V21)
+    // Trùng xe + hàng trong payload (tạo đơn mới — chưa có CT cũ)
     const pairKey = (v: string, p: string) =>
       `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
     const seen = new Set<string>();
-    for (const d of active) {
-      const k = pairKey(d.vehicleId || "", d.productId || "");
-      if (k !== "|") seen.add(k);
-    }
     for (const d of details) {
       const key = pairKey(d.vehicleId, d.productId);
       if (seen.has(key)) {
@@ -706,15 +702,18 @@ export class OrderService {
     }
 
     // Trùng xe+hàng với active hiện có
+    // Trùng xe + hàng với CT active + trong payload (V21, không phân biệt hoa thường)
+    const pairKey = (v: string, p: string) =>
+      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
     const seen = new Set(
-      active.map((d) => `${d.vehicleId}|${d.productId}`)
+      active.map((d) => pairKey(d.vehicleId || "", d.productId || "")).filter((k) => k !== "|")
     );
     for (const d of details) {
-      const key = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
+      const key = pairKey(d.vehicleId, d.productId);
       if (seen.has(key)) {
         throw {
           code: "VALIDATION_ERROR",
-          message: `Trùng xe/hàng với đơn hiện tại: ${d.vehicleId} / ${d.productId}`,
+          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
         };
       }
       seen.add(key);
