@@ -54,9 +54,11 @@ export default function PlansPage() {
   // Filters
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-  const [status, setStatus] = useState("ALL");
-  const [supplierId, setSupplierId] = useState("");
+  const [statuses, setStatuses] = useState<string[]>([]);
+  const [supplierIds, setSupplierIds] = useState<string[]>([]);
   const [q, setQ] = useState("");
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [nccOpen, setNccOpen] = useState(false);
   const [nccOptions, setNccOptions] = useState<Array<{ id: string; name: string }>>([]);
 
   // Modals
@@ -134,8 +136,8 @@ export default function PlansPage() {
         });
         if (fromDate) qs.set("fromDate", fromDate);
         if (toDate) qs.set("toDate", toDate);
-        if (status && status !== "ALL") qs.set("status", status);
-        if (supplierId) qs.set("supplierId", supplierId);
+        if (statuses.length) qs.set("status", statuses.join(";"));
+        if (supplierIds.length) qs.set("supplierId", supplierIds.join(";"));
         if (q.trim()) qs.set("q", q.trim());
 
         const res = await fetch(`/api/v1/planning?${qs}`, {
@@ -157,7 +159,7 @@ export default function PlansPage() {
         setLoading(false);
       }
     },
-    [year, fromDate, toDate, status, supplierId, q]
+    [year, fromDate, toDate, statuses, supplierIds, q]
   );
 
   useEffect(() => {
@@ -345,42 +347,95 @@ export default function PlansPage() {
               className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             />
           </label>
-          <label className="text-xs space-y-1">
+          <div className="text-xs space-y-1 relative">
             <span className="text-slate-600 font-medium">Trạng thái</span>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
+            <button
+              type="button"
+              onClick={() => {
+                setStatusOpen((v) => !v);
+                setNccOpen(false);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-left text-slate-800 bg-white"
             >
-              <option value="ALL">Tất cả trạng thái</option>
-              <option value="Đang thực hiện">Đang thực hiện</option>
-              <option value="Hoàn thành">Hoàn thành</option>
-              <option value="Hủy">Hủy</option>
-            </select>
-          </label>
+              {statuses.length
+                ? statuses.join(", ")
+                : "Tất cả trạng thái (chọn nhiều)"}
+            </button>
+            {statusOpen && (
+              <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg p-2 space-y-1">
+                {["Đang thực hiện", "Hoàn thành", "Hủy"].map((s) => (
+                  <label
+                    key={s}
+                    className="flex items-center gap-2 text-sm px-1 py-1 hover:bg-slate-50 rounded"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={statuses.includes(s)}
+                      onChange={() =>
+                        setStatuses((prev) =>
+                          prev.includes(s)
+                            ? prev.filter((x) => x !== s)
+                            : [...prev, s]
+                        )
+                      }
+                    />
+                    {s}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.2fr_auto] gap-3 items-end">
-          <label className="text-xs space-y-1">
+          <div className="text-xs space-y-1 relative">
             <span className="text-slate-600 font-medium">Nhà cung cấp</span>
-            <select
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
+            <button
+              type="button"
+              onClick={() => {
+                setNccOpen((v) => !v);
+                setStatusOpen(false);
+              }}
+              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-left text-slate-800 bg-white"
             >
-              <option value="">Tất cả NCC</option>
-              {nccOptions.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              {supplierIds.length
+                ? `${supplierIds.length} NCC đã chọn`
+                : "Tất cả NCC (chọn nhiều)"}
+            </button>
+            {nccOpen && (
+              <div className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg p-2 space-y-1">
+                {nccOptions.map((n) => (
+                  <label
+                    key={n.id}
+                    className="flex items-center gap-2 text-sm px-1 py-1 hover:bg-slate-50 rounded"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={supplierIds.includes(n.id)}
+                      onChange={() =>
+                        setSupplierIds((prev) =>
+                          prev.includes(n.id)
+                            ? prev.filter((x) => x !== n.id)
+                            : [...prev, n.id]
+                        )
+                      }
+                    />
+                    <span className="truncate">{n.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
           <label className="text-xs space-y-1">
-            <span className="text-slate-600 font-medium">Tìm kiếm</span>
+            <span className="text-slate-600 font-medium">
+              Tìm kiếm{" "}
+              <span className="text-slate-400 font-normal">
+                (Và: + · Hoặc: ;)
+              </span>
+            </span>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Tên chương trình, NCC, hàng hóa..."
+              placeholder="VD: bim + son; song lam"
               className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 bg-white"
             />
           </label>

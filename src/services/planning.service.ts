@@ -19,8 +19,8 @@ import {
   ymdDate,
   currentYearVN,
 } from "@/lib/sheets/date";
-import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
 import { writeAudit } from "@/lib/sheets/audit";
+import { matchSearchVn, buildHaystack } from "@/lib/vn-search";
 
 export type PlanInput = {
   programName: string;
@@ -33,6 +33,22 @@ export type PlanInput = {
   note?: string;
   year?: number;
 };
+
+/** V21: DanhSachHH = mã HH nối bằng ";" */
+function splitDanhSachHH(ids: string[] | string | undefined): string[] {
+  const raw = Array.isArray(ids) ? ids.join(";") : String(ids || "");
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split(";")) {
+    const id = part.trim();
+    if (!id) continue;
+    const up = id.toUpperCase();
+    if (seen.has(up)) continue;
+    seen.add(up);
+    out.push(id);
+  }
+  return out;
+}
 
 function requirePlanView(user: UserContext) {
   if (
@@ -61,58 +77,6 @@ function requirePlanUpdate(user: UserContext) {
   }
 }
 
-/** Chuẩn hóa mã HH từ DanhSachHH (bỏ token rác) */
-function normalizeProductIds(ids: string[] | undefined): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of ids || []) {
-    const id = String(raw || "").trim();
-    if (!id || id.length < 2) continue;
-    const up = id.toUpperCase();
-    if (seen.has(up)) continue;
-    seen.add(up);
-    out.push(id);
-  }
-  return out;
-}
-
-/**
- * Thực hiện kế hoạch (parity V21):
- * Cộng ThucNhan các CT cùng MaNCC + MaHH ∈ DanhSachHH,
- * ngày nghiệp vụ = NgayNhanHang (ưu tiên) hoặc NgayDatHang nếu đã có ThucNhan,
- * nằm trong [TuNgay, DenNgay]; loại Hủy/Xóa xe.
- */
-function computeActualFromDetails(
-  plan: ProductionPlan,
-  details: Awaited<ReturnType<typeof ReportRepository.getDetails>>
-): number {
-  const from = (plan.fromDate || "").slice(0, 10);
-  const to = (plan.toDate || "").slice(0, 10);
-  const hhSet = new Set(
-    normalizeProductIds(plan.productIds).map((x) => x.toUpperCase())
-  );
-  const ncc = String(plan.supplierId || "").trim().toUpperCase();
-  let sum = 0;
-  for (const d of details) {
-    if (isExcludedDetailStatus(String(d.status || ""))) continue;
-    if (String(d.supplierId || "").trim().toUpperCase() !== ncc) continue;
-    const pid = String(d.productId || "").trim().toUpperCase();
-    if (hhSet.size && !hhSet.has(pid)) continue;
-    const tn = Number(d.actualReceived) || 0;
-    if (tn <= 0) continue;
-    // Ngày: ưu tiên nhận; fallback ngày đặt nếu đã nhận
-    let nd = String(d.receivedDate || "").slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(nd)) {
-      nd = String(d.orderDate || "").slice(0, 10);
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(nd)) continue;
-    if (from && nd < from) continue;
-    if (to && nd > to) continue;
-    sum += tn;
-  }
-  return Math.round(sum * 1000) / 1000;
-}
-
 export class PlanningService {
   static async listPlans(
     filter: {
@@ -138,15 +102,34 @@ export class PlanningService {
       return (b.id || "").localeCompare(a.id || "");
     });
 
+    // Multi NCC: "A;B" hoặc "A,B"
     if (filter.supplierId) {
-      plans = plans.filter((p) => p.supplierId === filter.supplierId);
+      const nccs = filter.supplierId
+        .split(/[;,]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (nccs.length === 1) {
+        plans = plans.filter((p) => p.supplierId === nccs[0]);
+      } else if (nccs.length > 1) {
+        const set = new Set(nccs);
+        plans = plans.filter((p) => set.has(p.supplierId));
+      }
     }
+
+    // Multi trạng thái
     if (filter.status && filter.status !== "ALL") {
-      const st = filter.status.toLowerCase();
-      plans = plans.filter((p) =>
-        String(p.status || "").toLowerCase().includes(st)
-      );
+      const wanted = filter.status
+        .split(/[;,]/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+      if (wanted.length) {
+        plans = plans.filter((p) => {
+          const st = String(p.status || "").toLowerCase();
+          return wanted.some((w) => st.includes(w));
+        });
+      }
     }
+
     if (filter.fromDate) {
       const f = filter.fromDate.slice(0, 10);
       plans = plans.filter((p) => !p.toDate || p.toDate.slice(0, 10) >= f);
@@ -155,20 +138,19 @@ export class PlanningService {
       const t = filter.toDate.slice(0, 10);
       plans = plans.filter((p) => !p.fromDate || p.fromDate.slice(0, 10) <= t);
     }
+
+    // Tìm kiếm: OR (;) / AND (+)
     if (filter.q?.trim()) {
-      const q = filter.q.trim().toLowerCase();
       plans = plans.filter((p) => {
-        const hay = [
+        const hay = buildHaystack(
           p.id,
           p.programName,
           p.supplierId,
           p.supplierName,
           ...(p.productIds || []),
-          p.note,
-        ]
-          .join(" ")
-          .toLowerCase();
-        return hay.includes(q);
+          p.note
+        );
+        return matchSearchVn(hay, filter.q || "");
       });
     }
 
@@ -179,8 +161,6 @@ export class PlanningService {
 
     const nccMap = await MasterRepository.nccNames();
     const hhMap = await MasterRepository.hhNames();
-    // Một lần đọc CT cho cả trang — tính thực hiện
-    const allDetails = await ReportRepository.getDetails(year);
 
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
@@ -188,16 +168,10 @@ export class PlanningService {
     const start = (page - 1) * pageSize;
     const slice = plans.slice(start, start + pageSize);
 
+    // V21: ThucTe / DanhSachHH từ sheet — không tự tính sản lượng
     const items: ProductionPlan[] = [];
     for (const p of slice) {
-      const productIds = normalizeProductIds(p.productIds);
-      const computed = computeActualFromDetails(
-        { ...p, productIds },
-        allDetails
-      );
-      // Ưu tiên số tính được; nếu 0 giữ ThucTe trên sheet (V21 có thể đã ghi)
-      const sheetActual = Number(p.actualQuantity) || 0;
-      const actual = computed > 0 ? computed : sheetActual;
+      const productIds = splitDanhSachHH(p.productIds);
       const productNames = productIds.map((id) =>
         MasterRepository.resolveName(hhMap, id)
       );
@@ -208,7 +182,7 @@ export class PlanningService {
           p.supplierName ||
           MasterRepository.resolveName(nccMap, p.supplierId) ||
           p.supplierId,
-        actualQuantity: actual,
+        actualQuantity: Number(p.actualQuantity) || 0,
         productNames,
       } as ProductionPlan & { productNames: string[] });
     }
@@ -231,7 +205,7 @@ export class PlanningService {
     requirePlanView(user);
     const y = year ?? currentYearVN();
     const plans = await ReportRepository.getPlans(y);
-    let p = plans.find(
+    const p = plans.find(
       (x) => String(x.id).toUpperCase() === String(id).trim().toUpperCase()
     );
     if (!p) throw { code: "NOT_FOUND", message: "Không tìm thấy kế hoạch" };
@@ -245,11 +219,7 @@ export class PlanningService {
 
     const nccMap = await MasterRepository.nccNames();
     const hhMap = await MasterRepository.hhNames();
-    const details = await ReportRepository.getDetails(y);
-    const productIds = normalizeProductIds(p.productIds);
-    const computed = computeActualFromDetails({ ...p, productIds }, details);
-    const sheetActual = Number(p.actualQuantity) || 0;
-    const actual = computed > 0 ? computed : sheetActual;
+    const productIds = splitDanhSachHH(p.productIds);
     return {
       ...p,
       productIds,
@@ -257,7 +227,7 @@ export class PlanningService {
         p.supplierName ||
         MasterRepository.resolveName(nccMap, p.supplierId) ||
         p.supplierId,
-      actualQuantity: actual,
+      actualQuantity: Number(p.actualQuantity) || 0,
       productNames: productIds.map((id) =>
         MasterRepository.resolveName(hhMap, id)
       ),
@@ -272,15 +242,15 @@ export class PlanningService {
 
     const programName = String(input.programName || "").trim();
     const supplierId = String(input.supplierId || "").trim();
-    const productIds = (input.productIds || [])
-      .map((x) => String(x).trim())
-      .filter(Boolean);
+    const productIds = splitDanhSachHH(input.productIds);
     const fromDate = ymdDate(input.fromDate) || "";
     const toDate = ymdDate(input.toDate) || "";
     const planned = Number(input.plannedQuantity) || 0;
 
-    if (!programName) throw { code: "VALIDATION_ERROR", message: "Thiếu tên chương trình" };
-    if (!supplierId) throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp" };
+    if (!programName)
+      throw { code: "VALIDATION_ERROR", message: "Thiếu tên chương trình" };
+    if (!supplierId)
+      throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp" };
     if (!productIds.length)
       throw { code: "VALIDATION_ERROR", message: "Chọn ít nhất 1 hàng hóa" };
     if (!fromDate || !toDate)
@@ -296,9 +266,10 @@ export class PlanningService {
       email: user.email,
       year: y,
     });
-    const id = codes[0]; // KH-yyMMdd-####
+    const id = codes[0];
     const now = formatDateTimeVN();
-    const status = String(input.status || "Đang thực hiện").trim() || "Đang thực hiện";
+    const status =
+      String(input.status || "Đang thực hiện").trim() || "Đang thực hiện";
 
     await appendSheetRow(
       SHEETS.KHSL,
@@ -306,7 +277,7 @@ export class PlanningService {
         ID_KeHoach: id,
         Tenchuongtrinh: programName,
         MaNCC: supplierId,
-        DanhSachHH: productIds.join(","),
+        DanhSachHH: productIds.join(";"),
         TuNgay: fromDate,
         DenNgay: toDate,
         SoLuongKeHoach: planned,
@@ -330,7 +301,16 @@ export class PlanningService {
       year: y,
     }).catch(() => null);
 
-    return { id, programName, supplierId, productIds, fromDate, toDate, plannedQuantity: planned, status };
+    return {
+      id,
+      programName,
+      supplierId,
+      productIds,
+      fromDate,
+      toDate,
+      plannedQuantity: planned,
+      status,
+    };
   }
 
   static async updatePlan(
@@ -360,7 +340,7 @@ export class PlanningService {
       patch.Tenchuongtrinh = String(input.programName).trim();
     if (input.supplierId != null) patch.MaNCC = String(input.supplierId).trim();
     if (input.productIds != null)
-      patch.DanhSachHH = input.productIds.map(String).filter(Boolean).join(",");
+      patch.DanhSachHH = splitDanhSachHH(input.productIds).join(";");
     if (input.fromDate != null) patch.TuNgay = ymdDate(input.fromDate) || "";
     if (input.toDate != null) patch.DenNgay = ymdDate(input.toDate) || "";
     if (input.plannedQuantity != null)
@@ -410,7 +390,6 @@ export class PlanningService {
     return { id, status: "Hủy" };
   }
 
-  /** HH thuộc NCC (NCC_Hanghoa) — fallback all HH nếu sheet trống */
   static async productsForSupplier(supplierId: string): Promise<
     Array<{ id: string; name: string }>
   > {
@@ -430,7 +409,10 @@ export class PlanningService {
         if (hh) ids.add(hh);
       }
       if (ids.size) {
-        return [...ids].map((id) => ({ id, name: hhMap[id] || id }));
+        return [...ids].map((id) => ({
+          id,
+          name: MasterRepository.resolveName(hhMap, id) || id,
+        }));
       }
     } catch {
       /* fallthrough */

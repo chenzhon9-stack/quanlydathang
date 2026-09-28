@@ -1,9 +1,16 @@
 /**
  * Tìm kiếm tiếng Việt không dấu — parity UX V21
- * "hoang mai" khớp "Hoàng Mai", "XM" khớp "Xi măng"
+ *
+ * Toán tử:
+ *   - "Hoặc (;)"  : các nhóm OR
+ *   - "Và (+)"    : trong mỗi nhóm AND (khoảng trắng cũng là AND)
+ *
+ * Ví dụ:
+ *   "bim son"           → bim AND son
+ *   "bim + son"         → bim AND son
+ *   "bim son; song lam" → (bim AND son) OR (song AND lam)
  */
 
-/** Bỏ dấu + chuẩn hóa đ/Đ, khoảng trắng */
 export function removeDiacritics(input: string): string {
   if (!input) return "";
   return input
@@ -15,26 +22,31 @@ export function removeDiacritics(input: string): string {
     .trim();
 }
 
-/** Fold để so khớp: lower + không dấu */
 export function foldVn(input: string): string {
   return removeDiacritics(String(input || "")).toLowerCase();
 }
 
-/**
- * Khớp query với haystack (không dấu).
- * Hỗ trợ nhiều từ cách nhau bởi khoảng trắng / ; / +
- * (AND giữa các phần).
- */
 export function matchSearchVn(haystack: string, query: string): boolean {
   const q = foldVn(query);
   if (!q) return true;
   const hay = foldVn(haystack);
-  const parts = q.split(/[\s;+]+/).filter(Boolean);
-  if (!parts.length) return true;
-  return parts.every((p) => hay.includes(p));
+
+  const orGroups = q
+    .split(";")
+    .map((g) => g.trim())
+    .filter(Boolean);
+  if (!orGroups.length) return true;
+
+  return orGroups.some((group) => {
+    const andParts = group
+      .split(/[+\s]+/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (!andParts.length) return true;
+    return andParts.every((p) => hay.includes(p));
+  });
 }
 
-/** Build haystack từ nhiều field */
 export function buildHaystack(
   ...parts: Array<string | number | null | undefined>
 ): string {

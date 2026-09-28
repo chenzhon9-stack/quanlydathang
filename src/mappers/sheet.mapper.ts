@@ -176,8 +176,9 @@ export function mapPlanRow(row: Record<string, string>): ProductionPlan {
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName"]) || undefined,
-    productIds: pick(row, ["MaHH", "DanhSachHH", "productIds"])
-      .split(/[,;|]/)
+    // V21: DanhSachHH lưu mã HH phân tách bằng ";"
+    productIds: pick(row, ["DanhSachHH", "MaHH", "productIds"])
+      .split(";")
       .map((s) => s.trim())
       .filter(Boolean),
     fromDate: normalizeSheetDate(pick(row, ["TuNgay", "FromDate", "fromDate"])),
