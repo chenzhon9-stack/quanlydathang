@@ -714,7 +714,9 @@ export class OrderService {
       seen.add(key);
     }
 
-    const { ymdDate } = await import("@/lib/sheets/date");
+    const { ymdDate, formatDateTimeVN, parseLocalDate } = await import(
+      "@/lib/sheets/date"
+    );
     const { nextCounterCodes } = await import("@/lib/sheets/counter");
     const { appendSheetRow, readSheetAsObjects } = await import(
       "@/lib/sheets/dal"
@@ -722,8 +724,37 @@ export class OrderService {
     const { qty3, validateStep } = await import("@/lib/business-rules");
     const { writeAudit } = await import("@/lib/sheets/audit");
 
+    // NgayDatHang CT = full datetime của đơn (user chọn), KHÔNG ép 00:00:00
+    let ngayDatHangCt: string | number = "";
+    try {
+      const dhRows = await readSheetAsObjects(SHEETS.DH, { year: y });
+      const dhRaw = dhRows.find(
+        (r) =>
+          String(r.MaDon || "")
+            .trim()
+            .toUpperCase() === String(orderId).trim().toUpperCase()
+      );
+      if (dhRaw && dhRaw.NgayDatHang != null && String(dhRaw.NgayDatHang).trim() !== "") {
+        ngayDatHangCt = dhRaw.NgayDatHang as string | number;
+      }
+    } catch {
+      /* fallback */
+    }
+    if (ngayDatHangCt === "" || ngayDatHangCt == null) {
+      // order.orderDate có thể chỉ yyyy-MM-dd — giữ nguyên chuỗi nếu có giờ
+      const rawOd = String(order.orderDate || "").trim();
+      if (/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}/.test(rawOd)) {
+        ngayDatHangCt = rawOd.length === 16 ? rawOd + ":00" : rawOd.slice(0, 19);
+      } else if (rawOd) {
+        // Có ngày không giờ: giữ yyyy-MM-dd (Sheet serial 00:00) — chỉ khi DH cũng không có giờ
+        ngayDatHangCt = ymdDate(rawOd) || formatDateTimeVN();
+      } else {
+        ngayDatHangCt = formatDateTimeVN();
+      }
+    }
+    // Counter key theo ngày (YYYYMMDD)
     const ngayDat =
-      ymdDate(order.orderDate) || ymdDate(new Date()) || "";
+      ymdDate(ngayDatHangCt) || ymdDate(order.orderDate) || ymdDate(new Date()) || "";
     const maNcc = order.supplierId;
     const isDuyenHa = ["dha", "btay"].includes(
       String(maNcc || "").toLowerCase()
@@ -811,7 +842,7 @@ export class OrderService {
         SHEETS.CT,
         {
           ID_Chitiet: idCt,
-          NgayDatHang: ngayDat,
+          NgayDatHang: ngayDatHangCt,
           MaDon: orderId,
           MaNCC: maNcc,
           MaXe: d.vehicleId,

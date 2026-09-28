@@ -91,6 +91,11 @@ function coerceWriteValue(
   if (typeof val === "number") return val;
   const s = String(val ?? "").trim();
   if (!s) return "";
+  // NgayDatHang: giữ full datetime (serial có giờ)
+  if (/^NgayDatHang$/i.test(field) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const serial = toSheetSerialDateTime(s);
+    return serial === "" ? s : serial;
+  }
   // Date-only business fields → Sheets serial (Date 00:00:00)
   if (isSheetDateOnlyField(field) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
     // pure date or date+time string

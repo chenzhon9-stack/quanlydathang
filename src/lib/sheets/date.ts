@@ -294,8 +294,9 @@ export function toSheetDate(
 export function isSheetDateOnlyField(field: string): boolean {
   const f = String(field || "").trim();
   if (!f) return false;
-  // Ngày nghiệp vụ điểm ngày
-  if (/^Ngay(NhanHang|giao|Giao|DatHang|CT|Chot)?$/i.test(f)) return true;
+  // Ngày nghiệp vụ điểm ngày — NgayDatHang giữ full time (user chọn), không ép 00:00
+  if (/^Ngay(NhanHang|giao|Giao|CT|Chot)$/i.test(f)) return true;
+  if (/^NgayDatHang$/i.test(f)) return false;
   if (/^(TuNgay|DenNgay|NgayTao|NgayCapNhat)$/i.test(f)) return true;
   if (/^Ngay/i.test(f) && !/time/i.test(f)) return true;
   return false;
