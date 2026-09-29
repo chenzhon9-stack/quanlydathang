@@ -26,6 +26,13 @@ const STATUS_LABEL: Record<string, string> = {
   CANCEL: "Hủy đơn",
 };
 
+/**
+ * Ma trận nút tab Đơn hàng — parity V21:
+ * - Chưa gửi (LanGui=0): Thêm · Gửi · Xóa
+ * - Đã gửi / Đang xử lý: Sửa · Hủy · Reset? · Gửi lại? · PDF?
+ * - Hoàn thành / Hủy đơn: PDF? (chỉ xem file)
+ * Nguồn quyết định chính: LanGui (sendCount) + status + canReset + resendMail + FileDonhang
+ */
 function OrderActions({
   o,
   onChanged,
@@ -36,23 +43,30 @@ function OrderActions({
   onManageOrder?: (o: Order) => void;
 }) {
   const user = readClientUser();
-  const canCreate = clientHasAny(user, [...ACTION.orderCreate]);
   const canUpdate = clientHasAny(user, [...ACTION.orderUpdate]);
   const canSend = clientHasAny(user, [...ACTION.orderSend]);
   const canCancel = clientHasAny(user, [...ACTION.orderCancel]);
-  // status có thể là enum EN hoặc chuỗi VN từ Sheet
+  // Reset: ORDER_UPDATE hoặc CANCEL (admin/purchase) — parity quyền reset V21
+  const canReset =
+    clientHasAny(user, [...ACTION.orderUpdate, ...ACTION.orderCancel]) &&
+    Boolean(o.canReset);
+
   const raw = String(o.status || "");
   const st = raw.toUpperCase();
-  const isNew =
-    st === "NEW" ||
-    st.includes("KHỞI") ||
-    st.includes("KHOI") ||
-    raw === "Khởi tạo";
-  const isProcessing =
-    st === "PROCESSING" ||
-    st.includes("XỬ LÝ") ||
-    st.includes("XU LY") ||
-    raw === "Đang xử lý";
+  const isCancel =
+    st === "CANCEL" ||
+    st.includes("HỦY") ||
+    st.includes("HUY") ||
+    raw.includes("Hủy");
+  const isDone =
+    st === "DONE" || st.includes("HOÀN") || st.includes("HOAN") || raw === "Hoàn thành";
+  const lanGui = Number(o.sendCount) || 0;
+  const neverSent = lanGui === 0;
+  const hasDetails = (Number(o.detailCount) || 0) > 0;
+  // Cho phép quản lý khi chưa kết thúc
+  const canManage = !isCancel && !isDone && canUpdate;
+  // Nhãn: chưa gửi → "Thêm"; đã gửi → "Sửa"
+  const manageLabel = neverSent ? "Thêm" : "Sửa";
 
   async function cancelOrder(label: string) {
     if (!confirm(`${label} đơn ${o.orderId}?`)) return;
@@ -61,138 +75,146 @@ function OrderActions({
       { year: new Date().getFullYear() }
     );
     if (!json.success) {
-      alert(json.error?.message || "Lỗi hủy đơn");
+      alert(json.error?.message || `Lỗi ${label.toLowerCase()} đơn`);
       return;
     }
     onChanged?.();
   }
 
-  async function toast(msg: string) {
-    // Gửi mail / Thêm xe / PDF — phase sau (Strangler 20.8 bước 5–6)
-    alert(
-      `${msg}\n(Mã đơn: ${o.orderId})\n[API write sẽ bổ sung: Gửi mail / Thêm xe / PDF]`
+  async function sendOrder(isResend: boolean) {
+    if (
+      !confirm(
+        isResend
+          ? `Gửi lại đơn ${o.orderId}?`
+          : `Gửi đơn ${o.orderId} tới NCC?`
+      )
+    )
+      return;
+    const json = await apiPost(
+      `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+      { year: new Date().getFullYear(), sendAction: isResend ? "send" : "" }
     );
+    if (!json.success) {
+      alert(json.error?.message || (isResend ? "Gửi lại thất bại" : "Gửi đơn thất bại"));
+      return;
+    }
+    const data = json.data as {
+      needConfirm?: boolean;
+      message?: string;
+    };
+    if (data?.needConfirm) {
+      const choice = window.prompt(
+        (data.message || "Đơn gửi muộn.") +
+          "\n\nNhập: send | reset | cancel | markSent",
+        "send"
+      );
+      if (!choice) return;
+      const json2 = await apiPost(
+        `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+        { year: new Date().getFullYear(), sendAction: choice.trim() }
+      );
+      if (!json2.success) {
+        alert(json2.error?.message || "Thao tác thất bại");
+        return;
+      }
+      alert((json2.data as { message?: string })?.message || "OK");
+      onChanged?.();
+      return;
+    }
+    alert(data?.message || (isResend ? "Đã gửi lại" : "Đã gửi đơn"));
+    onChanged?.();
   }
 
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
-      {(isNew || isProcessing) && canUpdate && (
-          <button
-            onClick={() => (onManageOrder ? onManageOrder(o) : toast("Quản lý đơn"))}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500"
-          >
-            {isNew ? "Thêm" : "Sửa"}
-          </button>
-      )}
-      {isNew && canSend && (
-          <button
-            onClick={async () => {
-              if (!confirm(`Gửi đơn ${o.orderId} tới NCC?`)) return;
-              const json = await apiPost(
-                `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-                { year: new Date().getFullYear(), sendAction: "" }
-              );
-              if (!json.success) {
-                alert(json.error?.message || "Gửi đơn thất bại");
-                return;
-              }
-              const data = json.data as {
-                needConfirm?: boolean;
-                message?: string;
-                isDuyenHa?: boolean;
-              };
-              if (data?.needConfirm) {
-                const choice = window.prompt(
-                  (data.message || "Đơn gửi muộn.") +
-                    "\n\nNhập: send | reset | cancel | markSent",
-                  "send"
-                );
-                if (!choice) return;
-                const json2 = await apiPost(
-                  `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-                  { year: new Date().getFullYear(), sendAction: choice.trim() }
-                );
-                if (!json2.success) {
-                  alert(json2.error?.message || "Thao tác thất bại");
-                  return;
-                }
-                alert(
-                  (json2.data as { message?: string })?.message || "OK"
-                );
-                onChanged?.();
-                return;
-              }
-              alert(data?.message || "Đã gửi đơn");
-              onChanged?.();
-            }}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500"
-          >
-            Gửi
-          </button>
-      )}
-      {isNew && canCancel && (
-          <button
-            onClick={() => cancelOrder("Xóa")}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
-          >
-            Xóa
-          </button>
-      )}
-      {isProcessing && canCancel && (
-          <button
-            onClick={() => cancelOrder("Hủy")}
-            className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
-          >
-            Hủy
-          </button>
-      )}
-      {isProcessing && (canCreate || canCancel) && o.canReset && (
-            <button
-              onClick={async () => {
-                if (
-                  !confirm(
-                    `Reset đơn ${o.orderId}?\nXe chưa nhận sẽ về mã/đơn mới; xe đã nhận giữ nguyên.`
-                  )
-                )
-                  return;
-                const json = await apiPost(
-                  `/api/v1/orders/${encodeURIComponent(o.orderId)}/reset`,
-                  { year: new Date().getFullYear() }
-                );
-                if (!json.success) {
-                  alert(json.error?.message || "Reset thất bại");
-                  return;
-                }
-                alert(
-                  (json.data as { message?: string })?.message || "Đã reset đơn"
-                );
-                onChanged?.();
-              }}
-              className="px-2.5 py-1 text-[11px] font-medium rounded bg-amber-500 text-white hover:bg-amber-400"
-            >
-              Reset đơn
-            </button>
-      )}
-      {o.resendMail && canSend && (
+      {/* Thêm / Sửa — mở OrderManageModal */}
+      {canManage && (
         <button
+          type="button"
+          onClick={() => onManageOrder?.(o)}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500"
+        >
+          {manageLabel}
+        </button>
+      )}
+
+      {/* Gửi — chỉ khi chưa gửi + còn chi tiết */}
+      {neverSent && !isCancel && !isDone && canSend && (
+        <button
+          type="button"
+          disabled={!hasDetails}
+          title={!hasDetails ? "Cần thêm ít nhất 1 xe trước khi gửi" : undefined}
+          onClick={() => sendOrder(false)}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Gửi
+        </button>
+      )}
+
+      {/* Xóa — chỉ khi chưa gửi (V21 xóa đơn khởi tạo) */}
+      {neverSent && !isCancel && !isDone && canCancel && (
+        <button
+          type="button"
+          onClick={() => cancelOrder("Xóa")}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
+        >
+          Xóa
+        </button>
+      )}
+
+      {/* Hủy — đã gửi, chưa hoàn thành */}
+      {!neverSent && !isCancel && !isDone && canCancel && (
+        <button
+          type="button"
+          onClick={() => cancelOrder("Hủy")}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
+        >
+          Hủy
+        </button>
+      )}
+
+      {/* Reset — rule ngày + còn xe chưa nhận (o.canReset từ API) */}
+      {!isCancel && canReset && (
+        <button
+          type="button"
           onClick={async () => {
-            if (!confirm(`Gửi lại đơn ${o.orderId}?`)) return;
+            if (
+              !confirm(
+                `Reset đơn ${o.orderId}?\nXe chưa nhận sẽ về mã/đơn mới; xe đã nhận giữ nguyên.`
+              )
+            )
+              return;
             const json = await apiPost(
-              `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
+              `/api/v1/orders/${encodeURIComponent(o.orderId)}/reset`,
               { year: new Date().getFullYear() }
             );
             if (!json.success) {
-              alert(json.error?.message || "Gửi lại thất bại");
+              alert(json.error?.message || "Reset thất bại");
               return;
             }
-            alert((json.data as { message?: string })?.message || "Đã gửi lại");
+            alert(
+              (json.data as { message?: string })?.message || "Đã reset đơn"
+            );
             onChanged?.();
           }}
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-amber-500 text-white hover:bg-amber-400"
+        >
+          Reset đơn
+        </button>
+      )}
+
+      {/* Gửi lại — GuiLaimail */}
+      {Boolean(o.resendMail) && canSend && !isCancel && (
+        <button
+          type="button"
+          onClick={() => sendOrder(true)}
           className="px-2.5 py-1 text-[11px] font-medium rounded bg-violet-600 text-white hover:bg-violet-500"
         >
           Gửi lại
         </button>
       )}
+
+      {/* PDF — có FileDonhang */}
       {o.orderFile && (
         <a
           href={o.orderFile}
@@ -340,7 +362,7 @@ export default function OrdersPage() {
       <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm mã đơn, NCC, trạng thái…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã đơn, NCC…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
           { key: "NEW", label: "Khởi tạo" },
@@ -532,7 +554,7 @@ export default function OrdersPage() {
       />
       <OrderManageModal
         orderId={manageOrderId}
-        year={2026}
+        year={new Date().getFullYear()}
         onClose={() => setManageOrderId(null)}
         onSaved={() => load()}
       />
