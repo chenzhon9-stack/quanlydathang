@@ -1,13 +1,33 @@
 import { isSheetDateOnlyField, toSheetSerialDate, toSheetSerialDateTime, ymdDate } from "./date";
 import { getSheetsClient, getSpreadsheetId } from "./client";
+import {
+  getSheetCache,
+  setSheetCache,
+  invalidateSheetCache,
+} from "./sheet-cache";
+
+export { invalidateSheetCache } from "./sheet-cache";
 
 /** Read a sheet range and return rows as objects keyed by header (row 1). */
 export async function readSheetAsObjects(
   sheetName: string,
-  options?: { year?: number; range?: string }
+  options?: { year?: number; range?: string; /** bỏ qua cache */ noCache?: boolean }
 ): Promise<Record<string, string>[]> {
+  const year = options?.year;
+  const useCache = !options?.range && !options?.noCache;
+
+  if (useCache) {
+    const hit = getSheetCache(sheetName, year);
+    if (hit) {
+      if (process.env.SHEET_CACHE_DEBUG === "1") {
+        console.info(`[sheet-cache] HIT ${year ?? "-"}|${sheetName} n=${hit.length}`);
+      }
+      return hit;
+    }
+  }
+
   const sheets = getSheetsClient();
-  const spreadsheetId = getSpreadsheetId(options?.year);
+  const spreadsheetId = getSpreadsheetId(year);
   const range = options?.range
     ? `${sheetName}!${options.range}`
     : sheetName;
@@ -20,13 +40,16 @@ export async function readSheetAsObjects(
   });
 
   const values = res.data.values || [];
-  if (values.length < 2) return [];
+  if (values.length < 2) {
+    if (useCache) setSheetCache(sheetName, [], year);
+    return [];
+  }
 
   const headers = (values[0] as string[]).map((h) =>
     String(h ?? "").trim()
   );
 
-  return values.slice(1).map((row) => {
+  const rows = values.slice(1).map((row) => {
     const obj: Record<string, string> = {};
     headers.forEach((h, i) => {
       if (!h) return;
@@ -37,6 +60,14 @@ export async function readSheetAsObjects(
     });
     return obj;
   });
+
+  if (useCache) {
+    setSheetCache(sheetName, rows, year);
+    if (process.env.SHEET_CACHE_DEBUG === "1") {
+      console.info(`[sheet-cache] MISS ${year ?? "-"}|${sheetName} n=${rows.length}`);
+    }
+  }
+  return rows;
 }
 
 /** Batch read multiple sheets in one API call. */
@@ -171,6 +202,7 @@ export async function updateSheetRowByKey(
     valueInputOption: "USER_ENTERED",
     requestBody: { values: [row] },
   });
+  invalidateSheetCache(sheetName, year);
   return a1Row;
 }
 
@@ -202,4 +234,5 @@ export async function appendSheetRow(
     insertDataOption: "INSERT_ROWS",
     requestBody: { values: [row] },
   });
+  invalidateSheetCache(sheetName, year);
 }
