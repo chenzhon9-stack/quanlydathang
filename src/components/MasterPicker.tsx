@@ -87,6 +87,20 @@ export function MasterPicker({
   const [label, setLabel] = useState(displayName || value || "");
   const [loadedKey, setLoadedKey] = useState("");
   const [mounted, setMounted] = useState(false);
+  /** Form thêm nhanh ĐVT / Xe */
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickBusy, setQuickBusy] = useState(false);
+  const [quickErr, setQuickErr] = useState<string | null>(null);
+  // DVT fields
+  const [qaTenDvt, setQaTenDvt] = useState("");
+  const [qaPhone, setQaPhone] = useState("");
+  // XE fields
+  const [qaBienSo, setQaBienSo] = useState("");
+  const [qaMooc, setQaMooc] = useState("");
+  const [qaLaiXe, setQaLaiXe] = useState("");
+  const [qaBangLai, setQaBangLai] = useState("");
+
+  const canQuick = type === "DVT" || type === "XE";
 
   useEffect(() => {
     setMounted(true);
@@ -208,12 +222,119 @@ export function MasterPicker({
   function close() {
     setOpen(false);
     setQ("");
+    setQuickOpen(false);
+    setQuickErr(null);
   }
 
   async function openPicker() {
     if (disabled) return;
     setOpen(true);
+    setQuickOpen(false);
+    setQuickErr(null);
     await load();
+  }
+
+  function resetQuickForm() {
+    setQaTenDvt("");
+    setQaPhone("");
+    setQaBienSo("");
+    setQaMooc("");
+    setQaLaiXe("");
+    setQaBangLai("");
+    setQuickErr(null);
+  }
+
+  async function submitQuickAdd() {
+    setQuickErr(null);
+    setQuickBusy(true);
+    try {
+      const token = localStorage.getItem("token");
+      let body: Record<string, unknown> = { type };
+      if (type === "DVT") {
+        if (!qaTenDvt.trim()) {
+          setQuickErr("Vui lòng nhập tên đơn vị vận tải.");
+          return;
+        }
+        body = {
+          type: "DVT",
+          tenDVT: qaTenDvt.trim(),
+          dienThoai: qaPhone.trim(),
+        };
+      } else if (type === "XE") {
+        if (!qaBienSo.trim()) {
+          setQuickErr("Vui lòng nhập biển số xe.");
+          return;
+        }
+        if (!htvtId) {
+          setQuickErr("Chọn hình thức vận tải trước khi thêm xe.");
+          return;
+        }
+        const isThue =
+          String(htvtId).toUpperCase().includes("THUE") ||
+          String(htvtId).toUpperCase() === "THUE_NGOAI";
+        if (isThue && !dvtId) {
+          setQuickErr("Xe thuê ngoài — chọn đơn vị vận tải trước.");
+          return;
+        }
+        body = {
+          type: "XE",
+          bienSo: qaBienSo.trim(),
+          maHTVT: htvtId,
+          maDVT: dvtId || "",
+          soMooc: qaMooc.trim(),
+          tenLaiXe: qaLaiXe.trim(),
+          bangLai: qaBangLai.trim(),
+        };
+      } else {
+        return;
+      }
+
+      const res = await fetch("/api/v1/masters/quick", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        // Trùng → có thể chọn item đã có
+        if (json.error?.code === "DUPLICATE" && json.error?.item) {
+          const it = json.error.item as {
+            id: string;
+            name: string;
+            raw?: Record<string, string>;
+          };
+          if (confirm((json.error.message || "Trùng") + "\nChọn bản ghi đã có?")) {
+            onChange(it.id, it.name, it.raw);
+            setLabel(it.name);
+            close();
+          } else {
+            setQuickErr(json.error.message || "Trùng");
+          }
+          return;
+        }
+        setQuickErr(json.error?.message || "Không thêm được");
+        return;
+      }
+      const data = json.data as {
+        id: string;
+        name: string;
+        raw?: Record<string, string>;
+      };
+      // Invalidate cache list + chọn item mới
+      setLoadedKey("");
+      setItems([]);
+      onChange(data.id, data.name, data.raw);
+      setLabel(data.name);
+      resetQuickForm();
+      close();
+    } catch (e: unknown) {
+      setQuickErr((e as Error).message || "Lỗi mạng");
+    } finally {
+      setQuickBusy(false);
+    }
   }
 
   const modal =
@@ -316,8 +437,105 @@ export function MasterPicker({
             )}
           </div>
 
+          {/* Quick-add form */}
+          {canQuick && quickOpen && (
+            <div className="px-3 pb-2 border-t border-slate-100 space-y-2 shrink-0 bg-slate-50">
+              <div className="text-[12px] font-bold text-slate-700 pt-2">
+                {type === "DVT" ? "Thêm nhanh đơn vị vận tải" : "Thêm nhanh xe"}
+              </div>
+              {type === "DVT" ? (
+                <>
+                  <input
+                    value={qaTenDvt}
+                    onChange={(e) => setQaTenDvt(e.target.value)}
+                    placeholder="Tên đơn vị vận tải *"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  />
+                  <input
+                    value={qaPhone}
+                    onChange={(e) => setQaPhone(e.target.value)}
+                    placeholder="Điện thoại"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  />
+                </>
+              ) : (
+                <>
+                  {!htvtId && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                      Chọn <b>Hình thức VT</b> trước (và ĐVT nếu thuê ngoài).
+                    </p>
+                  )}
+                  <input
+                    value={qaBienSo}
+                    onChange={(e) => setQaBienSo(e.target.value)}
+                    placeholder="Biển số xe *"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg uppercase"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      value={qaMooc}
+                      onChange={(e) => setQaMooc(e.target.value)}
+                      placeholder="Số mooc"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                    />
+                    <input
+                      value={qaBangLai}
+                      onChange={(e) => setQaBangLai(e.target.value)}
+                      placeholder="Bằng lái"
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <input
+                    value={qaLaiXe}
+                    onChange={(e) => setQaLaiXe(e.target.value)}
+                    placeholder="Tên lái xe"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                  />
+                </>
+              )}
+              {quickErr && (
+                <p className="text-[11px] text-red-600 font-medium">{quickErr}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={quickBusy}
+                  onClick={() => {
+                    setQuickOpen(false);
+                    resetQuickForm();
+                  }}
+                  className="flex-1 py-2 text-sm rounded-lg border border-slate-300 text-slate-600"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  disabled={quickBusy}
+                  onClick={() => void submitQuickAdd()}
+                  className="flex-1 py-2 text-sm rounded-lg bg-sky-500 text-white font-semibold disabled:opacity-50"
+                >
+                  {quickBusy ? "Đang lưu…" : "Lưu & chọn"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Footer */}
-          <div className="p-3 border-t border-slate-100 shrink-0 safe-area-pb">
+          <div className="p-3 border-t border-slate-100 shrink-0 safe-area-pb space-y-2">
+            {canQuick && !quickOpen && (
+              <button
+                type="button"
+                onClick={() => {
+                  resetQuickForm();
+                  setQuickOpen(true);
+                }}
+                className="w-full py-2.5 text-sm font-semibold rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100"
+              >
+                {type === "DVT"
+                  ? "+ Thêm nhanh đơn vị vận tải"
+                  : "+ Thêm nhanh biển số xe"}
+              </button>
+            )}
             <button
               type="button"
               onClick={close}
