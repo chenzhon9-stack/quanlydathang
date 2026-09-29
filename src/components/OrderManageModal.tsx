@@ -13,9 +13,22 @@ type GhRow = {
   customerId: string;
   customerName: string;
   customerDetail: string;
+  /** V21: chỉ hiện ô Chi tiết KH khi DM_KhachHang.YeuCauChitiet = true */
+  requireCustomerDetail: boolean;
   plannedQty: string;
   actualQty: number;
 };
+
+function parseYeuCauChitiet(raw?: Record<string, string>): boolean {
+  if (!raw) return false;
+  const v =
+    raw.YeuCauChitiet ??
+    raw.YeuCauChiTiet ??
+    raw.yeuCauChitiet ??
+    "";
+  const s = String(v).trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes" || s === "có" || s === "co";
+}
 
 type Block = {
   key: string;
@@ -51,6 +64,7 @@ function emptyGh(): GhRow {
     customerId: "",
     customerName: "",
     customerDetail: "",
+    requireCustomerDetail: false,
     plannedQty: "",
     actualQty: 0,
   };
@@ -170,6 +184,10 @@ export function OrderManageModal({
                     customerId: g.customerId || "",
                     customerName: g.customerName || g.customerId || "",
                     customerDetail: g.customerDetail || "",
+                    // Load: hiện ô nếu đã có ChitietKh; khi chọn lại KH sẽ lấy YeuCauChitiet
+                    requireCustomerDetail: Boolean(
+                      String(g.customerDetail || "").trim()
+                    ),
                     plannedQty: formatDecimalVN(g.plannedQty ?? ""),
                     actualQty: Number(g.actualQty) || 0,
                   }))
@@ -506,6 +524,7 @@ export function OrderManageModal({
                                   customerId: g.customerId,
                                   customerName: g.customerName,
                                   customerDetail: g.customerDetail,
+                                  requireCustomerDetail: g.requireCustomerDetail,
                                   plannedQty: g.plannedQty,
                                   actualQty: 0,
                                 })),
@@ -536,7 +555,14 @@ export function OrderManageModal({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {/* Layout parity tạo đơn V21:
+                      HTVT | ĐVT · Xe full · HH | KV · Ghi chú full
+                   */}
+                  <div
+                    className={`grid grid-cols-1 gap-2 ${
+                      needCarrier ? "sm:grid-cols-2" : ""
+                    }`}
+                  >
                     <div>
                       <div className="text-[10px] text-slate-500 mb-0.5">
                         Hình thức VT
@@ -574,7 +600,7 @@ export function OrderManageModal({
                     {needCarrier && (
                       <div>
                         <div className="text-[10px] text-slate-500 mb-0.5">
-                          Đơn vị vận tải
+                          Đơn vị VT
                         </div>
                         <MasterPicker
                           type="DVT"
@@ -601,31 +627,32 @@ export function OrderManageModal({
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <div className="text-[10px] text-slate-500 mb-0.5">
-                        Biển số xe
-                      </div>
-                      <MasterPicker
-                        type="XE"
-                        value={b.vehicleId}
-                        displayName={b.vehicleName}
-                        disabled={!editable || lockedRecv || xeDisabled}
-                        htvtId={b.transportTypeId || undefined}
-                        dvtId={
-                          needCarrier ? b.carrierId || undefined : undefined
-                        }
-                        onChange={(id, name) =>
-                          setBlocks((rows) =>
-                            rows.map((x, i) =>
-                              i === bi
-                                ? { ...x, vehicleId: id, vehicleName: name }
-                                : x
-                            )
-                          )
-                        }
-                      />
+                  <div>
+                    <div className="text-[10px] text-slate-500 mb-0.5">
+                      Biển số xe
                     </div>
+                    <MasterPicker
+                      type="XE"
+                      value={b.vehicleId}
+                      displayName={b.vehicleName}
+                      disabled={!editable || lockedRecv || xeDisabled}
+                      htvtId={b.transportTypeId || undefined}
+                      dvtId={
+                        needCarrier ? b.carrierId || undefined : undefined
+                      }
+                      onChange={(id, name) =>
+                        setBlocks((rows) =>
+                          rows.map((x, i) =>
+                            i === bi
+                              ? { ...x, vehicleId: id, vehicleName: name }
+                              : x
+                          )
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <div className="text-[10px] text-slate-500 mb-0.5">
                         Hàng hóa
@@ -647,9 +674,6 @@ export function OrderManageModal({
                         }
                       />
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
                     <div>
                       <div className="text-[10px] text-slate-500 mb-0.5">
                         Khu vực/Công trình
@@ -670,30 +694,34 @@ export function OrderManageModal({
                         }
                       />
                     </div>
-                    <div className="text-right text-[11px] text-slate-600 pb-1">
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                    <div className="flex-1">
+                      <div className="text-[10px] text-slate-500 mb-0.5">
+                        Ghi chú
+                      </div>
+                      <input
+                        value={b.note}
+                        disabled={!editable || lockedRecv}
+                        onChange={(e) =>
+                          setBlocks((rows) =>
+                            rows.map((x, i) =>
+                              i === bi ? { ...x, note: e.target.value } : x
+                            )
+                          )
+                        }
+                        className="w-full px-3 py-2 rounded-lg border text-sm disabled:bg-slate-100"
+                      />
+                    </div>
+                    <div className="text-right text-[11px] text-slate-600 pb-1 shrink-0">
                       Tổng KH: <b>{khSum.toFixed(2)}</b>
-                      <br />
+                      <span className="mx-1">·</span>
                       {b.isNew ? "Mới tạo" : b.status}
                     </div>
                   </div>
 
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-0.5">Ghi chú</div>
-                    <input
-                      value={b.note}
-                      disabled={!editable || lockedRecv}
-                      onChange={(e) =>
-                        setBlocks((rows) =>
-                          rows.map((x, i) =>
-                            i === bi ? { ...x, note: e.target.value } : x
-                          )
-                        )
-                      }
-                      className="w-full px-3 py-2 rounded-lg border text-sm disabled:bg-slate-100"
-                    />
-                  </div>
-
-                  {/* GH table */}
+                  {/* GH table — Chi tiết KH chỉ khi YeuCauChitiet=true */}
                   <div className="overflow-x-auto border rounded-lg">
                     <table className="w-full text-[12px]">
                       <thead className="bg-slate-200 text-slate-700">
@@ -714,7 +742,8 @@ export function OrderManageModal({
                                 value={g.customerId}
                                 displayName={g.customerName}
                                 disabled={!editable || lockedRecv}
-                                onChange={(id, name) =>
+                                onChange={(id, name, raw) => {
+                                  const needDetail = parseYeuCauChitiet(raw);
                                   setBlocks((rows) =>
                                     rows.map((x, i) =>
                                       i === bi
@@ -727,44 +756,59 @@ export function OrderManageModal({
                                                       ...dd,
                                                       customerId: id,
                                                       customerName: name,
+                                                      requireCustomerDetail:
+                                                        needDetail,
+                                                      // Đổi KH → xóa chi tiết cũ nếu KH mới không yêu cầu
+                                                      customerDetail: needDetail
+                                                        ? dd.customerDetail
+                                                        : "",
                                                     }
                                                   : dd
                                             ),
                                           }
                                         : x
                                     )
-                                  )
-                                }
+                                  );
+                                }}
                               />
                             </td>
                             <td className="px-1 py-1">
-                              <input
-                                value={g.customerDetail}
-                                disabled={!editable || lockedRecv}
-                                onChange={(e) =>
-                                  setBlocks((rows) =>
-                                    rows.map((x, i) =>
-                                      i === bi
-                                        ? {
-                                            ...x,
-                                            deliveries: x.deliveries.map(
-                                              (dd, j) =>
-                                                j === gi
-                                                  ? {
-                                                      ...dd,
-                                                      customerDetail:
-                                                        e.target.value,
-                                                    }
-                                                  : dd
-                                            ),
-                                          }
-                                        : x
+                              {g.requireCustomerDetail ? (
+                                <input
+                                  value={g.customerDetail}
+                                  disabled={!editable || lockedRecv}
+                                  onChange={(e) =>
+                                    setBlocks((rows) =>
+                                      rows.map((x, i) =>
+                                        i === bi
+                                          ? {
+                                              ...x,
+                                              deliveries: x.deliveries.map(
+                                                (dd, j) =>
+                                                  j === gi
+                                                    ? {
+                                                        ...dd,
+                                                        customerDetail:
+                                                          e.target.value,
+                                                      }
+                                                    : dd
+                                              ),
+                                            }
+                                          : x
+                                      )
                                     )
-                                  )
-                                }
-                                className="w-full px-2 py-1.5 border rounded text-sm disabled:bg-slate-100"
-                                placeholder="Chi tiết khách"
-                              />
+                                  }
+                                  className="w-full px-2 py-1.5 border rounded text-sm disabled:bg-slate-100"
+                                  placeholder="Chi tiết khách *"
+                                />
+                              ) : (
+                                <span
+                                  className="block px-2 py-1.5 text-[11px] text-slate-400 bg-slate-100 rounded border border-slate-200"
+                                  title="Khách không yêu cầu chi tiết (YeuCauChitiet=false)"
+                                >
+                                  Không áp dụng
+                                </span>
+                              )}
                             </td>
                             <td className="px-1 py-1">
                               <DecimalInput
