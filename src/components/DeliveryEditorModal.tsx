@@ -266,8 +266,8 @@ export function DeliveryEditorModal({
   }
 
   async function submitReal() {
+    // Validate chia hết client-side trước
     for (const r of rows) {
-      if (!r.deliveryId || r.deliveryId.startsWith("NEW-")) continue;
       const qty = Number(r.actualQty) || 0;
       if (qty > 0) {
         const msg = stepErrorMsg(
@@ -283,33 +283,48 @@ export function DeliveryEditorModal({
     }
     setBusy(true);
     try {
-      for (const r of rows) {
-        if (!r.deliveryId || r.deliveryId.startsWith("NEW-")) continue;
-        const body: Record<string, unknown> = {
+      const token = localStorage.getItem("token");
+      const body: Record<string, unknown> = {
+        year: new Date().getFullYear(),
+        rows: rows.map((r) => ({
+          deliveryId: r.deliveryId?.startsWith("NEW-")
+            ? undefined
+            : r.deliveryId,
+          customerId: r.customerId,
+          customerDetail: r.customerDetail || "",
+          plannedQty: Number(r.plannedQty) || 0,
           actualQty: Number(r.actualQty) || 0,
           deliveryDate: r.deliveryDate,
-          customerId: r.customerId,
-          customerDetail: r.customerDetail || "", // ChitietKh = chi tiết mở rộng MaKh, không phải tên
-          year: new Date().getFullYear(),
-        };
-        let json = await apiPatch(
-          `/api/v1/deliveries/${encodeURIComponent(r.deliveryId)}`,
-          body
+          note: r.note,
+        })),
+      };
+      const call = async (payload: Record<string, unknown>) => {
+        const res = await fetch(
+          `/api/v1/order-details/${encodeURIComponent(summary.detailId)}/real`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(payload),
+          }
         );
-        const err = json.error as
-          | { code?: string; message?: string }
-          | undefined;
-        if (!json.success && err?.code === "NEED_CONFIRM") {
-          if (!confirm(err.message || "Cần xác nhận")) return;
-          body.confirm = true;
-          json = await apiPatch(
-            `/api/v1/deliveries/${encodeURIComponent(r.deliveryId)}`,
-            body
-          );
-        }
-        if (!json.success) {
-          throw new Error(err?.message || json.error?.message || "Lỗi lưu giao");
-        }
+        return res.json();
+      };
+      let json = await call(body);
+      const err = json.error as
+        | { code?: string; message?: string }
+        | undefined;
+      // V21: TG < TN / vượt ngưỡng → hỏi xác nhận
+      if (!json.success && err?.code === "NEED_CONFIRM") {
+        if (!confirm(err.message || "Cần xác nhận")) return;
+        body.confirmFinish = true;
+        body.confirm = true;
+        json = await call(body);
+      }
+      if (!json.success) {
+        throw new Error(err?.message || json.error?.message || "Lỗi lưu giao");
       }
       onSaved?.();
       onClose();
