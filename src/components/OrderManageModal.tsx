@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
+import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
 type GhRow = {
@@ -44,6 +45,8 @@ type Block = {
   vehicleName: string;
   productId: string;
   productName: string;
+  /** TyleChiahet từ DM_HangHoa */
+  tyleChiahet: number;
   regionId: string;
   regionName: string;
   note: string;
@@ -85,6 +88,7 @@ function emptyBlock(): Block {
     vehicleName: "",
     productId: "",
     productName: "",
+    tyleChiahet: 0,
     regionId: "",
     regionName: "",
     note: "",
@@ -171,6 +175,7 @@ export function OrderManageModal({
             vehicleName: d.vehiclePlate || d.vehicleId || "",
             productId: d.productId || "",
             productName: d.productName || d.productId || "",
+            tyleChiahet: 0, // bổ sung khi chọn lại HH; BE vẫn validate
             regionId: d.regionId || "",
             regionName: d.regionName || d.regionId || "",
             note: d.note || "",
@@ -265,6 +270,17 @@ export function OrderManageModal({
       for (const g of b.deliveries) {
         if (!g.customerId || parseDecimalVN(g.plannedQty) <= 0) {
           setErr("Mỗi dòng KH cần khách và SL đặt > 0");
+          return;
+        }
+        const qty = parseDecimalVN(g.plannedQty);
+        const stepMsg = stepErrorMsg(
+          b.productName || b.productId,
+          qty,
+          b.tyleChiahet
+        );
+        if (stepMsg) {
+          setErr(stepMsg);
+          alert(stepMsg);
           return;
         }
       }
@@ -513,6 +529,7 @@ export function OrderManageModal({
                                 vehicleName: src.vehicleName,
                                 productId: src.productId,
                                 productName: src.productName,
+                                tyleChiahet: src.tyleChiahet,
                                 regionId: src.regionId,
                                 regionName: src.regionName,
                                 note: src.note,
@@ -663,11 +680,16 @@ export function OrderManageModal({
                         displayName={b.productName}
                         supplierId={order?.supplierId}
                         disabled={!editable || lockedRecv}
-                        onChange={(id, name) =>
+                        onChange={(id, name, raw) =>
                           setBlocks((rows) =>
                             rows.map((x, i) =>
                               i === bi
-                                ? { ...x, productId: id, productName: name }
+                                ? {
+                                    ...x,
+                                    productId: id,
+                                    productName: name,
+                                    tyleChiahet: parseTyleChiahet(raw),
+                                  }
                                 : x
                             )
                           )

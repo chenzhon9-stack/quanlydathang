@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
+import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
 
 /** datetime-local value from Date (local) */
 function toDatetimeLocalValue(d = new Date()): string {
@@ -37,6 +38,8 @@ type DetailRow = {
   vehicleName: string;
   productId: string;
   productName: string;
+  /** TyleChiahet từ DM_HangHoa — validate KH giao / nhận */
+  tyleChiahet: number;
   regionId: string;
   regionName: string;
   note: string;
@@ -64,6 +67,7 @@ function emptyDetail(): DetailRow {
     vehicleName: "",
     productId: "",
     productName: "",
+    tyleChiahet: 0,
     regionId: "",
     regionName: "",
     note: "",
@@ -137,6 +141,16 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
       for (const g of d.deliveries) {
         if (!g.customerId || parseDecimalVN(g.plannedQty) <= 0) {
           setErr("Mỗi dòng KH giao cần khách hàng và SL > 0");
+          return;
+        }
+        const qty = parseDecimalVN(g.plannedQty);
+        const stepMsg = stepErrorMsg(
+          d.productName || d.productId,
+          qty,
+          d.tyleChiahet
+        );
+        if (stepMsg) {
+          setErr(stepMsg);
           return;
         }
       }
@@ -292,6 +306,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                             vehicleName: src.vehicleName,
                             productId: src.productId,
                             productName: src.productName,
+                            tyleChiahet: src.tyleChiahet,
                             regionId: src.regionId,
                             regionName: src.regionName,
                             note: src.note,
@@ -452,15 +467,20 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                         supplierId ? "Chọn hàng theo NCC…" : "Chọn NCC trước…"
                       }
                       disabled={!supplierId}
-                      onChange={(id, name) =>
+                      onChange={(id, name, raw) => {
                         setDetails((rows) =>
                           rows.map((x, i) =>
                             i === di
-                              ? { ...x, productId: id, productName: name }
+                              ? {
+                                  ...x,
+                                  productId: id,
+                                  productName: name,
+                                  tyleChiahet: parseTyleChiahet(raw),
+                                }
                               : x
                           )
-                        )
-                      }
+                        );
+                      }}
                     />
                   </div>
                   <div>
@@ -503,80 +523,102 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                 <div className="text-[10px] font-semibold text-slate-500 uppercase">
                   Kế hoạch giao
                 </div>
-                {d.deliveries.map((g, gi) => (
-                  <div
-                    key={g.key}
-                    className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_auto] gap-2 items-start"
-                  >
-                    <MasterPicker
-                      type="KH"
-                      value={g.customerId}
-                      displayName={g.customerName}
-                      onChange={(id, name) =>
-                        setDetails((rows) =>
-                          rows.map((x, i) =>
-                            i === di
-                              ? {
-                                  ...x,
-                                  deliveries: x.deliveries.map((dd, j) =>
-                                    j === gi
-                                      ? {
-                                          ...dd,
-                                          customerId: id,
-                                          customerName: name,
-                                        }
-                                      : dd
-                                  ),
-                                }
-                              : x
-                          )
+                {d.deliveries.map((g, gi) => {
+                  const qtyNum = parseDecimalVN(g.plannedQty);
+                  const stepMsg =
+                    g.plannedQty.trim() !== "" && qtyNum > 0
+                      ? stepErrorMsg(
+                          d.productName || d.productId,
+                          qtyNum,
+                          d.tyleChiahet
                         )
-                      }
-                    />
-                    <DecimalInput
-                      value={g.plannedQty}
-                      placeholder="KH giao"
-                      onValueChange={(display) =>
-                        setDetails((rows) =>
-                          rows.map((x, i) =>
-                            i === di
-                              ? {
-                                  ...x,
-                                  deliveries: x.deliveries.map((dd, j) =>
-                                    j === gi
-                                      ? { ...dd, plannedQty: display }
-                                      : dd
-                                  ),
-                                }
-                              : x
+                      : null;
+                  return (
+                  <div key={g.key} className="space-y-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_auto] gap-2 items-start">
+                      <MasterPicker
+                        type="KH"
+                        value={g.customerId}
+                        displayName={g.customerName}
+                        onChange={(id, name) =>
+                          setDetails((rows) =>
+                            rows.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    deliveries: x.deliveries.map((dd, j) =>
+                                      j === gi
+                                        ? {
+                                            ...dd,
+                                            customerId: id,
+                                            customerName: name,
+                                          }
+                                        : dd
+                                    ),
+                                  }
+                                : x
+                            )
                           )
-                        )
-                      }
-                    />
-                    <button
-                      type="button"
-                      title="Xóa dòng KH"
-                      disabled={d.deliveries.length <= 1}
-                      onClick={() =>
-                        setDetails((rows) =>
-                          rows.map((x, i) =>
-                            i === di
-                              ? {
-                                  ...x,
-                                  deliveries: x.deliveries.filter(
-                                    (_, j) => j !== gi
-                                  ),
-                                }
-                              : x
+                        }
+                      />
+                      <div>
+                        <DecimalInput
+                          value={g.plannedQty}
+                          placeholder="KH giao"
+                          className={
+                            stepMsg
+                              ? "border-red-400 bg-red-50 focus:ring-red-300"
+                              : undefined
+                          }
+                          onValueChange={(display) =>
+                            setDetails((rows) =>
+                              rows.map((x, i) =>
+                                i === di
+                                  ? {
+                                      ...x,
+                                      deliveries: x.deliveries.map((dd, j) =>
+                                        j === gi
+                                          ? { ...dd, plannedQty: display }
+                                          : dd
+                                      ),
+                                    }
+                                  : x
+                              )
+                            )
+                          }
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        title="Xóa dòng KH"
+                        disabled={d.deliveries.length <= 1}
+                        onClick={() =>
+                          setDetails((rows) =>
+                            rows.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    deliveries: x.deliveries.filter(
+                                      (_, j) => j !== gi
+                                    ),
+                                  }
+                                : x
+                            )
                           )
-                        )
-                      }
-                      className="w-8 h-8 rounded-lg bg-red-500 text-white font-bold disabled:opacity-30"
-                    >
-                      −
-                    </button>
+                        }
+                        className="w-8 h-8 rounded-lg bg-red-500 text-white font-bold disabled:opacity-30"
+                      >
+                        −
+                      </button>
+                    </div>
+                    {stepMsg && (
+                      <p className="text-[11px] text-red-600 font-medium leading-snug sm:pl-0">
+                        {stepMsg}
+                      </p>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
                 <button
                   type="button"
                   className="text-xs font-semibold text-sky-600"

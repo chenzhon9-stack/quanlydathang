@@ -15,7 +15,12 @@ import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
-import { receiveDateBounds, clampYmd } from "@/lib/business-rules";
+import {
+  receiveDateBounds,
+  clampYmd,
+  stepErrorMsg,
+  parseTyleChiahet,
+} from "@/lib/business-rules";
 import {
   DeliveryEditorModal,
   summaryFromDetail,
@@ -400,6 +405,8 @@ export default function DetailsPage() {
   // receive form
   const [recvQty, setRecvQty] = useState("");
   const [recvDate, setRecvDate] = useState("");
+  const [recvStep, setRecvStep] = useState(0);
+  const [recvStepErr, setRecvStepErr] = useState<string | null>(null);
 
   const load = useCallback(async (p: number) => {
     const token = localStorage.getItem("token");
@@ -473,6 +480,8 @@ export default function DetailsPage() {
   const handlers: Handlers = {
     onReceive: (d) => {
       setReceiveTarget(d);
+      setRecvStepErr(null);
+      setRecvStep(0);
       {
         const bounds = receiveDateBounds({
           orderDate: d.orderDate,
@@ -485,8 +494,35 @@ export default function DetailsPage() {
         );
         setRecvDate(def);
       }
-      setRecvQty(String(d.quantity || ""));
-      setRecvDate(new Date().toISOString().slice(0, 10));
+      setRecvQty(
+        d.quantity != null
+          ? formatDecimalVN(d.quantity)
+          : ""
+      );
+      // Load TyleChiahet từ master HH
+      void (async () => {
+        try {
+          const token = localStorage.getItem("token");
+          const res = await fetch("/api/v1/masters?types=HH", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = await res.json();
+          const list: Record<string, string>[] =
+            json.data?.HH || json.data?.hh || [];
+          const row = list.find(
+            (r) =>
+              String(r.MaHH || r.MaHh || "")
+                .trim()
+                .toUpperCase() ===
+              String(d.productId || "")
+                .trim()
+                .toUpperCase()
+          );
+          if (row) setRecvStep(parseTyleChiahet(row));
+        } catch {
+          /* ignore */
+        }
+      })();
     },
     onEdit: (d) => {
       setEditTarget(d);
@@ -700,12 +736,27 @@ export default function DetailsPage() {
 
   async function submitReceive() {
     if (!receiveTarget) return;
+    const qty = parseDecimalVN(recvQty);
+    if (!(qty > 0)) {
+      alert("Thực nhận phải > 0");
+      return;
+    }
+    const msg = stepErrorMsg(
+      receiveTarget.productName || receiveTarget.productId || "",
+      qty,
+      recvStep
+    );
+    if (msg) {
+      setRecvStepErr(msg);
+      alert(msg);
+      return;
+    }
     setBusy(true);
     try {
       const json = await apiPost(
         `/api/v1/order-details/${encodeURIComponent(receiveTarget.detailId)}/receive`,
         {
-          actualReceived: parseDecimalVN(recvQty),
+          actualReceived: qty,
           receivedDate: recvDate,
           year: new Date().getFullYear(),
         }
@@ -1366,12 +1417,42 @@ export default function DetailsPage() {
               />
             );
           })()}
-          <InputField
-            label="Số lượng thực nhận"
-            type="number"
-            value={recvQty}
-            onChange={setRecvQty}
-          />
+          <div>
+            <div className="text-[12px] font-bold text-slate-600 mb-1">
+              Số lượng thực nhận
+            </div>
+            <DecimalInput
+              value={recvQty}
+              placeholder="Thực nhận"
+              className={
+                recvStepErr
+                  ? "border-red-400 bg-red-50 focus:ring-red-300"
+                  : undefined
+              }
+              onValueChange={(display) => {
+                setRecvQty(display);
+                const q = parseDecimalVN(display);
+                if (display.trim() && q > 0) {
+                  setRecvStepErr(
+                    stepErrorMsg(
+                      receiveTarget.productName ||
+                        receiveTarget.productId ||
+                        "",
+                      q,
+                      recvStep
+                    )
+                  );
+                } else {
+                  setRecvStepErr(null);
+                }
+              }}
+            />
+            {recvStepErr && (
+              <p className="text-[11px] text-red-600 font-medium mt-1 leading-snug">
+                {recvStepErr}
+              </p>
+            )}
+          </div>
         </ModalShell>
       )}
 

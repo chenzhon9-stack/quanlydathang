@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
+import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
 import type { Order } from "@/types";
 
 type DeliveryRow = {
@@ -24,6 +25,7 @@ type DetailRow = {
   vehicleName: string;
   productId: string;
   productName: string;
+  tyleChiahet: number;
   regionId: string;
   regionName: string;
   note: string;
@@ -51,6 +53,7 @@ function emptyDetail(): DetailRow {
     vehicleName: "",
     productId: "",
     productName: "",
+    tyleChiahet: 0,
     regionId: "",
     regionName: "",
     note: "",
@@ -92,6 +95,21 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
       if (!d.vehicleId || !d.productId || !d.regionId) {
         setErr("Thiếu xe / hàng / khu vực");
         return;
+      }
+      for (const g of d.deliveries) {
+        if (!g.customerId || parseDecimalVN(g.plannedQty) <= 0) {
+          setErr("Mỗi dòng KH cần khách và SL > 0");
+          return;
+        }
+        const stepMsg = stepErrorMsg(
+          d.productName || d.productId,
+          parseDecimalVN(g.plannedQty),
+          d.tyleChiahet
+        );
+        if (stepMsg) {
+          setErr(stepMsg);
+          return;
+        }
       }
     }
     setBusy(true);
@@ -249,11 +267,16 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                     value={d.productId}
                     displayName={d.productName}
                     supplierId={order.supplierId}
-                    onChange={(id, name) =>
+                    onChange={(id, name, raw) =>
                       setDetails((rows) =>
                         rows.map((x, i) =>
                           i === di
-                            ? { ...x, productId: id, productName: name }
+                            ? {
+                                ...x,
+                                productId: id,
+                                productName: name,
+                                tyleChiahet: parseTyleChiahet(raw),
+                              }
                             : x
                         )
                       )
@@ -274,9 +297,19 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                     }
                   />
                 </div>
-                {d.deliveries.map((g, gi) => (
+                {d.deliveries.map((g, gi) => {
+                  const qtyNum = parseDecimalVN(g.plannedQty);
+                  const stepMsg =
+                    g.plannedQty.trim() !== "" && qtyNum > 0
+                      ? stepErrorMsg(
+                          d.productName || d.productId,
+                          qtyNum,
+                          d.tyleChiahet
+                        )
+                      : null;
+                  return (
+                  <div key={g.key} className="space-y-1">
                   <div
-                    key={g.key}
                     className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_auto] gap-2"
                   >
                     <MasterPicker
@@ -346,7 +379,14 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                       −
                     </button>
                   </div>
-                ))}
+                  {stepMsg && (
+                    <p className="text-[11px] text-red-600 font-medium leading-snug">
+                      {stepMsg}
+                    </p>
+                  )}
+                  </div>
+                  );
+                })}
                 <button
                   type="button"
                   className="text-xs font-semibold text-sky-600"

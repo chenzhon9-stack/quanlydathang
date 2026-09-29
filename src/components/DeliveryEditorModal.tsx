@@ -3,7 +3,12 @@
 import React, { useEffect, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
-import { deliveryDateBounds, clampYmd } from "@/lib/business-rules";
+import {
+  deliveryDateBounds,
+  clampYmd,
+  stepErrorMsg,
+  parseTyleChiahet,
+} from "@/lib/business-rules";
 import { apiPatch } from "@/components/ActionPrompt";
 import type { Delivery, OrderDetail } from "@/types";
 
@@ -77,6 +82,8 @@ type Summary = {
   detailId: string;
   receivedDate?: string;
   isDuyenHa?: boolean;
+  /** TyleChiahet — nếu thiếu sẽ tự load từ masters */
+  tyleChiahet?: number;
 };
 
 type Props = {
@@ -100,6 +107,40 @@ export function DeliveryEditorModal({
   const [qtyDisp, setQtyDisp] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(!initialRows);
   const [busy, setBusy] = useState(false);
+  const [tyleChiahet, setTyleChiahet] = useState(Number(summary.tyleChiahet) || 0);
+
+  // Load TyleChiahet từ master HH nếu chưa có
+  useEffect(() => {
+    if (Number(summary.tyleChiahet) > 0) {
+      setTyleChiahet(Number(summary.tyleChiahet));
+      return;
+    }
+    const pid = String(summary.productId || "").trim();
+    if (!pid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = localStorage.getItem("token");
+        const res = await fetch("/api/v1/masters?types=HH", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = await res.json();
+        const list: Record<string, string>[] =
+          json.data?.HH || json.data?.hh || json.data?.items || [];
+        const row = list.find(
+          (r) =>
+            String(r.MaHH || r.MaHh || "").trim().toUpperCase() ===
+            pid.toUpperCase()
+        );
+        if (!cancelled && row) setTyleChiahet(parseTyleChiahet(row));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [summary.productId, summary.tyleChiahet]);
 
   useEffect(() => {
     if (initialRows && initialRows.length) {
@@ -171,6 +212,22 @@ export function DeliveryEditorModal({
         : `Xem chi tiết giao hàng: Xe ${summary.vehiclePlate || summary.vehicleId || "—"} | Hàng: ${summary.productName || summary.productId || "—"}`;
 
   async function submitPlan() {
+    for (const r of rows) {
+      const qty = Number(r.plannedQty) || 0;
+      if (!(qty > 0)) {
+        alert("KH giao phải > 0");
+        return;
+      }
+      const msg = stepErrorMsg(
+        summary.productName || summary.productId || "",
+        qty,
+        tyleChiahet
+      );
+      if (msg) {
+        alert(msg);
+        return;
+      }
+    }
     setBusy(true);
     try {
       const token = localStorage.getItem("token");
@@ -209,6 +266,21 @@ export function DeliveryEditorModal({
   }
 
   async function submitReal() {
+    for (const r of rows) {
+      if (!r.deliveryId || r.deliveryId.startsWith("NEW-")) continue;
+      const qty = Number(r.actualQty) || 0;
+      if (qty > 0) {
+        const msg = stepErrorMsg(
+          summary.productName || summary.productId || "",
+          qty,
+          tyleChiahet
+        );
+        if (msg) {
+          alert(msg);
+          return;
+        }
+      }
+    }
     setBusy(true);
     try {
       for (const r of rows) {

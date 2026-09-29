@@ -36,6 +36,49 @@ export function roundToStep(value: number, step: number): number {
   return qty3(Math.round(value / s) * s);
 }
 
+/** Format số gợi ý VN (dấu phẩy) */
+function fmtStepNum(n: number): string {
+  return String(qty3(n)).replace(".", ",");
+}
+
+/** Gợi ý 2 bội gần nhất khi không chia hết (parity V21) */
+export function stepHint(value: number, step: number): string {
+  const s = Number(step) || 0;
+  if (s <= EPS) return "";
+  const v = qty3(value);
+  const lo = qty3(Math.floor(v / s) * s);
+  const hi = qty3(Math.ceil(v / s) * s);
+  if (Math.abs(lo - hi) < EPS) return fmtStepNum(lo);
+  return `${fmtStepNum(lo)} hoặc ${fmtStepNum(hi)}`;
+}
+
+/**
+ * Thông báo lỗi chia hết — KH giao / thực nhận / thực giao.
+ * null nếu hợp lệ hoặc step<=0.
+ */
+export function stepErrorMsg(
+  productLabel: string,
+  value: number,
+  step: number
+): string | null {
+  const s = Number(step) || 0;
+  if (s <= EPS) return null;
+  const v = qty3(Number(value) || 0);
+  if (Math.abs(v) < EPS) return null;
+  if (validateStep(v, s)) return null;
+  const label = productLabel || "Hàng hóa";
+  return `${label} phải chia hết cho ${fmtStepNum(s)}. Gợi ý: ${stepHint(v, s)}`;
+}
+
+/** Parse TyleChiahet từ row master HH */
+export function parseTyleChiahet(raw?: Record<string, string> | null): number {
+  if (!raw) return 0;
+  const n = Number(
+    raw.TyleChiahet ?? raw.TyleChiaHet ?? raw.tyleChiahet ?? 0
+  );
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /**
  * Hao hụt: |TN − TG| / TN ≤ tlHH
  * tlHH trên sheet thường là tỷ lệ (0.02 = 2%). Nếu > 1 coi là % → /100.
