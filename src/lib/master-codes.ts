@@ -1,9 +1,12 @@
 /** Helpers mã danh mục — parity V21 _suggestCodeFromName_ / _normalizePlate_ */
 
+/** Parity V21 `_stripAccents_` — NFD + đ/Đ → d/D (chưa lower) */
 export function stripAccents(s: string): string {
   return String(s || "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
 }
 
 export function normalizePlate(plate: string): string {
@@ -94,9 +97,12 @@ export const VEHICLE_HTVT_PREFIX: Record<string, string> = {
 };
 
 export function vehicleCodePrefix(maHtvt: string): string {
-  const k = String(maHtvt || "").toUpperCase();
+  const k = String(maHtvt || "").toUpperCase().trim();
   if (VEHICLE_HTVT_PREFIX[k]) return VEHICLE_HTVT_PREFIX[k];
-  // lấy 2 ký tự chữ/số đầu của mã HTVT
+  if (k.includes("THUE")) return "3T";
+  if (k.includes("KHACH") || k === "KH") return "4K";
+  if (k.includes("NPP")) return "1P";
+  if (k.includes("NCC")) return "2C";
   const cleaned = k.replace(/[^A-Z0-9]/g, "");
   return (cleaned.slice(0, 2) || "XX").padEnd(2, "X").slice(0, 2);
 }
