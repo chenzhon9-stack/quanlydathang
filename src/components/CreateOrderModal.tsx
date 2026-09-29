@@ -335,100 +335,110 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                   </div>
                 </div>
 
-                {/* HTVT */}
-                <div>
-                  <div className="text-[10px] text-slate-500 mb-0.5">
-                    Hình thức VT *
-                  </div>
-                  <MasterPicker
-                    type="HTVT"
-                    value={d.transportTypeId}
-                    displayName={d.transportTypeName}
-                    onChange={(id, name, raw) => {
-                      const can =
-                        String(raw?.CanChonDVT || raw?.CanChonDvt || "")
-                          .toLowerCase()
-                          .match(/^(true|1|yes|có|co)$/) != null ||
-                        String(id).toUpperCase().includes("THUE");
-                      setDetails((rows) =>
-                        rows.map((x, i) =>
-                          i === di
-                            ? {
-                                ...x,
-                                transportTypeId: id,
-                                transportTypeName: name,
-                                canChonDvt: !!can,
-                                carrierId: "",
-                                carrierName: "",
-                                vehicleId: "",
-                                vehicleName: "",
-                              }
-                            : x
-                        )
-                      );
-                    }}
-                  />
-                </div>
-
-                {/* DVT nếu thuê ngoài */}
-                {needCarrier && (
+                {/* V21 layout:
+                    Hàng 1: Hình thức VT | Đơn vị VT (cùng dòng)
+                    Hàng 2: Biển số xe (full)
+                    Hàng 3: Hàng hóa | Khu vực/Công trình
+                    Hàng 4: Ghi chú (full)
+                 */}
+                <div
+                  className={`grid grid-cols-1 gap-2 ${
+                    needCarrier ? "sm:grid-cols-2" : ""
+                  }`}
+                >
                   <div>
                     <div className="text-[10px] text-slate-500 mb-0.5">
-                      Đơn vị vận tải *
+                      Hình thức VT *
                     </div>
                     <MasterPicker
-                      type="DVT"
-                      value={d.carrierId}
-                      displayName={d.carrierName}
-                      onChange={(id, name) =>
+                      type="HTVT"
+                      value={d.transportTypeId}
+                      displayName={d.transportTypeName}
+                      onChange={(id, name, raw) => {
+                        const can =
+                          String(raw?.CanChonDVT || raw?.CanChonDvt || "")
+                            .toLowerCase()
+                            .match(/^(true|1|yes|có|co)$/) != null ||
+                          String(id).toUpperCase().includes("THUE");
                         setDetails((rows) =>
                           rows.map((x, i) =>
                             i === di
                               ? {
                                   ...x,
-                                  carrierId: id,
-                                  carrierName: name,
+                                  transportTypeId: id,
+                                  transportTypeName: name,
+                                  canChonDvt: !!can,
+                                  carrierId: "",
+                                  carrierName: "",
                                   vehicleId: "",
                                   vehicleName: "",
                                 }
                               : x
                           )
-                        )
-                      }
+                        );
+                      }}
                     />
                   </div>
-                )}
+                  {needCarrier && (
+                    <div>
+                      <div className="text-[10px] text-slate-500 mb-0.5">
+                        Đơn vị VT *
+                      </div>
+                      <MasterPicker
+                        type="DVT"
+                        value={d.carrierId}
+                        displayName={d.carrierName}
+                        onChange={(id, name) =>
+                          setDetails((rows) =>
+                            rows.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    carrierId: id,
+                                    carrierName: name,
+                                    vehicleId: "",
+                                    vehicleName: "",
+                                  }
+                                : x
+                            )
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-[10px] text-slate-500 mb-0.5">
+                    Biển số xe *
+                  </div>
+                  <MasterPicker
+                    type="XE"
+                    value={d.vehicleId}
+                    displayName={d.vehicleName}
+                    disabled={xeDisabled}
+                    htvtId={d.transportTypeId || undefined}
+                    dvtId={needCarrier ? d.carrierId || undefined : undefined}
+                    placeholder={
+                      xeDisabled
+                        ? needCarrier
+                          ? "Chọn HTVT và ĐVT trước…"
+                          : "Chọn hình thức VT trước…"
+                        : "Chọn xe…"
+                    }
+                    onChange={(id, name) =>
+                      setDetails((rows) =>
+                        rows.map((x, i) =>
+                          i === di
+                            ? { ...x, vehicleId: id, vehicleName: name }
+                            : x
+                        )
+                      )
+                    }
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <div className="text-[10px] text-slate-500 mb-0.5">
-                      Biển số xe *
-                    </div>
-                    <MasterPicker
-                      type="XE"
-                      value={d.vehicleId}
-                      displayName={d.vehicleName}
-                      disabled={xeDisabled}
-                      htvtId={d.transportTypeId || undefined}
-                      dvtId={needCarrier ? d.carrierId || undefined : undefined}
-                      placeholder={
-                        xeDisabled
-                          ? needCarrier
-                            ? "Chọn HTVT và ĐVT trước…"
-                            : "Chọn hình thức VT trước…"
-                          : "Chọn xe…"
-                      }
-                      onChange={(id, name) =>
-                        setDetails((rows) =>
-                          rows.map((x, i) =>
-                            i === di
-                              ? { ...x, vehicleId: id, vehicleName: name }
-                              : x
-                          )
-                        )
-                      }
-                    />
-                  </div>
                   <div>
                     <div className="text-[10px] text-slate-500 mb-0.5">
                       Hàng hóa *
@@ -453,26 +463,26 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                       }
                     />
                   </div>
-                </div>
-
-                <div>
-                  <div className="text-[10px] text-slate-500 mb-0.5">
-                    Khu vực/Công trình *
-                  </div>
-                  <MasterPicker
-                    type="KV"
-                    value={d.regionId}
-                    displayName={d.regionName}
-                    onChange={(id, name) =>
-                      setDetails((rows) =>
-                        rows.map((x, i) =>
-                          i === di
-                            ? { ...x, regionId: id, regionName: name }
-                            : x
+                  <div>
+                    <div className="text-[10px] text-slate-500 mb-0.5">
+                      Khu vực/Công trình *
+                    </div>
+                    <MasterPicker
+                      type="KV"
+                      value={d.regionId}
+                      displayName={d.regionName}
+                      placeholder="Chọn khu vực…"
+                      onChange={(id, name) =>
+                        setDetails((rows) =>
+                          rows.map((x, i) =>
+                            i === di
+                              ? { ...x, regionId: id, regionName: name }
+                              : x
+                          )
                         )
-                      )
-                    }
-                  />
+                      }
+                    />
+                  </div>
                 </div>
 
                 <div>
