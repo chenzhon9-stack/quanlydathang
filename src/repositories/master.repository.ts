@@ -12,6 +12,10 @@ type CacheEntry = { at: number; map: Dict };
 const cache: Record<string, CacheEntry> = {};
 const TTL_MS = 60_000;
 
+type HhMeta = { phanLoai: string; tyleChiahet: number; ten?: string };
+type HhMetaCacheEntry = { at: number; map: Record<string, HhMeta> };
+const hhMetaCache: { entry?: HhMetaCacheEntry } = {};
+
 function isActive(v: unknown): boolean {
   if (v === false) return false;
   const s = String(v ?? "").toLowerCase();
@@ -129,30 +133,13 @@ export class MasterRepository {
    * Meta HH: PhanLoaiHH + TyleChiahet (cho nhận hàng khóa Bao / chia hết).
    * key = MaHH (và uppercase).
    */
-  static async hhMeta(): Promise<
-    Record<string, { phanLoai: string; tyleChiahet: number; ten?: string }>
-  > {
-    const ck = "hh:meta";
-    const hit = cache[ck] as
-      | { at: number; map: Record<string, { phanLoai: string; tyleChiahet: number; ten?: string }> }
-      | undefined;
-    // reuse string cache shape loosely — store JSON-serialized in Dict is awkward; use separate
-    const hitAny = (cache as Record<string, { at: number; map: unknown }>)[ck];
-    if (hitAny && Date.now() - hitAny.at < TTL_MS) {
-      return hitAny.map as Record<
-        string,
-        { phanLoai: string; tyleChiahet: number; ten?: string }
-      >;
-    }
-    const out: Record<
-      string,
-      { phanLoai: string; tyleChiahet: number; ten?: string }
-    > = {};
+  static async hhMeta(): Promise<Record<string, HhMeta>> {
+    const hit = hhMetaCache.entry;
+    if (hit && Date.now() - hit.at < TTL_MS) return hit.map;
+
+    const out: Record<string, HhMeta> = {};
     if (!isSheetsConfigured()) {
-      (cache as Record<string, { at: number; map: unknown }>)[ck] = {
-        at: Date.now(),
-        map: out,
-      };
+      hhMetaCache.entry = { at: Date.now(), map: out };
       return out;
     }
     try {
@@ -166,17 +153,14 @@ export class MasterRepository {
         const tyleChiahet =
           Number(r.TyleChiahet || r.TyleChiaHet || r.tyleChiahet || 0) || 0;
         const ten = String(r.TenHangHoa || r.TenHH || "").trim();
-        const meta = { phanLoai, tyleChiahet, ten };
+        const meta: HhMeta = { phanLoai, tyleChiahet, ten };
         out[id] = meta;
         out[id.toUpperCase()] = meta;
       }
     } catch (e) {
       console.error("[Master] hhMeta", e);
     }
-    (cache as Record<string, { at: number; map: unknown }>)[ck] = {
-      at: Date.now(),
-      map: out,
-    };
+    hhMetaCache.entry = { at: Date.now(), map: out };
     return out;
   }
   static xeNames() {
