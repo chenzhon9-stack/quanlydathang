@@ -166,8 +166,8 @@ function OrderActions({
         </button>
       )}
 
-      {/* Xóa — ORDER_CANCEL · chưa gửi (V21 xóa đơn khởi tạo) */}
-      {neverSent && canCancel && (
+      {/* Xóa — ORDER_CANCEL · chưa gửi · không có CT đã nhận (V21 D112) */}
+      {neverSent && canCancel && o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Xóa")}
@@ -177,8 +177,8 @@ function OrderActions({
         </button>
       )}
 
-      {/* Hủy — ORDER_CANCEL · đã gửi · BE từ chối nếu đã có xe nhận (D112) */}
-      {!neverSent && canCancel && (
+      {/* Hủy — ORDER_CANCEL · đã gửi · ẩn khi ≥1 xe đã nhận/giao (V21 D112; BE enforce) */}
+      {!neverSent && canCancel && o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Hủy")}

@@ -55,6 +55,12 @@ export interface Order {
   createdBy: string;
   /** Có thể reset đơn theo rule V21 (ngày + còn xe chưa nhận) */
   canReset?: boolean;
+  /**
+   * Có thể hủy/xóa đơn trên UI (V21 D112):
+   * false nếu ≥1 CT đã nhận/giao (ThucNhan>0 hoặc TT ∈ Đã nhận|Đang giao|Hoàn thành).
+   * BE cancelOrder vẫn enforce lại.
+   */
+  canCancelOrder?: boolean;
 }
 
 export interface OrderDetail {

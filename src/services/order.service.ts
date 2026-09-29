@@ -90,21 +90,45 @@ export class OrderService {
     const start = (page - 1) * pageSize;
     let items = orders.slice(start, start + pageSize);
 
-    // V21: canReset chỉ tính cho trang hiện tại + cần còn xe chưa nhận
-    // Load CT theo năm một lần, gom hasUnreceived theo MaDon
+    // V21: canReset / canCancelOrder — load CT năm 1 lần
+    // hasUnreceived: còn xe chưa nhận (reset)
+    // hasReceived: ≥1 CT đã nhận/giao → không hủy đơn (D112)
     const hasUnreceived = new Map<string, boolean>();
+    const hasReceived = new Map<string, boolean>();
     try {
       const { DetailRepository } = await import(
         "@/repositories/detail.repository"
       );
       const allCt = await DetailRepository.findMany({ year: filter.year });
       for (const d of allCt) {
-        const st = String(d.status || "").toUpperCase();
-        if (st === "DELETE") continue;
+        const stRaw = String(d.status || "").trim();
+        const st = stRaw.toUpperCase();
+        if (st === "DELETE" || stRaw === STATUS_CT.DELETE) continue;
         const oid = String(d.orderId || "");
         if (!oid) continue;
+
+        const receivedQty = Number(d.actualReceived) || 0;
+        const isRecvStatus =
+          receivedQty > 0 ||
+          stRaw === STATUS_CT.RECEIVED ||
+          stRaw === STATUS_CT.DELIVERING ||
+          stRaw === STATUS_CT.DONE ||
+          st.includes("NHẬN") ||
+          st.includes("NHAN") ||
+          st.includes("GIAO") ||
+          st.includes("HOÀN") ||
+          st.includes("HOAN");
+
+        if (isRecvStatus) {
+          hasReceived.set(oid, true);
+        } else if (!hasReceived.has(oid)) {
+          hasReceived.set(oid, false);
+        }
+
         const unrecv =
-          (Number(d.actualReceived) || 0) === 0 && st !== "CANCEL";
+          receivedQty === 0 &&
+          st !== "CANCEL" &&
+          stRaw !== STATUS_CT.CANCEL;
         if (unrecv) {
           hasUnreceived.set(oid, true);
         } else if (!hasUnreceived.has(oid)) {
@@ -112,7 +136,7 @@ export class OrderService {
         }
       }
     } catch (e) {
-      console.error("[listOrders] canReset CT load", e);
+      console.error("[listOrders] canReset/canCancel CT load", e);
     }
 
     items = items.map((o) => {
@@ -123,7 +147,9 @@ export class OrderService {
         sendCount: o.sendCount,
         hasUnreceivedVehicle: hasUnreceived.get(o.orderId) === true,
       });
-      return { ...o, canReset: reset.ok };
+      // V21: đã có ≥1 xe nhận/giao → không hiện Hủy/Xóa
+      const canCancelOrder = hasReceived.get(o.orderId) !== true;
+      return { ...o, canReset: reset.ok, canCancelOrder };
     });
 
     return {
