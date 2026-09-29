@@ -209,8 +209,9 @@ export class DeliveryService {
     let tenHH = ct.productName || ct.productId || "";
     try {
       const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+      const pid = String(ct.productId || "").trim().toUpperCase();
       const hh = hhRows.find(
-        (r) => String(r.MaHH || "").trim() === String(ct.productId || "").trim()
+        (r) => String(r.MaHH || r.MaHh || "").trim().toUpperCase() === pid
       );
       if (hh) {
         tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;

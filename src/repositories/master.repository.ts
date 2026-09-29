@@ -124,6 +124,61 @@ export class MasterRepository {
       false // lấy cả HH tạm khóa để map tên trên KHSL
     );
   }
+
+  /**
+   * Meta HH: PhanLoaiHH + TyleChiahet (cho nhận hàng khóa Bao / chia hết).
+   * key = MaHH (và uppercase).
+   */
+  static async hhMeta(): Promise<
+    Record<string, { phanLoai: string; tyleChiahet: number; ten?: string }>
+  > {
+    const ck = "hh:meta";
+    const hit = cache[ck] as
+      | { at: number; map: Record<string, { phanLoai: string; tyleChiahet: number; ten?: string }> }
+      | undefined;
+    // reuse string cache shape loosely — store JSON-serialized in Dict is awkward; use separate
+    const hitAny = (cache as Record<string, { at: number; map: unknown }>)[ck];
+    if (hitAny && Date.now() - hitAny.at < TTL_MS) {
+      return hitAny.map as Record<
+        string,
+        { phanLoai: string; tyleChiahet: number; ten?: string }
+      >;
+    }
+    const out: Record<
+      string,
+      { phanLoai: string; tyleChiahet: number; ten?: string }
+    > = {};
+    if (!isSheetsConfigured()) {
+      (cache as Record<string, { at: number; map: unknown }>)[ck] = {
+        at: Date.now(),
+        map: out,
+      };
+      return out;
+    }
+    try {
+      const rows = await readSheetAsObjects(SHEETS.HH, {});
+      for (const r of rows) {
+        const id = String(r.MaHH || r.MaHh || "").trim();
+        if (!id) continue;
+        const phanLoai = String(
+          r.PhanLoaiHH || r.PhanLoai || r.phanLoai || ""
+        ).trim();
+        const tyleChiahet =
+          Number(r.TyleChiahet || r.TyleChiaHet || r.tyleChiahet || 0) || 0;
+        const ten = String(r.TenHangHoa || r.TenHH || "").trim();
+        const meta = { phanLoai, tyleChiahet, ten };
+        out[id] = meta;
+        out[id.toUpperCase()] = meta;
+      }
+    } catch (e) {
+      console.error("[Master] hhMeta", e);
+    }
+    (cache as Record<string, { at: number; map: unknown }>)[ck] = {
+      at: Date.now(),
+      map: out,
+    };
+    return out;
+  }
   static xeNames() {
     return loadMap(
       "xe",

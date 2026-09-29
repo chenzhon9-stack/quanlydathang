@@ -19,6 +19,7 @@ import {
   roundToStep,
   computeDetailStatus,
   normalizeHaohut,
+  isHangBao,
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
@@ -52,21 +53,37 @@ export class DetailService {
       rows = filterBySupplierIds(rows, allowed);
     }
 
-    const [nccMap, hhMap, xeMap, kvMap, htvtMap] = await Promise.all([
+    const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta] = await Promise.all([
       MasterRepository.nccNames(),
       MasterRepository.hhNames(),
       MasterRepository.xeNames(),
       MasterRepository.kvNames(),
       MasterRepository.htvtNames(),
+      MasterRepository.hhMeta(),
     ]);
-    rows = rows.map((d) => ({
-      ...d,
-      supplierName: (d as { supplierName?: string }).supplierName || nccMap[d.supplierId] || d.supplierId,
-      productName: d.productName || hhMap[d.productId] || d.productId,
-      vehiclePlate: xeMap[d.vehicleId] || d.vehicleId,
-      regionName: kvMap[d.regionId] || d.regionId,
-      transportTypeName: d.transportTypeName || htvtMap[d.transportTypeId || ""] || d.transportTypeId,
-    })) as typeof rows;
+    rows = rows.map((d) => {
+      const meta = hhMeta[d.productId] || hhMeta[String(d.productId || "").toUpperCase()];
+      return {
+        ...d,
+        supplierName:
+          (d as { supplierName?: string }).supplierName ||
+          nccMap[d.supplierId] ||
+          d.supplierId,
+        productName: d.productName || hhMap[d.productId] || d.productId,
+        vehiclePlate: xeMap[d.vehicleId] || d.vehicleId,
+        regionName: kvMap[d.regionId] || d.regionId,
+        transportTypeName:
+          d.transportTypeName ||
+          htvtMap[d.transportTypeId || ""] ||
+          d.transportTypeId,
+        // Enrich từ DM_HangHoa — FE khóa Bao + validate chia hết
+        phanLoai: (meta?.phanLoai as typeof d.phanLoai) || d.phanLoai,
+        tyleChiahet:
+          meta?.tyleChiahet != null
+            ? meta.tyleChiahet
+            : (d as { tyleChiahet?: number }).tyleChiahet,
+      };
+    }) as typeof rows;
 
     // PDF FileDonhang
     try {
@@ -182,26 +199,36 @@ export class DetailService {
       }
     }
 
-    const qty = qty3(Number(payload.actualReceived));
-    if (!(qty > 0)) {
-      throw { code: "VALIDATION_ERROR", message: "Thực nhận phải > 0" };
-    }
-
-    // TyleChiahet từ DM_HangHoa
+    // TyleChiahet + PhanLoaiHH từ DM_HangHoa
     let tyleChiahet = 0;
     let tenHH = ct.productName || ct.productId;
+    let phanLoai = String(ct.phanLoai || "");
     try {
       const hhRows = await readSheetAsObjects(SHEETS.HH, {});
       const hh = hhRows.find(
-        (r) => String(r.MaHH || "").trim() === String(ct.productId || "").trim()
+        (r) =>
+          String(r.MaHH || "").trim().toUpperCase() ===
+          String(ct.productId || "").trim().toUpperCase()
       );
       if (hh) {
         tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
         tenHH = String(hh.TenHangHoa || tenHH);
+        phanLoai = String(hh.PhanLoaiHH || hh.PhanLoai || phanLoai);
       }
     } catch {
       /* optional */
     }
+
+    // V21: hàng Bao → thực nhận = đúng SoLuong đặt (không cho lệch)
+    let qty = qty3(Number(payload.actualReceived));
+    if (isHangBao(phanLoai)) {
+      qty = qty3(Number(ct.quantity) || 0);
+    }
+    if (!(qty > 0)) {
+      throw { code: "VALIDATION_ERROR", message: "Thực nhận phải > 0" };
+    }
+
+    // Chia hết TyleChiahet (kể cả Bao — SL đặt cũng phải hợp lệ)
     if (!validateStep(qty, tyleChiahet)) {
       throw {
         code: "VALIDATION_ERROR",

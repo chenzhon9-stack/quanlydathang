@@ -87,6 +87,8 @@ export interface OrderDetail {
   transportTypeName?: string;
   isDuyenHa?: boolean;
   phanLoai?: PhanLoaiHH;
+  /** TyleChiahet từ DM_HangHoa (enrich lúc list) */
+  tyleChiahet?: number;
   /** Link PDF đơn (từ DonHang.FileDonhang) */
   orderFile?: string;
 }

@@ -20,6 +20,7 @@ import {
   clampYmd,
   stepErrorMsg,
   parseTyleChiahet,
+  isHangBao,
 } from "@/lib/business-rules";
 import {
   DeliveryEditorModal,
@@ -483,13 +484,10 @@ export default function DetailsPage() {
     onReceive: (d) => {
       setReceiveTarget(d);
       setRecvStepErr(null);
-      setRecvStep(0);
-      // Tạm theo phanLoai trên CT; master HH sẽ xác nhận lại
-      const pl0 = String(d.phanLoai || "")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
-      const isBao0 = pl0 === "bao" || pl0.includes("bao");
+      // Ưu tiên meta đã enrich từ listDetails (phanLoai + tyleChiahet)
+      const step0 = Number(d.tyleChiahet) || 0;
+      setRecvStep(step0);
+      const isBao0 = isHangBao(d.phanLoai);
       setRecvLockedBao(isBao0);
       {
         const bounds = receiveDateBounds({
@@ -507,16 +505,26 @@ export default function DetailsPage() {
       setRecvQty(
         d.quantity != null ? formatDecimalVN(d.quantity) : ""
       );
-      // Load TyleChiahet + PhanLoaiHH từ master HH
+      // Nếu đã có step từ list — kiểm tra chia hết ngay (SL kế hoạch)
+      if (step0 > 0 && d.quantity != null) {
+        setRecvStepErr(
+          stepErrorMsg(
+            d.productName || d.productId || "",
+            Number(d.quantity) || 0,
+            step0
+          )
+        );
+      }
+      // Backup: load master HH (type=HH → data.items) nếu list chưa có meta
       void (async () => {
         try {
           const token = localStorage.getItem("token");
-          const res = await fetch("/api/v1/masters?types=HH", {
+          const res = await fetch("/api/v1/masters?type=HH", {
             headers: { Authorization: `Bearer ${token}` },
           });
           const json = await res.json();
           const list: Record<string, string>[] =
-            json.data?.HH || json.data?.hh || [];
+            json.data?.items || json.data?.HH || json.data?.hh || [];
           const row = list.find(
             (r) =>
               String(r.MaHH || r.MaHh || "")
@@ -526,19 +534,23 @@ export default function DetailsPage() {
                 .trim()
                 .toUpperCase()
           );
-          if (row) {
-            setRecvStep(parseTyleChiahet(row));
-            const pl = String(
-              row.PhanLoaiHH || row.PhanLoai || row.phanLoai || ""
-            )
-              .normalize("NFD")
-              .replace(/[\u0300-\u036f]/g, "")
-              .toLowerCase();
-            const isBao = pl === "bao" || pl.includes("bao");
-            setRecvLockedBao(isBao);
-            if (isBao && d.quantity != null) {
-              setRecvQty(formatDecimalVN(d.quantity));
-            }
+          if (!row) return;
+          const step = parseTyleChiahet(row);
+          if (step > 0) setRecvStep(step);
+          const isBao = isHangBao(row);
+          setRecvLockedBao(isBao);
+          if (isBao && d.quantity != null) {
+            setRecvQty(formatDecimalVN(d.quantity));
+          }
+          const qtyCheck = Number(d.quantity) || 0;
+          if (step > 0 && qtyCheck > 0) {
+            setRecvStepErr(
+              stepErrorMsg(
+                d.productName || d.productId || "",
+                qtyCheck,
+                step
+              )
+            );
           }
         } catch {
           /* ignore */
@@ -757,7 +769,7 @@ export default function DetailsPage() {
 
   async function submitReceive() {
     if (!receiveTarget) return;
-    // Bao: ép đúng SL kế hoạch
+    // Bao: ép đúng SL kế hoạch; còn lại lấy từ ô nhập
     const qty = recvLockedBao
       ? Number(receiveTarget.quantity) || parseDecimalVN(recvQty)
       : parseDecimalVN(recvQty);
@@ -765,17 +777,16 @@ export default function DetailsPage() {
       alert("Thực nhận phải > 0");
       return;
     }
-    if (!recvLockedBao) {
-      const msg = stepErrorMsg(
-        receiveTarget.productName || receiveTarget.productId || "",
-        qty,
-        recvStep
-      );
-      if (msg) {
-        setRecvStepErr(msg);
-        alert(msg);
-        return;
-      }
+    // Chia hết TyleChiahet (Bao cũng kiểm — SL đặt phải hợp lệ, vd 0.05)
+    const msg = stepErrorMsg(
+      receiveTarget.productName || receiveTarget.productId || "",
+      qty,
+      recvStep
+    );
+    if (msg) {
+      setRecvStepErr(msg);
+      alert(msg);
+      return;
     }
     setBusy(true);
     try {
@@ -1456,6 +1467,11 @@ export default function DetailsPage() {
                   Hàng <b>Bao</b> — đặt bao nhiêu nhận bấy nhiêu (không chỉnh
                   thực nhận).
                 </p>
+                {recvStepErr && (
+                  <p className="text-[11px] text-red-600 font-medium mt-1 leading-snug">
+                    {recvStepErr}
+                  </p>
+                )}
               </>
             ) : (
               <>

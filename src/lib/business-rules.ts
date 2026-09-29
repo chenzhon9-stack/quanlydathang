@@ -80,6 +80,32 @@ export function parseTyleChiahet(raw?: Record<string, string> | null): number {
 }
 
 /**
+ * V21: hàng Bao (xi măng bao…) → nhận đúng SL đặt, không cho lệch.
+ * Nhận diện từ PhanLoaiHH / chuỗi "bao".
+ */
+export function isHangBao(
+  phanLoaiOrRaw?: string | Record<string, string> | null
+): boolean {
+  let s = "";
+  if (phanLoaiOrRaw && typeof phanLoaiOrRaw === "object") {
+    s = String(
+      phanLoaiOrRaw.PhanLoaiHH ||
+        phanLoaiOrRaw.PhanLoai ||
+        phanLoaiOrRaw.phanLoai ||
+        ""
+    );
+  } else {
+    s = String(phanLoaiOrRaw || "");
+  }
+  const fold = s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  return fold === "bao" || fold.includes("bao");
+}
+
+/**
  * Hao hụt: |TN − TG| / TN ≤ tlHH
  * tlHH trên sheet thường là tỷ lệ (0.02 = 2%). Nếu > 1 coi là % → /100.
  */

@@ -109,7 +109,7 @@ export function DeliveryEditorModal({
   const [busy, setBusy] = useState(false);
   const [tyleChiahet, setTyleChiahet] = useState(Number(summary.tyleChiahet) || 0);
 
-  // Load TyleChiahet từ master HH nếu chưa có
+  // Load TyleChiahet từ master HH nếu chưa có (API: type=HH → data.items)
   useEffect(() => {
     if (Number(summary.tyleChiahet) > 0) {
       setTyleChiahet(Number(summary.tyleChiahet));
@@ -121,12 +121,12 @@ export function DeliveryEditorModal({
     (async () => {
       try {
         const token = localStorage.getItem("token");
-        const res = await fetch("/api/v1/masters?types=HH", {
+        const res = await fetch("/api/v1/masters?type=HH", {
           headers: { Authorization: `Bearer ${token}` },
         });
         const json = await res.json();
         const list: Record<string, string>[] =
-          json.data?.HH || json.data?.hh || json.data?.items || [];
+          json.data?.items || json.data?.HH || json.data?.hh || [];
         const row = list.find(
           (r) =>
             String(r.MaHH || r.MaHh || "").trim().toUpperCase() ===
@@ -445,22 +445,50 @@ export function DeliveryEditorModal({
                   KH giao
                 </div>
                 {mode === "plan" ? (
-                  <DecimalInput
-                    value={
-                      qtyDisp[`p-${idx}`] ??
-                      formatDecimalVN(r.plannedQty)
-                    }
-                    onValueChange={(display, num) => {
-                      setQtyDisp((d) => ({ ...d, [`p-${idx}`]: display }));
-                      if (num != null) {
-                        setRows((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, plannedQty: num } : x
+                  (() => {
+                    const pq = Number(r.plannedQty) || 0;
+                    const pErr =
+                      pq > 0
+                        ? stepErrorMsg(
+                            summary.productName || summary.productId || "",
+                            pq,
+                            tyleChiahet
                           )
-                        );
-                      }
-                    }}
-                  />
+                        : null;
+                    return (
+                      <>
+                        <DecimalInput
+                          value={
+                            qtyDisp[`p-${idx}`] ??
+                            formatDecimalVN(r.plannedQty)
+                          }
+                          className={
+                            pErr
+                              ? "border-red-400 bg-red-50 focus:ring-red-300"
+                              : undefined
+                          }
+                          onValueChange={(display, num) => {
+                            setQtyDisp((d) => ({
+                              ...d,
+                              [`p-${idx}`]: display,
+                            }));
+                            if (num != null) {
+                              setRows((prev) =>
+                                prev.map((x, i) =>
+                                  i === idx ? { ...x, plannedQty: num } : x
+                                )
+                              );
+                            }
+                          }}
+                        />
+                        {pErr && (
+                          <p className="text-[10px] text-red-600 font-medium mt-0.5 leading-snug">
+                            {pErr}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()
                 ) : (
                   <div className="text-sm tabular-nums px-2 py-2 rounded-lg bg-slate-100 border border-slate-200 text-center">
                     {fmtNum(r.plannedQty)}
@@ -474,22 +502,50 @@ export function DeliveryEditorModal({
                   Thực giao
                 </div>
                 {mode === "real" ? (
-                  <DecimalInput
-                    value={
-                      qtyDisp[`a-${idx}`] ??
-                      formatDecimalVN(r.actualQty)
-                    }
-                    onValueChange={(display, num) => {
-                      setQtyDisp((d) => ({ ...d, [`a-${idx}`]: display }));
-                      if (num != null) {
-                        setRows((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, actualQty: num } : x
+                  (() => {
+                    const aq = Number(r.actualQty) || 0;
+                    const aErr =
+                      aq > 0
+                        ? stepErrorMsg(
+                            summary.productName || summary.productId || "",
+                            aq,
+                            tyleChiahet
                           )
-                        );
-                      }
-                    }}
-                  />
+                        : null;
+                    return (
+                      <>
+                        <DecimalInput
+                          value={
+                            qtyDisp[`a-${idx}`] ??
+                            formatDecimalVN(r.actualQty)
+                          }
+                          className={
+                            aErr
+                              ? "border-red-400 bg-red-50 focus:ring-red-300"
+                              : undefined
+                          }
+                          onValueChange={(display, num) => {
+                            setQtyDisp((d) => ({
+                              ...d,
+                              [`a-${idx}`]: display,
+                            }));
+                            if (num != null) {
+                              setRows((prev) =>
+                                prev.map((x, i) =>
+                                  i === idx ? { ...x, actualQty: num } : x
+                                )
+                              );
+                            }
+                          }}
+                        />
+                        {aErr && (
+                          <p className="text-[10px] text-red-600 font-medium mt-0.5 leading-snug">
+                            {aErr}
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()
                 ) : (
                   <div className="text-sm tabular-nums px-2 py-2 rounded-lg bg-slate-100 border border-slate-200 text-center">
                     {fmtNum(r.actualQty ?? 0)}
@@ -605,6 +661,7 @@ export function summaryFromDetail(d: OrderDetail): Summary {
     actualDelivered: d.actualDelivered,
     receivedDate: d.receivedDate,
     isDuyenHa: !!d.isDuyenHa,
+    tyleChiahet: Number(d.tyleChiahet) || 0,
   };
 }
 
