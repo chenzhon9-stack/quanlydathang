@@ -407,6 +407,8 @@ export default function DetailsPage() {
   const [recvDate, setRecvDate] = useState("");
   const [recvStep, setRecvStep] = useState(0);
   const [recvStepErr, setRecvStepErr] = useState<string | null>(null);
+  /** V21: hàng Bao (xi măng bao) → khóa thực nhận = SL kế hoạch */
+  const [recvLockedBao, setRecvLockedBao] = useState(false);
 
   const load = useCallback(async (p: number) => {
     const token = localStorage.getItem("token");
@@ -482,6 +484,13 @@ export default function DetailsPage() {
       setReceiveTarget(d);
       setRecvStepErr(null);
       setRecvStep(0);
+      // Tạm theo phanLoai trên CT; master HH sẽ xác nhận lại
+      const pl0 = String(d.phanLoai || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      const isBao0 = pl0 === "bao" || pl0.includes("bao");
+      setRecvLockedBao(isBao0);
       {
         const bounds = receiveDateBounds({
           orderDate: d.orderDate,
@@ -494,12 +503,11 @@ export default function DetailsPage() {
         );
         setRecvDate(def);
       }
+      // Bao: luôn = SL kế hoạch; khác: mặc định = KH nhưng cho sửa
       setRecvQty(
-        d.quantity != null
-          ? formatDecimalVN(d.quantity)
-          : ""
+        d.quantity != null ? formatDecimalVN(d.quantity) : ""
       );
-      // Load TyleChiahet từ master HH
+      // Load TyleChiahet + PhanLoaiHH từ master HH
       void (async () => {
         try {
           const token = localStorage.getItem("token");
@@ -518,7 +526,20 @@ export default function DetailsPage() {
                 .trim()
                 .toUpperCase()
           );
-          if (row) setRecvStep(parseTyleChiahet(row));
+          if (row) {
+            setRecvStep(parseTyleChiahet(row));
+            const pl = String(
+              row.PhanLoaiHH || row.PhanLoai || row.phanLoai || ""
+            )
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLowerCase();
+            const isBao = pl === "bao" || pl.includes("bao");
+            setRecvLockedBao(isBao);
+            if (isBao && d.quantity != null) {
+              setRecvQty(formatDecimalVN(d.quantity));
+            }
+          }
         } catch {
           /* ignore */
         }
@@ -736,20 +757,25 @@ export default function DetailsPage() {
 
   async function submitReceive() {
     if (!receiveTarget) return;
-    const qty = parseDecimalVN(recvQty);
+    // Bao: ép đúng SL kế hoạch
+    const qty = recvLockedBao
+      ? Number(receiveTarget.quantity) || parseDecimalVN(recvQty)
+      : parseDecimalVN(recvQty);
     if (!(qty > 0)) {
       alert("Thực nhận phải > 0");
       return;
     }
-    const msg = stepErrorMsg(
-      receiveTarget.productName || receiveTarget.productId || "",
-      qty,
-      recvStep
-    );
-    if (msg) {
-      setRecvStepErr(msg);
-      alert(msg);
-      return;
+    if (!recvLockedBao) {
+      const msg = stepErrorMsg(
+        receiveTarget.productName || receiveTarget.productId || "",
+        qty,
+        recvStep
+      );
+      if (msg) {
+        setRecvStepErr(msg);
+        alert(msg);
+        return;
+      }
     }
     setBusy(true);
     try {
@@ -1421,36 +1447,50 @@ export default function DetailsPage() {
             <div className="text-[12px] font-bold text-slate-600 mb-1">
               Số lượng thực nhận
             </div>
-            <DecimalInput
-              value={recvQty}
-              placeholder="Thực nhận"
-              className={
-                recvStepErr
-                  ? "border-red-400 bg-red-50 focus:ring-red-300"
-                  : undefined
-              }
-              onValueChange={(display) => {
-                setRecvQty(display);
-                const q = parseDecimalVN(display);
-                if (display.trim() && q > 0) {
-                  setRecvStepErr(
-                    stepErrorMsg(
-                      receiveTarget.productName ||
-                        receiveTarget.productId ||
-                        "",
-                      q,
-                      recvStep
-                    )
-                  );
-                } else {
-                  setRecvStepErr(null);
-                }
-              }}
-            />
-            {recvStepErr && (
-              <p className="text-[11px] text-red-600 font-medium mt-1 leading-snug">
-                {recvStepErr}
-              </p>
+            {recvLockedBao ? (
+              <>
+                <div className="px-3 py-2.5 rounded-lg bg-slate-100 text-slate-800 text-sm border border-slate-200 tabular-nums">
+                  {formatDecimalVN(receiveTarget.quantity ?? recvQty)}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Hàng <b>Bao</b> — đặt bao nhiêu nhận bấy nhiêu (không chỉnh
+                  thực nhận).
+                </p>
+              </>
+            ) : (
+              <>
+                <DecimalInput
+                  value={recvQty}
+                  placeholder="Thực nhận"
+                  className={
+                    recvStepErr
+                      ? "border-red-400 bg-red-50 focus:ring-red-300"
+                      : undefined
+                  }
+                  onValueChange={(display) => {
+                    setRecvQty(display);
+                    const q = parseDecimalVN(display);
+                    if (display.trim() && q > 0) {
+                      setRecvStepErr(
+                        stepErrorMsg(
+                          receiveTarget.productName ||
+                            receiveTarget.productId ||
+                            "",
+                          q,
+                          recvStep
+                        )
+                      );
+                    } else {
+                      setRecvStepErr(null);
+                    }
+                  }}
+                />
+                {recvStepErr && (
+                  <p className="text-[11px] text-red-600 font-medium mt-1 leading-snug">
+                    {recvStepErr}
+                  </p>
+                )}
+              </>
             )}
           </div>
         </ModalShell>
