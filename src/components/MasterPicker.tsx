@@ -68,6 +68,9 @@ export function MasterPicker({
   allowedIds,
   htvtId,
   dvtId,
+  /** Tên HTVT/ĐVT để hiển thị khóa trên form thêm xe (V21) */
+  htvtName,
+  dvtName,
 }: {
   type: MasterType;
   value: string;
@@ -79,6 +82,8 @@ export function MasterPicker({
   allowedIds?: string[];
   htvtId?: string;
   dvtId?: string;
+  htvtName?: string;
+  dvtName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -91,16 +96,25 @@ export function MasterPicker({
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickBusy, setQuickBusy] = useState(false);
   const [quickErr, setQuickErr] = useState<string | null>(null);
-  // DVT fields
+  // DVT fields (đủ như V21)
   const [qaTenDvt, setQaTenDvt] = useState("");
   const [qaPhone, setQaPhone] = useState("");
+  const [qaMst, setQaMst] = useState("");
+  const [qaDiaChi, setQaDiaChi] = useState("");
+  const [qaLienHe, setQaLienHe] = useState("");
+  const [qaGhiChu, setQaGhiChu] = useState("");
   // XE fields
   const [qaBienSo, setQaBienSo] = useState("");
   const [qaMooc, setQaMooc] = useState("");
   const [qaLaiXe, setQaLaiXe] = useState("");
   const [qaBangLai, setQaBangLai] = useState("");
+  const [qaXeNote, setQaXeNote] = useState("");
 
   const canQuick = type === "DVT" || type === "XE";
+  const isThueNgoai =
+    !!htvtId &&
+    (String(htvtId).toUpperCase() === "THUE_NGOAI" ||
+      String(htvtId).toUpperCase().includes("THUE"));
 
   useEffect(() => {
     setMounted(true);
@@ -237,10 +251,15 @@ export function MasterPicker({
   function resetQuickForm() {
     setQaTenDvt("");
     setQaPhone("");
+    setQaMst("");
+    setQaDiaChi("");
+    setQaLienHe("");
+    setQaGhiChu("");
     setQaBienSo("");
     setQaMooc("");
     setQaLaiXe("");
     setQaBangLai("");
+    setQaXeNote("");
     setQuickErr(null);
   }
 
@@ -253,39 +272,46 @@ export function MasterPicker({
       if (type === "DVT") {
         if (!qaTenDvt.trim()) {
           setQuickErr("Vui lòng nhập tên đơn vị vận tải.");
+          setQuickBusy(false);
           return;
         }
         body = {
           type: "DVT",
           tenDVT: qaTenDvt.trim(),
           dienThoai: qaPhone.trim(),
+          mst: qaMst.trim(),
+          diaChi: qaDiaChi.trim(),
+          nguoiLienHe: qaLienHe.trim(),
+          ghiChu: qaGhiChu.trim(),
         };
       } else if (type === "XE") {
         if (!qaBienSo.trim()) {
           setQuickErr("Vui lòng nhập biển số xe.");
+          setQuickBusy(false);
           return;
         }
         if (!htvtId) {
           setQuickErr("Chọn hình thức vận tải trước khi thêm xe.");
+          setQuickBusy(false);
           return;
         }
-        const isThue =
-          String(htvtId).toUpperCase().includes("THUE") ||
-          String(htvtId).toUpperCase() === "THUE_NGOAI";
-        if (isThue && !dvtId) {
+        if (isThueNgoai && !dvtId) {
           setQuickErr("Xe thuê ngoài — chọn đơn vị vận tải trước.");
+          setQuickBusy(false);
           return;
         }
         body = {
           type: "XE",
           bienSo: qaBienSo.trim(),
           maHTVT: htvtId,
-          maDVT: dvtId || "",
+          maDVT: isThueNgoai ? dvtId || "" : "",
           soMooc: qaMooc.trim(),
           tenLaiXe: qaLaiXe.trim(),
           bangLai: qaBangLai.trim(),
+          ghiChu: qaXeNote.trim(),
         };
       } else {
+        setQuickBusy(false);
         return;
       }
 
@@ -363,12 +389,23 @@ export function MasterPicker({
           "
           onClick={(e) => e.stopPropagation()}
         >
-          {/* Header giống V21 */}
+          {/* Header — V21: list title hoặc form title */}
           <div className="bg-sky-500 text-white px-4 py-3 rounded-t-2xl sm:rounded-t-2xl flex items-center justify-between shrink-0">
-            <h3 className="font-bold text-base">{TYPE_TITLE[type]}</h3>
+            <h3 className="font-bold text-base">
+              {quickOpen
+                ? type === "DVT"
+                  ? "Thêm đơn vị vận tải"
+                  : "Thêm xe mới"
+                : TYPE_TITLE[type]}
+            </h3>
             <button
               type="button"
-              onClick={close}
+              onClick={() => {
+                if (quickOpen) {
+                  setQuickOpen(false);
+                  resetQuickForm();
+                } else close();
+              }}
               className="text-white/90 hover:text-white text-xl leading-none px-1"
               aria-label="Đóng"
             >
@@ -376,174 +413,274 @@ export function MasterPicker({
             </button>
           </div>
 
-          {/* Search */}
-          <div className="p-3 border-b border-slate-100 shrink-0">
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Tìm mã / tên (không dấu)…"
-              className="w-full px-3 py-2.5 text-base sm:text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400"
-            />
-            <div className="mt-1.5 text-[11px] text-slate-500">
-              {loading
-                ? "Đang tải…"
-                : `${filtered.length}${items.length > filtered.length ? ` / ${items.length}` : ""} mục`}
-            </div>
-          </div>
-
-          {/* List */}
-          <div className="overflow-y-auto flex-1 overscroll-contain">
-            {loading ? (
-              <div className="text-center text-slate-400 text-sm py-10">
-                Đang tải danh mục…
-              </div>
-            ) : filtered.length === 0 ? (
-              <div className="text-center text-slate-400 text-sm py-10 px-4">
-                {type === "HH" && supplierId
-                  ? "Không có HH trong NCC_Hanghoa của NCC này"
-                  : q
-                    ? "Không tìm thấy kết quả"
-                    : "Không có dữ liệu"}
-              </div>
-            ) : (
-              filtered.map((it) => (
-                <button
-                  key={it.id}
-                  type="button"
-                  className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
-                    it.id === value ? "bg-sky-50" : ""
-                  }`}
-                  onClick={() => {
-                    onChange(it.id, it.name, it.raw);
-                    setLabel(it.name);
-                    close();
-                  }}
-                >
-                  <div
-                    className={`text-sm sm:text-[15px] leading-snug ${
-                      it.id === value
-                        ? "font-semibold text-sky-800"
-                        : "font-medium text-slate-800"
-                    }`}
-                  >
-                    {it.name}
-                  </div>
-                  <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                    {it.id}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-
-          {/* Quick-add form */}
-          {canQuick && quickOpen && (
-            <div className="px-3 pb-2 border-t border-slate-100 space-y-2 shrink-0 bg-slate-50">
-              <div className="text-[12px] font-bold text-slate-700 pt-2">
-                {type === "DVT" ? "Thêm nhanh đơn vị vận tải" : "Thêm nhanh xe"}
-              </div>
+          {/* ===== Form thêm nhanh (parity V21 modal) ===== */}
+          {canQuick && quickOpen ? (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {type === "DVT" ? (
                 <>
-                  <input
-                    value={qaTenDvt}
-                    onChange={(e) => setQaTenDvt(e.target.value)}
-                    placeholder="Tên đơn vị vận tải *"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
-                  />
-                  <input
-                    value={qaPhone}
-                    onChange={(e) => setQaPhone(e.target.value)}
-                    placeholder="Điện thoại"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
-                  />
+                  <div>
+                    <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                      Tên đơn vị vận tải *
+                    </div>
+                    <input
+                      autoFocus
+                      value={qaTenDvt}
+                      onChange={(e) => setQaTenDvt(e.target.value)}
+                      placeholder="Nhập tên đơn vị vận tải"
+                      className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Điện thoại
+                      </div>
+                      <input
+                        value={qaPhone}
+                        onChange={(e) => setQaPhone(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Mã số thuế
+                      </div>
+                      <input
+                        value={qaMst}
+                        onChange={(e) => setQaMst(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                      Địa chỉ
+                    </div>
+                    <input
+                      value={qaDiaChi}
+                      onChange={(e) => setQaDiaChi(e.target.value)}
+                      className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                      Người liên hệ
+                    </div>
+                    <input
+                      value={qaLienHe}
+                      onChange={(e) => setQaLienHe(e.target.value)}
+                      className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                      Ghi chú
+                    </div>
+                    <textarea
+                      value={qaGhiChu}
+                      onChange={(e) => setQaGhiChu(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none"
+                    />
+                  </div>
                 </>
               ) : (
                 <>
+                  {/* Xe: HTVT/ĐVT khóa theo ngữ cảnh form đơn (V21) */}
                   {!htvtId && (
-                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                      Chọn <b>Hình thức VT</b> trước (và ĐVT nếu thuê ngoài).
+                    <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Chọn <b>Hình thức vận tải</b> trên form đơn trước. Nếu{" "}
+                      <b>Thuê ngoài</b> phải chọn thêm <b>Đơn vị vận tải</b>.
                     </p>
                   )}
-                  <input
-                    value={qaBienSo}
-                    onChange={(e) => setQaBienSo(e.target.value)}
-                    placeholder="Biển số xe *"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg uppercase"
-                  />
                   <div className="grid grid-cols-2 gap-2">
-                    <input
-                      value={qaMooc}
-                      onChange={(e) => setQaMooc(e.target.value)}
-                      placeholder="Số mooc"
-                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
-                    />
-                    <input
-                      value={qaBangLai}
-                      onChange={(e) => setQaBangLai(e.target.value)}
-                      placeholder="Bằng lái"
-                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Biển số xe *
+                      </div>
+                      <input
+                        autoFocus
+                        value={qaBienSo}
+                        onChange={(e) => setQaBienSo(e.target.value)}
+                        placeholder="VD: 38C-12345"
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg uppercase"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Số mooc
+                      </div>
+                      <input
+                        value={qaMooc}
+                        onChange={(e) => setQaMooc(e.target.value)}
+                        placeholder="VD: 15R-… hoặc số mooc"
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Tên lái xe
+                      </div>
+                      <input
+                        value={qaLaiXe}
+                        onChange={(e) => setQaLaiXe(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Bằng lái
+                      </div>
+                      <input
+                        value={qaBangLai}
+                        onChange={(e) => setQaBangLai(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg"
+                      />
+                    </div>
+                  </div>
+                  <div
+                    className={`grid gap-2 ${
+                      isThueNgoai ? "grid-cols-2" : "grid-cols-1"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                        Hình thức vận tải
+                      </div>
+                      <div className="px-3 py-2.5 text-sm rounded-lg bg-slate-100 border border-slate-200 text-slate-700">
+                        {htvtName || htvtId || "— chưa chọn —"}
+                      </div>
+                    </div>
+                    {isThueNgoai && (
+                      <div>
+                        <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                          Đơn vị vận tải
+                        </div>
+                        <div className="px-3 py-2.5 text-sm rounded-lg bg-slate-100 border border-slate-200 text-slate-700">
+                          {dvtName || dvtId || "— chưa chọn —"}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[12px] font-semibold text-slate-600 mb-1">
+                      Ghi chú
+                    </div>
+                    <textarea
+                      value={qaXeNote}
+                      onChange={(e) => setQaXeNote(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-none"
                     />
                   </div>
-                  <input
-                    value={qaLaiXe}
-                    onChange={(e) => setQaLaiXe(e.target.value)}
-                    placeholder="Tên lái xe"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg"
-                  />
                 </>
               )}
               {quickErr && (
-                <p className="text-[11px] text-red-600 font-medium">{quickErr}</p>
+                <p className="text-[12px] text-red-600 font-medium">{quickErr}</p>
               )}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={quickBusy}
-                  onClick={() => {
-                    setQuickOpen(false);
-                    resetQuickForm();
-                  }}
-                  className="flex-1 py-2 text-sm rounded-lg border border-slate-300 text-slate-600"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="button"
-                  disabled={quickBusy}
-                  onClick={() => void submitQuickAdd()}
-                  className="flex-1 py-2 text-sm rounded-lg bg-sky-500 text-white font-semibold disabled:opacity-50"
-                >
-                  {quickBusy ? "Đang lưu…" : "Lưu & chọn"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="p-3 border-t border-slate-100 shrink-0 safe-area-pb space-y-2">
-            {canQuick && !quickOpen && (
               <button
                 type="button"
-                onClick={() => {
-                  resetQuickForm();
-                  setQuickOpen(true);
-                }}
-                className="w-full py-2.5 text-sm font-semibold rounded-xl border border-sky-300 text-sky-700 bg-sky-50 hover:bg-sky-100"
+                disabled={quickBusy}
+                onClick={() => void submitQuickAdd()}
+                className="w-full py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-sm disabled:opacity-50"
               >
-                {type === "DVT"
-                  ? "+ Thêm nhanh đơn vị vận tải"
-                  : "+ Thêm nhanh biển số xe"}
+                {quickBusy
+                  ? "Đang lưu…"
+                  : type === "DVT"
+                    ? "LƯU VÀ CHỌN ĐƠN VỊ"
+                    : "LƯU VÀ CHỌN XE"}
               </button>
-            )}
-            <button
-              type="button"
-              onClick={close}
-              className="w-full py-2.5 text-sm font-medium rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50"
-            >
-              Đóng
-            </button>
-          </div>
+            </div>
+          ) : (
+            <>
+              {/* Search + nút thêm (V21: dưới ô tìm kiếm) */}
+              <div className="p-3 border-b border-slate-100 shrink-0 space-y-2">
+                <input
+                  autoFocus
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Tìm kiếm…"
+                  className="w-full px-3 py-2.5 text-base sm:text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400"
+                />
+                {canQuick && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetQuickForm();
+                      setQuickOpen(true);
+                    }}
+                    className="w-full py-2.5 text-sm font-semibold rounded-xl bg-sky-500 text-white hover:bg-sky-400"
+                  >
+                    {type === "DVT"
+                      ? "+ Thêm đơn vị vận tải mới"
+                      : "+ Thêm xe mới"}
+                  </button>
+                )}
+                <div className="text-[11px] text-slate-500">
+                  {loading
+                    ? "Đang tải…"
+                    : `${filtered.length}${items.length > filtered.length ? ` / ${items.length}` : ""} mục`}
+                </div>
+              </div>
+
+              {/* List */}
+              <div className="overflow-y-auto flex-1 overscroll-contain">
+                {loading ? (
+                  <div className="text-center text-slate-400 text-sm py-10">
+                    Đang tải danh mục…
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="text-center text-slate-400 text-sm py-10 px-4">
+                    {type === "HH" && supplierId
+                      ? "Không có HH trong NCC_Hanghoa của NCC này"
+                      : q
+                        ? "Không tìm thấy kết quả"
+                        : "Không có dữ liệu"}
+                  </div>
+                ) : (
+                  filtered.map((it) => (
+                    <button
+                      key={it.id}
+                      type="button"
+                      className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
+                        it.id === value ? "bg-sky-50" : ""
+                      }`}
+                      onClick={() => {
+                        onChange(it.id, it.name, it.raw);
+                        setLabel(it.name);
+                        close();
+                      }}
+                    >
+                      <div
+                        className={`text-sm sm:text-[15px] leading-snug ${
+                          it.id === value
+                            ? "font-semibold text-sky-800"
+                            : "font-medium text-slate-800"
+                        }`}
+                      >
+                        {it.name}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                        {it.id}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+
+              <div className="p-3 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  onClick={close}
+                  className="w-full py-2.5 text-sm font-medium rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50"
+                >
+                  Đóng
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>,
       document.body

@@ -248,7 +248,9 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                     displayName={d.vehicleName}
                     disabled={xeDisabled}
                     htvtId={d.transportTypeId || undefined}
+                    htvtName={d.transportTypeName || undefined}
                     dvtId={needCarrier ? d.carrierId || undefined : undefined}
+                    dvtName={needCarrier ? d.carrierName || undefined : undefined}
                     placeholder={
                       xeDisabled ? "Chọn HTVT trước…" : "Chọn xe…"
                     }

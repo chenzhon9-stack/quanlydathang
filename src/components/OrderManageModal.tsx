@@ -684,8 +684,12 @@ export function OrderManageModal({
                       displayName={b.vehicleName}
                       disabled={!editable || lockedRecv || xeDisabled}
                       htvtId={b.transportTypeId || undefined}
+                      htvtName={b.transportTypeName || undefined}
                       dvtId={
                         needCarrier ? b.carrierId || undefined : undefined
+                      }
+                      dvtName={
+                        needCarrier ? b.carrierName || undefined : undefined
                       }
                       onChange={(id, name) =>
                         setBlocks((rows) =>

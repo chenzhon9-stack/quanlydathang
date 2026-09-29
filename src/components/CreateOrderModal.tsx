@@ -433,7 +433,9 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                     displayName={d.vehicleName}
                     disabled={xeDisabled}
                     htvtId={d.transportTypeId || undefined}
+                    htvtName={d.transportTypeName || undefined}
                     dvtId={needCarrier ? d.carrierId || undefined : undefined}
+                    dvtName={needCarrier ? d.carrierName || undefined : undefined}
                     placeholder={
                       xeDisabled
                         ? needCarrier
