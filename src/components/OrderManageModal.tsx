@@ -153,7 +153,7 @@ export function OrderManageModal({
         byCt.get(id)!.push(g);
       }
 
-      const mapped: Block[] = details
+      let mapped: Block[] = details
         .filter((d) => {
           const s = String(d.status || "");
           return !s.includes("Xóa");
@@ -175,7 +175,8 @@ export function OrderManageModal({
             vehicleName: d.vehiclePlate || d.vehicleId || "",
             productId: d.productId || "",
             productName: d.productName || d.productId || "",
-            tyleChiahet: 0, // bổ sung khi chọn lại HH; BE vẫn validate
+            // Enrich từ listDetails (DetailService.hhMeta)
+            tyleChiahet: Number(d.tyleChiahet) || 0,
             regionId: d.regionId || "",
             regionName: d.regionName || d.regionId || "",
             note: d.note || "",
@@ -199,6 +200,35 @@ export function OrderManageModal({
                 : [emptyGh()],
           };
         });
+
+      // Backup: nếu list chưa có tyleChiahet → load master HH (type=HH → items)
+      if (mapped.some((b) => b.productId && !(b.tyleChiahet > 0))) {
+        try {
+          const rh = await fetch("/api/v1/masters?type=HH", { headers });
+          const jh = await rh.json();
+          const hhList: Record<string, string>[] =
+            jh.data?.items || jh.data?.HH || [];
+          const byMa: Record<string, number> = {};
+          for (const r of hhList) {
+            const id = String(r.MaHH || r.MaHh || "").trim();
+            if (!id) continue;
+            const step = parseTyleChiahet(r);
+            if (step > 0) {
+              byMa[id] = step;
+              byMa[id.toUpperCase()] = step;
+            }
+          }
+          mapped = mapped.map((b) => {
+            if (b.tyleChiahet > 0) return b;
+            const step =
+              byMa[b.productId] || byMa[String(b.productId).toUpperCase()] || 0;
+            return step > 0 ? { ...b, tyleChiahet: step } : b;
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+
       setBlocks(mapped.length ? mapped : [emptyBlock()]);
     } catch (e: unknown) {
       setErr((e as Error).message);
@@ -833,30 +863,55 @@ export function OrderManageModal({
                               )}
                             </td>
                             <td className="px-1 py-1">
-                              <DecimalInput
-                                value={g.plannedQty}
-                                disabled={!editable || lockedRecv}
-                                onValueChange={(display) =>
-                                  setBlocks((rows) =>
-                                    rows.map((x, i) =>
-                                      i === bi
-                                        ? {
-                                            ...x,
-                                            deliveries: x.deliveries.map(
-                                              (dd, j) =>
-                                                j === gi
-                                                  ? {
-                                                      ...dd,
-                                                      plannedQty: display,
-                                                    }
-                                                  : dd
-                                            ),
-                                          }
-                                        : x
-                                    )
-                                  )
-                                }
-                              />
+                              {(() => {
+                                const qty = parseDecimalVN(g.plannedQty);
+                                const stepErr =
+                                  qty > 0
+                                    ? stepErrorMsg(
+                                        b.productName || b.productId,
+                                        qty,
+                                        b.tyleChiahet
+                                      )
+                                    : null;
+                                return (
+                                  <>
+                                    <DecimalInput
+                                      value={g.plannedQty}
+                                      disabled={!editable || lockedRecv}
+                                      className={
+                                        stepErr
+                                          ? "border-red-400 bg-red-50 focus:ring-red-300"
+                                          : undefined
+                                      }
+                                      onValueChange={(display) =>
+                                        setBlocks((rows) =>
+                                          rows.map((x, i) =>
+                                            i === bi
+                                              ? {
+                                                  ...x,
+                                                  deliveries: x.deliveries.map(
+                                                    (dd, j) =>
+                                                      j === gi
+                                                        ? {
+                                                            ...dd,
+                                                            plannedQty: display,
+                                                          }
+                                                        : dd
+                                                  ),
+                                                }
+                                              : x
+                                          )
+                                        )
+                                      }
+                                    />
+                                    {stepErr && (
+                                      <p className="text-[10px] text-red-600 font-medium mt-0.5 leading-snug">
+                                        {stepErr}
+                                      </p>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </td>
                             <td className="px-1 py-1 text-center text-slate-500">
                               {g.actualQty.toFixed(2)}
