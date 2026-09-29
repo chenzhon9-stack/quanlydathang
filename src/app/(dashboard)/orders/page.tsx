@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ACTION, clientHasAny, readClientUser } from "@/lib/nav-access";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -27,11 +26,18 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /**
- * Ma trận nút tab Đơn hàng — parity V21:
- * - Chưa gửi (LanGui=0): Thêm · Gửi · Xóa
- * - Đã gửi / Đang xử lý: Sửa · Hủy · Reset? · Gửi lại? · PDF?
- * - Hoàn thành / Hủy đơn: PDF? (chỉ xem file)
- * Nguồn quyết định chính: LanGui (sendCount) + status + canReset + resendMail + FileDonhang
+ * Ma trận nút tab Đơn hàng — parity V21 (permission + business rule):
+ *
+ * Nguồn:
+ * - roleAccess / ORDER_* matrix (admin|purchase|dispatcher)
+ * - LanGui: 0 = chưa gửi; >0 = đã gửi NCC
+ * - cancelOrder: ORDER_CANCEL; BE chặn khi đã có xe nhận (D112)
+ * - resetOrder: admin|purchase (+canReset: quá hạn ngày + còn CT chưa nhận)
+ * - sendOrder / gửi lại: ORDER_SEND; gửi lại khi GuiLaimail
+ * - Quản lý xe (openOrderFlow): ORDER_UPDATE
+ *   · Chưa gửi → nút "Thêm" trên list
+ *   · Đã gửi → mở qua click Mã đơn (V21 openOrderFlow), không nhét "Sửa" vào cột Hành động
+ * - PDF: cột riêng khi có FileDonhang (không trộn vào Hành động)
  */
 function OrderActions({
   o,
@@ -46,8 +52,8 @@ function OrderActions({
   const canUpdate = clientHasAny(user, [...ACTION.orderUpdate]);
   const canSend = clientHasAny(user, [...ACTION.orderSend]);
   const canCancel = clientHasAny(user, [...ACTION.orderCancel]);
-  // Reset: ORDER_UPDATE hoặc CANCEL (admin/purchase) — parity quyền reset V21
-  const canReset =
+  // Reset: API đã gắn o.canReset (ngày + còn xe chưa nhận); quyền admin/purchase
+  const canResetBtn =
     clientHasAny(user, [...ACTION.orderUpdate, ...ACTION.orderCancel]) &&
     Boolean(o.canReset);
 
@@ -59,14 +65,14 @@ function OrderActions({
     st.includes("HUY") ||
     raw.includes("Hủy");
   const isDone =
-    st === "DONE" || st.includes("HOÀN") || st.includes("HOAN") || raw === "Hoàn thành";
+    st === "DONE" ||
+    st.includes("HOÀN") ||
+    st.includes("HOAN") ||
+    raw === "Hoàn thành";
   const lanGui = Number(o.sendCount) || 0;
   const neverSent = lanGui === 0;
   const hasDetails = (Number(o.detailCount) || 0) > 0;
-  // Cho phép quản lý khi chưa kết thúc
-  const canManage = !isCancel && !isDone && canUpdate;
-  // Nhãn: chưa gửi → "Thêm"; đã gửi → "Sửa"
-  const manageLabel = neverSent ? "Thêm" : "Sửa";
+  const terminal = isCancel || isDone;
 
   async function cancelOrder(label: string) {
     if (!confirm(`${label} đơn ${o.orderId}?`)) return;
@@ -95,7 +101,10 @@ function OrderActions({
       { year: new Date().getFullYear(), sendAction: isResend ? "send" : "" }
     );
     if (!json.success) {
-      alert(json.error?.message || (isResend ? "Gửi lại thất bại" : "Gửi đơn thất bại"));
+      alert(
+        json.error?.message ||
+          (isResend ? "Gửi lại thất bại" : "Gửi đơn thất bại")
+      );
       return;
     }
     const data = json.data as {
@@ -125,56 +134,62 @@ function OrderActions({
     onChanged?.();
   }
 
+  if (terminal) {
+    return <span className="text-[11px] text-slate-400">—</span>;
+  }
+
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
-      {/* Thêm / Sửa — mở OrderManageModal */}
-      {canManage && (
+      {/* V21: chưa gửi → Thêm (openOrderFlow / OrderManage) */}
+      {neverSent && canUpdate && (
         <button
           type="button"
           onClick={() => onManageOrder?.(o)}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500"
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-100 text-slate-800 border border-slate-300 hover:bg-slate-200"
         >
-          {manageLabel}
+          Thêm
         </button>
       )}
 
-      {/* Gửi — chỉ khi chưa gửi + còn chi tiết */}
-      {neverSent && !isCancel && !isDone && canSend && (
+      {/* Gửi — ORDER_SEND · LanGui=0 · có ≥1 CT */}
+      {neverSent && canSend && (
         <button
           type="button"
           disabled={!hasDetails}
-          title={!hasDetails ? "Cần thêm ít nhất 1 xe trước khi gửi" : undefined}
+          title={
+            !hasDetails ? "Cần thêm ít nhất 1 xe trước khi gửi" : undefined
+          }
           onClick={() => sendOrder(false)}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-100 text-slate-800 border border-slate-300 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Gửi
         </button>
       )}
 
-      {/* Xóa — chỉ khi chưa gửi (V21 xóa đơn khởi tạo) */}
-      {neverSent && !isCancel && !isDone && canCancel && (
+      {/* Xóa — ORDER_CANCEL · chưa gửi (V21 xóa đơn khởi tạo) */}
+      {neverSent && canCancel && (
         <button
           type="button"
           onClick={() => cancelOrder("Xóa")}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-600 text-white hover:bg-red-500"
         >
           Xóa
         </button>
       )}
 
-      {/* Hủy — đã gửi, chưa hoàn thành */}
-      {!neverSent && !isCancel && !isDone && canCancel && (
+      {/* Hủy — ORDER_CANCEL · đã gửi · BE từ chối nếu đã có xe nhận (D112) */}
+      {!neverSent && canCancel && (
         <button
           type="button"
           onClick={() => cancelOrder("Hủy")}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-500 text-white hover:bg-red-400"
+          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-600 text-white hover:bg-red-500"
         >
           Hủy
         </button>
       )}
 
-      {/* Reset — rule ngày + còn xe chưa nhận (o.canReset từ API) */}
-      {!isCancel && canReset && (
+      {/* Reset — quá hạn ngày + còn xe chưa nhận (o.canReset từ API) */}
+      {canResetBtn && (
         <button
           type="button"
           onClick={async () => {
@@ -199,12 +214,12 @@ function OrderActions({
           }}
           className="px-2.5 py-1 text-[11px] font-medium rounded bg-amber-500 text-white hover:bg-amber-400"
         >
-          Reset đơn
+          Reset
         </button>
       )}
 
-      {/* Gửi lại — GuiLaimail */}
-      {Boolean(o.resendMail) && canSend && !isCancel && (
+      {/* Gửi lại — ORDER_SEND · GuiLaimail */}
+      {Boolean(o.resendMail) && canSend && (
         <button
           type="button"
           onClick={() => sendOrder(true)}
@@ -212,18 +227,6 @@ function OrderActions({
         >
           Gửi lại
         </button>
-      )}
-
-      {/* PDF — có FileDonhang */}
-      {o.orderFile && (
-        <a
-          href={o.orderFile}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-slate-200 text-slate-700 hover:bg-slate-300"
-        >
-          PDF
-        </a>
       )}
     </div>
   );
@@ -398,12 +401,30 @@ export default function OrdersPage() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <Link
-                      href={`/orders?q=${encodeURIComponent(o.orderId)}`}
-                      className="text-sm font-bold text-blue-700 underline break-all"
-                    >
-                      {o.orderId}
-                    </Link>
+                    {(() => {
+                      const stU = String(o.status || "").toUpperCase();
+                      const terminalRow =
+                        stU === "CANCEL" ||
+                        stU === "DONE" ||
+                        stU.includes("HỦY") ||
+                        stU.includes("HOÀN");
+                      const canOpen =
+                        !terminalRow &&
+                        clientHasAny(pageUser, [...ACTION.orderUpdate]);
+                      return canOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => setManageOrderId(o.orderId)}
+                          className="text-sm font-bold text-blue-700 underline break-all text-left"
+                        >
+                          {o.orderId}
+                        </button>
+                      ) : (
+                        <span className="text-sm font-bold text-blue-700 break-all">
+                          {o.orderId}
+                        </span>
+                      );
+                    })()}
                     <div className="text-xs text-slate-500 mt-0.5">
                       {o.orderDate}
                     </div>
@@ -479,6 +500,7 @@ export default function OrdersPage() {
                     <th className="px-3 py-2.5 text-left font-semibold">Nhà cung cấp</th>
                     <th className="px-3 py-2.5 text-right font-semibold">CT</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Trạng thái</th>
+                    <th className="px-3 py-2.5 text-center font-semibold">PDF</th>
                     <th className="px-3 py-2.5 text-left font-semibold">Người tạo</th>
                     <th className="px-3 py-2.5 text-right font-semibold">Hành động</th>
                   </tr>
@@ -487,11 +509,21 @@ export default function OrdersPage() {
                   {dates.map((date) => (
                     <React.Fragment key={`g-${date}`}>
                       <tr className="bg-slate-700 text-white">
-                        <td colSpan={7} className="px-3 py-2 text-xs font-medium">
+                        <td colSpan={8} className="px-3 py-2 text-xs font-medium">
                           📅 Ngày đặt lệnh: {date.split("-").reverse().join("/")}
                         </td>
                       </tr>
-                      {byDate[date].map((o) => (
+                      {byDate[date].map((o) => {
+                        const stU = String(o.status || "").toUpperCase();
+                        const terminalRow =
+                          stU === "CANCEL" ||
+                          stU === "DONE" ||
+                          stU.includes("HỦY") ||
+                          stU.includes("HOÀN");
+                        const canOpenManage =
+                          !terminalRow &&
+                          clientHasAny(pageUser, [...ACTION.orderUpdate]);
+                        return (
                         <tr
                           key={o.orderId}
                           className={`border-t border-slate-100 ${
@@ -499,7 +531,20 @@ export default function OrdersPage() {
                           }`}
                         >
                           <td className="px-3 py-2.5">
-                            <span className="font-semibold text-blue-700">{o.orderId}</span>
+                            {canOpenManage ? (
+                              <button
+                                type="button"
+                                title="Mở quản lý đơn (V21 openOrderFlow)"
+                                onClick={() => setManageOrderId(o.orderId)}
+                                className="font-semibold text-blue-700 underline hover:text-blue-900 text-left"
+                              >
+                                {o.orderId}
+                              </button>
+                            ) : (
+                              <span className="font-semibold text-blue-700">
+                                {o.orderId}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">
                             {o.orderDate}
@@ -511,14 +556,34 @@ export default function OrdersPage() {
                           <td className="px-3 py-2.5">
                             <StatusBadge status={STATUS_LABEL[o.status] || o.status} />
                           </td>
+                          <td className="px-3 py-2.5 text-center">
+                            {o.orderFile ? (
+                              <a
+                                href={o.orderFile}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title="Mở file đơn hàng"
+                                className="inline-flex text-red-600 hover:text-red-700 text-base"
+                              >
+                                📄
+                              </a>
+                            ) : (
+                              <span className="text-slate-400 text-xs">-</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2.5 text-xs text-slate-500 truncate max-w-[140px]">
                             {o.createdBy}
                           </td>
                           <td className="px-3 py-2.5">
-                            <OrderActions o={o} onChanged={load} onManageOrder={(o) => setManageOrderId(o.orderId)} />
+                            <OrderActions
+                              o={o}
+                              onChanged={load}
+                              onManageOrder={(ord) => setManageOrderId(ord.orderId)}
+                            />
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </React.Fragment>
                   ))}
                 </tbody>
