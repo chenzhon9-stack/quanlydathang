@@ -78,13 +78,19 @@ export function uniqueCodeFromUsed(
   return b + Date.now().toString().slice(-6);
 }
 
-/** Prefix MaXe theo MaHTVT (V21 VEHICLE_HTVT_PREFIX — fallback XX) */
+/**
+ * Prefix MaXe theo MaHTVT — parity V21:
+ *   NPP:"1P", NCC:"2C", THUE_NGOAI:"3T", KHACH:"4K"
+ */
 export const VEHICLE_HTVT_PREFIX: Record<string, string> = {
-  THUE_NGOAI: "TN",
-  KHACH_HANG: "KH",
-  KH_VAN_CHUYEN: "KH",
-  CONG_TY: "CT",
-  TU_CO: "TC",
+  NPP: "1P",
+  NCC: "2C",
+  THUE_NGOAI: "3T",
+  KHACH: "4K",
+  // alias form / sheet
+  KHACH_HANG: "4K",
+  KH_VAN_CHUYEN: "4K",
+  KH: "4K",
 };
 
 export function vehicleCodePrefix(maHtvt: string): string {
