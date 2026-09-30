@@ -88,11 +88,21 @@ function OrderActions({
   }
 
   async function sendOrder(isResend: boolean) {
+    const lan = Number(o.sendCount) || 0;
+    const nccLine = o.supplierName
+      ? `\nNCC: ${o.supplierName} (${o.supplierId || ""})`
+      : o.supplierId
+        ? `\nNCC: ${o.supplierId}`
+        : "";
     if (
       !confirm(
-        isResend
-          ? `Gửi lại đơn ${o.orderId}?\n(Theo hình thức NCC: Email / Zalo / APP)`
-          : `Gửi đơn ${o.orderId} tới NCC?\n(Email / Zalo / hoặc hướng dẫn APP)`
+        (isResend
+          ? `Gửi lại đơn ${o.orderId}?`
+          : `Gửi đơn ${o.orderId} tới NCC?`) +
+          nccLine +
+          `\nLần gửi hiện tại: ${lan}` +
+          `\n(Hình thức theo DM_NCC: Email / Zalo / APP)` +
+          `\n\nXác nhận?`
       )
     )
       return;
@@ -121,15 +131,33 @@ function OrderActions({
       appGuide?: boolean;
     };
     if (data?.needConfirm) {
-      const choice = window.prompt(
+      const choiceMap: Record<string, string> = {
+        "1": "send",
+        "2": "reset",
+        "3": "cancel",
+        "4": "markSent",
+      };
+      const choiceInput = window.prompt(
         (data.message || "Đơn gửi muộn.") +
-          "\n\nNhập: send | reset | cancel | markSent",
-        "send"
+          "\n\nChọn hành động:\n" +
+          "  1. Gửi bình thường (send)\n" +
+          "  2. Reset đơn (reset)\n" +
+          "  3. Hủy đơn (cancel)\n" +
+          "  4. Đánh dấu đã gửi ngoài hệ thống (markSent)\n\n" +
+          "Nhập số 1 / 2 / 3 / 4:",
+        "1"
       );
-      if (!choice) return;
+      if (!choiceInput) return;
+      const sendAction =
+        choiceMap[String(choiceInput).trim()] ||
+        (["send", "reset", "cancel", "markSent"].includes(
+          String(choiceInput).trim().toLowerCase()
+        )
+          ? String(choiceInput).trim().toLowerCase()
+          : "send");
       const json2 = await apiPost(
         `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-        { year: new Date().getFullYear(), sendAction: choice.trim() }
+        { year: new Date().getFullYear(), sendAction }
       );
       if (!json2.success) {
         alert(json2.error?.message || "Thao tác thất bại");

@@ -986,18 +986,9 @@ export class OrderService {
     sendAction?: string,
     opts?: { resend?: boolean }
   ) {
-    if (
-      !hasPermission(user, "ORDER_SEND") &&
-      !hasPermission(user, "ORDER_UPDATE") &&
-      !hasPermission(user, "*")
-    ) {
-      if (
-        !["ADMIN", "PURCHASE", "MANAGER", "DISPATCHER"].includes(
-          String(user.role || "").toUpperCase()
-        )
-      ) {
-        throw { code: "PERMISSION_DENIED", message: "Không có quyền gửi đơn" };
-      }
+    // Chỉ ORDER_SEND (hoặc *) — không fallback role (MANAGER không được gửi)
+    if (!hasPermission(user, "ORDER_SEND") && !hasPermission(user, "*")) {
+      throw { code: "PERMISSION_DENIED", message: "Không có quyền gửi đơn" };
     }
 
     const y = year ?? currentYearVN();
@@ -1154,10 +1145,12 @@ export class OrderService {
         ...(secret ? { secret } : {}),
       };
       const bodyStr = JSON.stringify(payload);
-      const GAS_TIMEOUT_MS = 20000;
+      // PDF + MailApp thực tế 20–45s; Hobby max ~60s serverless → 55s
+      const GAS_TIMEOUT_MS = 55_000;
+      const baselineLanGui = Number(lanGui) || 0;
 
-      // GAS Web App thường 302 → googleusercontent; POST lại URL cuối (giữ body).
-      async function postGas(url: string, canRedirect = true): Promise<{
+      // GAS Web App 302 → googleusercontent. Thử follow trước; fallback manual POST.
+      async function postGas(url: string, mode: "follow" | "manual" = "follow"): Promise<{
         status: number;
         body: Record<string, unknown>;
         raw: string;
@@ -1173,17 +1166,15 @@ export class OrderService {
               Accept: "application/json",
             },
             body: bodyStr,
-            redirect: canRedirect ? "manual" : "follow",
+            redirect: mode,
             signal: controller.signal,
           });
         } finally {
           clearTimeout(timer);
         }
-        if (canRedirect && res.status >= 300 && res.status < 400) {
+        if (mode === "manual" && res.status >= 300 && res.status < 400) {
           const loc = res.headers.get("location");
-          if (loc) {
-            return postGas(loc, false);
-          }
+          if (loc) return postGas(loc, "follow");
         }
         const raw = await res.text();
         let body: Record<string, unknown> = {};
@@ -1208,27 +1199,92 @@ export class OrderService {
         return { status: res.status, body, raw };
       }
 
+      /** Sau timeout/abort: reload Sheet — nếu LanGui đã tăng thì coi GAS đã gửi (tránh double-send). */
+      async function resolveAfterGasAbort(): Promise<{
+        orderId: string;
+        via: "gas";
+        needConfirm: false;
+        notifiedNcc: boolean;
+        channel: string;
+        hinhThucGui: string;
+        message: string;
+        recoveredFromSheet: true;
+      } | null> {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          try {
+            const afterOrders = await OrderRepository.findMany({ year: y });
+            const after = afterOrders.find(
+              (o) =>
+                String(o.orderId).toUpperCase() ===
+                String(orderId).toUpperCase()
+            );
+            const afterLanGui = Number(after?.sendCount) || 0;
+            if (afterLanGui > baselineLanGui) {
+              return {
+                orderId,
+                via: "gas" as const,
+                needConfirm: false as const,
+                notifiedNcc: true,
+                channel: channelHint,
+                hinhThucGui,
+                recoveredFromSheet: true as const,
+                message:
+                  `Đã gửi đơn qua GAS (xác nhận Sheet lần ${attempt + 1}: ` +
+                  `LanGui ${baselineLanGui} → ${afterLanGui}). Không bấm gửi lại.`,
+              };
+            }
+          } catch (e) {
+            console.error(
+              `[sendOrder] recover attempt ${attempt + 1} failed`,
+              e
+            );
+          }
+        }
+        return null;
+      }
+
       let gasRes: { status: number; body: Record<string, unknown>; raw: string };
       try {
-        gasRes = await postGas(gasUrl);
+        gasRes = await postGas(gasUrl, "follow");
       } catch (e) {
         const aborted =
           e instanceof Error &&
           (e.name === "AbortError" || /aborted/i.test(e.message));
+        if (aborted) {
+          const recovered = await resolveAfterGasAbort();
+          if (recovered) {
+            await writeAudit({
+              email: user.email,
+              role: user.role,
+              action: "SEND_ORDER_GAS_RECOVERED",
+              maDon: orderId,
+              targetId: orderId,
+              newValue: JSON.stringify({
+                baselineLanGui,
+                message: recovered.message,
+              }),
+              year: y,
+            });
+            return recovered;
+          }
+        }
         throw {
           code: "GAS_SEND_FAILED",
           message: aborted
-            ? `GAS không phản hồi trong ${GAS_TIMEOUT_MS / 1000}s. Kiểm tra Executions trên Apps Script; nếu LanGui không tăng thì đơn chưa được gửi.`
+            ? `GAS không phản hồi trong ${GAS_TIMEOUT_MS / 1000}s và Sheet chưa tăng LanGui. ` +
+              `Đợi ~30s rồi kiểm tra cột LanGui trước khi gửi lại (tránh trùng email).`
             : `Không gọi được GAS: ${e instanceof Error ? e.message : String(e)}`,
         };
       }
 
       const gasBody = gasRes.body;
-      console.info(
-        "[sendOrder] GAS response",
-        gasRes.status,
-        JSON.stringify(gasBody).slice(0, 500)
-      );
+      console.error("[sendOrder] GAS response", {
+        maDon: orderId,
+        status: gasRes.status,
+        bodyPreview: JSON.stringify(gasBody).slice(0, 500),
+        hint: gasBody._gasHtml ? "GAS trả HTML" : undefined,
+      });
 
       /** Làm sạch message — không bao giờ alert HTML */
       const cleanMsg = (v: unknown, fallback: string) => {
@@ -1301,18 +1357,9 @@ export class OrderService {
       });
 
       const notified = gasBody.notifiedNcc !== false;
+      // Nhánh GAS chỉ còn email/zalo (APP return sớm phía trên)
       let defaultMsg = "Đã gửi đơn qua GAS.";
-      let appGuide = false;
-      if (channelHint === "app") {
-        // V21: success + message mở APP
-        appGuide = true;
-        defaultMsg =
-          cleanMsg(
-            gasBody.message,
-            ""
-          ) ||
-          `Đơn hàng ${orderId} đã sẵn sàng. Vui lòng mở APP của nhà cung cấp để đặt hàng.`;
-      } else if (channelHint === "zalo") {
+      if (channelHint === "zalo") {
         defaultMsg = notified
           ? "Đã gửi đơn qua Zalo (GAS)."
           : "GAS đã xử lý đơn nhưng có thể chưa gửi được Zalo — kiểm tra ZaloUserId trên DM_NCC.";
@@ -1330,7 +1377,7 @@ export class OrderService {
         notifiedNcc: notified,
         channel: channelHint,
         hinhThucGui,
-        appGuide,
+        appGuide: false,
         zaloUserId: zaloUserId ? "(có)" : "(thiếu)",
         message: cleanMsg(gasBody.message, defaultMsg),
         gas: gasBody,
