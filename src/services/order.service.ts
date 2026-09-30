@@ -1051,9 +1051,90 @@ export class OrderService {
       return hinhNorm || "unknown";
     })();
 
-    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo / APP) ───
-    // V21 APP: vẫn xuLyDonHang_ (LanGui, PDF, ORDERED) nhưng không gửi mail/Zalo
-    //          → message "mở APP của NCC để đặt hàng"
+    // ─── APP: không phụ thuộc GAS (V21 cũng không gửi mail/Zalo) ───
+    // GAS hiện HTTP 500 HTML (thường thiếu PDF_FOLDER_ID / doPost lỗi) → Sheet không đổi + chờ lâu.
+    // Vercel tự ghi LanGui + mark ORDERED + báo mở APP — nhanh, ổn định.
+    if (channelHint === "app") {
+      if (!isSheetsConfigured()) {
+        throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
+      }
+      const ordersApp = await OrderRepository.findMany({ year: y });
+      const orderApp = ordersApp.find(
+        (o) => String(o.orderId).toUpperCase() === String(orderId).toUpperCase()
+      );
+      if (!orderApp) {
+        throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
+      }
+      const tenNcc =
+        String(orderApp.supplierName || orderApp.supplierId || "").trim() ||
+        "nhà cung cấp";
+      const lanGuiNext = (Number(orderApp.sendCount) || 0) + 1;
+      const timeLabel = formatDateTimeVN(new Date());
+      await updateSheetRowByKey(
+        SHEETS.DH,
+        "MaDon",
+        orderId,
+        {
+          LanGui: lanGuiNext,
+          timeGuimail: timeLabel,
+          ChoGuiMail: false,
+          GuiLaimail: false,
+          TrangThaiDon: STATUS_DON.PROCESSING,
+          FileDonhang: orderApp.orderFile || "",
+        },
+        y
+      );
+      const { DetailRepository } = await import(
+        "@/repositories/detail.repository"
+      );
+      const details = await DetailRepository.findMany({ year: y, orderId });
+      let ctUpdated = 0;
+      for (const ct of details) {
+        const st = String(ct.status || "").toUpperCase();
+        if (
+          st === "NEW" ||
+          st === "" ||
+          String(ct.status) === STATUS_CT.NEW ||
+          String(ct.status).includes("Mới")
+        ) {
+          await updateSheetRowByKey(
+            SHEETS.CT,
+            "ID_Chitiet",
+            ct.detailId,
+            { TrangThaiXe: STATUS_CT.ORDERED, TimeChange: timeLabel },
+            y
+          );
+          ctUpdated++;
+        }
+      }
+      await writeAudit({
+        email: user.email,
+        role: user.role,
+        action: "SEND_ORDER_APP",
+        maDon: orderId,
+        targetId: orderId,
+        newValue: JSON.stringify({ lanGui: lanGuiNext, ctUpdated, channel: "app" }),
+        lyDo: "Hình thức APP — cập nhật Sheet, hướng dẫn mở app NCC",
+        year: y,
+      });
+      return {
+        orderId,
+        via: "app" as const,
+        needConfirm: false,
+        notifiedNcc: true,
+        channel: "app",
+        hinhThucGui,
+        appGuide: true,
+        lanGui: lanGuiNext,
+        ctUpdated,
+        message:
+          `Đơn hàng ${orderId} đã sẵn sàng (Lần gửi ${lanGuiNext}).\n` +
+          `Vui lòng mở APP của ${tenNcc} để đặt hàng.\n` +
+          `Hệ thống không gửi Email/Zalo cho hình thức APP.`,
+      };
+    }
+
+    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
     if (gasUrl) {
       const secret = (process.env.GAS_WEBHOOK_SECRET || "").trim();
       // V21 sendOrderEmail(maDon, email, action|null)
@@ -1065,7 +1146,6 @@ export class OrderService {
         email: user.email,
         sendAction: action || null,
         year: y,
-        // Gợi ý thêm cho GAS (bản doPost mới có thể dùng; bản cũ bỏ qua)
         resend: !!(opts?.resend || guiLaiMail || lanGui > 0),
         hinhThucGui,
         zaloUserId,
@@ -1074,23 +1154,31 @@ export class OrderService {
         ...(secret ? { secret } : {}),
       };
       const bodyStr = JSON.stringify(payload);
+      const GAS_TIMEOUT_MS = 20000;
 
-      // GAS Web App thường 302 → googleusercontent; cần POST lại URL cuối (tránh mất body).
+      // GAS Web App thường 302 → googleusercontent; POST lại URL cuối (giữ body).
       async function postGas(url: string, canRedirect = true): Promise<{
         status: number;
         body: Record<string, unknown>;
         raw: string;
       }> {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: bodyStr,
-          redirect: canRedirect ? "manual" : "follow",
-        });
-        // 3xx — follow bằng POST (Node mặc định có thể đổi thành GET)
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS);
+        let res: Response;
+        try {
+          res = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
+            body: bodyStr,
+            redirect: canRedirect ? "manual" : "follow",
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
         if (canRedirect && res.status >= 300 && res.status < 400) {
           const loc = res.headers.get("location");
           if (loc) {
@@ -1108,15 +1196,13 @@ export class OrderService {
           if (looksHtml) throw new Error("html");
           body = JSON.parse(raw) as Record<string, unknown>;
         } catch {
-          // Không đưa HTML thô ra UI
           body = {
             success: false,
             _gasHtml: true,
             error:
-              `GAS trả về trang HTML (HTTP ${res.status}) thay vì JSON. ` +
-              `Đơn có thể đã được xử lý phía GAS — hãy kiểm tra cột LanGui / timeGuimail trên Sheet. ` +
-              `Cách sửa: Apps Script → Deploy → Web app → Execute as: Me, Who has access: Anyone; ` +
-              `đảm bảo doPost trả ContentService JSON (không dùng HtmlService).`,
+              `GAS trả về HTML (HTTP ${res.status}) thay vì JSON — thường do doPost lỗi hoặc Web App chưa deploy đúng. ` +
+              `Nếu cột LanGui trên Sheet KHÔNG tăng thì GAS chưa ghi đơn (chưa gửi được). ` +
+              `Kiểm tra: Deploy → Execute as Me, Anyone; PDF_FOLDER_ID; doPost → ContentService JSON; Logs (Executions).`,
           };
         }
         return { status: res.status, body, raw };
@@ -1126,9 +1212,14 @@ export class OrderService {
       try {
         gasRes = await postGas(gasUrl);
       } catch (e) {
+        const aborted =
+          e instanceof Error &&
+          (e.name === "AbortError" || /aborted/i.test(e.message));
         throw {
           code: "GAS_SEND_FAILED",
-          message: `Không gọi được GAS: ${e instanceof Error ? e.message : String(e)}`,
+          message: aborted
+            ? `GAS không phản hồi trong ${GAS_TIMEOUT_MS / 1000}s. Kiểm tra Executions trên Apps Script; nếu LanGui không tăng thì đơn chưa được gửi.`
+            : `Không gọi được GAS: ${e instanceof Error ? e.message : String(e)}`,
         };
       }
 
