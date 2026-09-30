@@ -83,6 +83,17 @@ export default function PayablesPage() {
 
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  /** Ghi chứng từ CN thủ công */
+  const [entryOpen, setEntryOpen] = useState(false);
+  const [entryBusy, setEntryBusy] = useState(false);
+  const [entryForm, setEntryForm] = useState({
+    maNcc: "",
+    loai: "THANH_TOAN",
+    soTien: "",
+    ngayCT: "",
+    soChungTu: "",
+    dienGiai: "",
+  });
 
   const load = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -258,6 +269,59 @@ export default function PayablesPage() {
 
   const year = Number(fromDate.slice(0, 4)) || init.year;
 
+  async function submitPayableEntry() {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    const soTien = Number(String(entryForm.soTien).replace(",", "."));
+    if (!entryForm.maNcc.trim()) {
+      alert("Chọn / nhập MaNCC");
+      return;
+    }
+    if (!Number.isFinite(soTien) || soTien === 0) {
+      alert("Số tiền phải ≠ 0");
+      return;
+    }
+    setEntryBusy(true);
+    try {
+      const res = await fetch("/api/v1/finance/payables", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          maNcc: entryForm.maNcc.trim(),
+          loai: entryForm.loai,
+          soTien,
+          ngayCT: entryForm.ngayCT || toDate,
+          soChungTu: entryForm.soChungTu,
+          dienGiai: entryForm.dienGiai,
+          year,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.error?.message || "Không ghi được chứng từ");
+        return;
+      }
+      alert("Đã ghi chứng từ: " + (json.data?.idCn || ""));
+      setEntryOpen(false);
+      setEntryForm({
+        maNcc: "",
+        loai: "THANH_TOAN",
+        soTien: "",
+        ngayCT: "",
+        soChungTu: "",
+        dienGiai: "",
+      });
+      void load();
+    } catch {
+      alert("Lỗi mạng");
+    } finally {
+      setEntryBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-4 max-w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -269,14 +333,143 @@ export default function PayablesPage() {
             {meta.priceRows != null ? ` · ${String(meta.priceRows)} giá mua` : ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={load}
-          className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
-        >
-          Tải lại
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEntryForm((f) => ({
+                ...f,
+                ngayCT: f.ngayCT || toDate,
+              }));
+              setEntryOpen(true);
+            }}
+            className="px-3 py-2 text-xs font-semibold rounded-lg bg-sky-500 text-white"
+          >
+            + Ghi chứng từ
+          </button>
+          <button
+            type="button"
+            onClick={load}
+            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+          >
+            Tải lại
+          </button>
+        </div>
       </div>
+
+      {entryOpen && (
+        <div className="bg-white border border-sky-200 rounded-xl p-4 shadow-sm space-y-3">
+          <div className="flex justify-between items-center">
+            <h3 className="font-bold text-slate-800 text-sm">
+              Ghi chứng từ công nợ
+            </h3>
+            <button
+              type="button"
+              className="text-slate-400 text-lg"
+              onClick={() => setEntryOpen(false)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <label className="text-xs text-slate-500">
+              MaNCC *
+              <input
+                value={entryForm.maNcc}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, maNcc: e.target.value }))
+                }
+                list="pay-ncc-list"
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+                placeholder="Mã NCC"
+              />
+              <datalist id="pay-ncc-list">
+                {summary.map((s) => (
+                  <option key={s.supplierId} value={s.supplierId}>
+                    {s.supplierName || s.supplierId}
+                  </option>
+                ))}
+              </datalist>
+            </label>
+            <label className="text-xs text-slate-500">
+              Loại
+              <select
+                value={entryForm.loai}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, loai: e.target.value }))
+                }
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+              >
+                <option value="THANH_TOAN">Thanh toán</option>
+                <option value="CHIET_KHAU">Chiết khấu</option>
+                <option value="DOI_TRU">Đối trừ</option>
+                <option value="DIEU_CHINH_TANG">Điều chỉnh tăng</option>
+                <option value="DIEU_CHINH_GIAM">Điều chỉnh giảm</option>
+                <option value="KHAC">Khác</option>
+              </select>
+            </label>
+            <label className="text-xs text-slate-500">
+              Số tiền *
+              <input
+                value={entryForm.soTien}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, soTien: e.target.value }))
+                }
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+                placeholder="VD: 1000000"
+              />
+            </label>
+            <label className="text-xs text-slate-500">
+              Ngày CT
+              <input
+                type="date"
+                value={entryForm.ngayCT}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, ngayCT: e.target.value }))
+                }
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+              />
+            </label>
+            <label className="text-xs text-slate-500">
+              Số chứng từ
+              <input
+                value={entryForm.soChungTu}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, soChungTu: e.target.value }))
+                }
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+              />
+            </label>
+            <label className="text-xs text-slate-500 sm:col-span-1">
+              Diễn giải
+              <input
+                value={entryForm.dienGiai}
+                onChange={(e) =>
+                  setEntryForm((f) => ({ ...f, dienGiai: e.target.value }))
+                }
+                className="block mt-1 w-full px-2 py-1.5 text-sm border rounded-lg"
+              />
+            </label>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => setEntryOpen(false)}
+              className="px-3 py-1.5 text-xs rounded-lg border"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              disabled={entryBusy}
+              onClick={() => void submitPayableEntry()}
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-500 text-white disabled:opacity-50"
+            >
+              {entryBusy ? "Đang lưu…" : "Lưu chứng từ"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm space-y-2">
         <div className="text-xs font-semibold text-slate-600 uppercase">
