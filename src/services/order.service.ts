@@ -327,6 +327,17 @@ export class OrderService {
     if (row < 0)
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
 
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "CANCEL_ORDER",
+      maDon: orderId,
+      targetId: orderId,
+      newValue: { cancelledCt, deletedGh },
+      lyDo: `Hủy đơn: ${cancelledCt} CT, soft-delete ${deletedGh} GH`,
+      year: y,
+    });
+
     return {
       orderId,
       status: "CANCEL",

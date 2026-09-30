@@ -324,10 +324,19 @@ export class DetailService {
       email: user.email,
       role: user.role,
       action: "RECEIVE_DETAIL",
+      maDon: ct.orderId,
       idCt: detailId,
       targetId: detailId,
-      newValue: JSON.stringify(payload),
-      year: year ?? new Date().getFullYear(),
+      oldValue: { thucNhan: ct.actualReceived, status: ct.status },
+      newValue: {
+        actualReceived: qty,
+        receivedDate: ngay,
+        redistributed,
+      },
+      lyDo: isHangBao(phanLoai)
+        ? "Nhận hàng Bao (ép = SoLuong)"
+        : "Nhận hàng",
+      year: y,
     });
 
     return {
@@ -473,10 +482,21 @@ export class DetailService {
     await writeAudit({
       email: user.email,
       role: user.role,
-      action: "CANCEL_DETAIL",
+      action:
+        effectiveMode === "delete" ? "DELETE_DETAIL" : "CANCEL_DETAIL",
+      maDon: ct.orderId,
       idCt: detailId,
       targetId: detailId,
-      year: year ?? new Date().getFullYear(),
+      oldValue: { status: ct.status, orderSent },
+      newValue: {
+        status: effectiveMode === "delete" ? "DELETE" : "CANCEL",
+        deletedGh,
+      },
+      lyDo:
+        effectiveMode === "delete"
+          ? "Xóa xe (đơn chưa gửi NCC)"
+          : "Hủy xe (đơn đã gửi) + GuiLaimail",
+      year: y,
     });
 
     return {

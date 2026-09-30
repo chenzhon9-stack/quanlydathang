@@ -534,6 +534,18 @@ export class DeliveryService {
       y
     );
 
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "SAVE_PLAN",
+      maDon: ct.orderId,
+      idCt: detailId,
+      targetId: detailId,
+      newValue: { soLuong: sumKh, created, updated, deleted },
+      lyDo: "Lưu kế hoạch giao (KHgiao)",
+      year: y,
+    });
+
     return {
       detailId,
       soLuong: sumKh,
@@ -937,14 +949,18 @@ export class DeliveryService {
       email: user.email,
       role: user.role,
       action: "SAVE_DELIVERY",
+      maDon: ct.orderId,
       idCt: detailId,
       targetId: detailId,
-      newValue: JSON.stringify({
+      newValue: {
         count: list.length,
         totalTg,
         thucNhan,
         sumKh,
-      }),
+        updated,
+        created,
+      },
+      lyDo: "Lưu thực giao batch (saveReal)",
       year: y,
     }).catch(() => {});
 

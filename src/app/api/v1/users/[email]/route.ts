@@ -5,6 +5,7 @@ import { isSheetsConfigured } from "@/lib/sheets/client";
 import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { normalizeRole } from "@/lib/permissions";
+import { writeAudit } from "@/lib/sheets/audit";
 
 type Ctx = { params: Promise<{ email: string }> };
 
@@ -71,6 +72,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (row < 0) {
       return jsonResponse(error("USER_NOT_FOUND", "Không tìm thấy user"), 404);
     }
+
+    await writeAudit({
+      email: gate.user!.email,
+      role: gate.user!.role,
+      action: "USER_UPDATE",
+      targetId: email,
+      newValue: patch,
+      lyDo: `Admin cập nhật user ${email}`,
+    });
 
     if (patch.Role) {
       try {
