@@ -469,24 +469,19 @@ export class FinanceService {
         isActiveFlag(r.HoatDong)
     );
     const now = formatDateTimeVN();
-    const patchExtra = input.chot
-      ? { NguoiChot: user.email, NgayChot: now }
-      : {};
+    const patch: Record<string, string | number | boolean> = {
+      SoDuDau: soDuDau,
+      GhiChu: String(input.ghiChu ?? existing?.GhiChu ?? ""),
+      HoatDong: true,
+    };
+    if (input.chot) {
+      patch.NguoiChot = user.email;
+      patch.NgayChot = now;
+    }
 
     if (existing && String(existing.ID_DD || "").trim()) {
       const id = String(existing.ID_DD).trim();
-      await updateSheetRowByKey(
-        SHEETS.DD,
-        "ID_DD",
-        id,
-        {
-          SoDuDau: soDuDau,
-          GhiChu: input.ghiChu ?? existing.GhiChu ?? "",
-          HoatDong: true,
-          ...patchExtra,
-        },
-        nam
-      );
+      await updateSheetRowByKey(SHEETS.DD, "ID_DD", id, patch, nam);
       await writeAudit({
         email: user.email,
         role: user.role,
