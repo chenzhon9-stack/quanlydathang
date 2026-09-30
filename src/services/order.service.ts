@@ -1036,40 +1036,24 @@ export class OrderService {
     } catch (e) {
       console.warn("[sendOrder] load NCC channel", e);
     }
+    // V21 MASTER: HinhThucGui = Email | ZALO | APP → so khớp sau toLowerCase
+    const hinhNorm = hinhThucGui
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
     const channelHint = (() => {
-      const h = hinhThucGui
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
-      // APP / ứng dụng NCC — không gửi mail/Zalo
-      if (h.includes("app") || h.includes("ung dung") || h.includes("ungdung"))
-        return "app";
-      if (h.includes("zalo") && (h.includes("mail") || h.includes("email")))
-        return "email+zalo";
-      if (h.includes("zalo")) return "zalo";
-      if (h.includes("mail") || h.includes("email")) return "email";
-      if (h.includes("ca ") || h.includes("all")) return "email+zalo";
-      return hinhThucGui || "unknown";
+      if (hinhNorm === "app" || hinhNorm.includes("ung dung")) return "app";
+      if (hinhNorm === "zalo") return "zalo";
+      if (hinhNorm === "email" || hinhNorm === "mail") return "email";
+      if (hinhNorm.includes("zalo")) return "zalo";
+      if (hinhNorm.includes("mail") || hinhNorm.includes("email")) return "email";
+      return hinhNorm || "unknown";
     })();
 
-    // ─── Kênh APP: cảnh báo mở app NCC — không gọi GAS mail/Zalo ───
-    if (channelHint === "app") {
-      return {
-        orderId,
-        via: "app" as const,
-        needConfirm: false,
-        notifiedNcc: false,
-        channel: "app",
-        hinhThucGui,
-        appGuide: true,
-        message:
-          `Nhà cung cấp nhận đơn qua ỨNG DỤNG (APP).\n` +
-          `Vui lòng mở app của NCC để đặt / xác nhận đơn ${orderId}.\n` +
-          `Hệ thống không gửi Email/Zalo cho hình thức này.`,
-      };
-    }
-
-    // ─── Nhánh 1: Uỷ quyền GAS (mail/PDF/Zalo + ghi Sheet) ───
+    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo / APP) ───
+    // V21 APP: vẫn xuLyDonHang_ (LanGui, PDF, ORDERED) nhưng không gửi mail/Zalo
+    //          → message "mở APP của NCC để đặt hàng"
     if (gasUrl) {
       const secret = (process.env.GAS_WEBHOOK_SECRET || "").trim();
       // V21 sendOrderEmail(maDon, email, action|null)
@@ -1227,7 +1211,17 @@ export class OrderService {
 
       const notified = gasBody.notifiedNcc !== false;
       let defaultMsg = "Đã gửi đơn qua GAS.";
-      if (channelHint.includes("zalo")) {
+      let appGuide = false;
+      if (channelHint === "app") {
+        // V21: success + message mở APP
+        appGuide = true;
+        defaultMsg =
+          cleanMsg(
+            gasBody.message,
+            ""
+          ) ||
+          `Đơn hàng ${orderId} đã sẵn sàng. Vui lòng mở APP của nhà cung cấp để đặt hàng.`;
+      } else if (channelHint === "zalo") {
         defaultMsg = notified
           ? "Đã gửi đơn qua Zalo (GAS)."
           : "GAS đã xử lý đơn nhưng có thể chưa gửi được Zalo — kiểm tra ZaloUserId trên DM_NCC.";
@@ -1235,7 +1229,7 @@ export class OrderService {
           defaultMsg =
             "Hình thức gửi là Zalo nhưng DM_NCC thiếu ZaloUserId — bổ sung mã Zalo NCC rồi gửi lại.";
         }
-      } else if (channelHint.includes("email") || channelHint.includes("mail")) {
+      } else if (channelHint === "email") {
         defaultMsg = "Đã gửi đơn qua Email (GAS).";
       }
       return {
@@ -1245,6 +1239,7 @@ export class OrderService {
         notifiedNcc: notified,
         channel: channelHint,
         hinhThucGui,
+        appGuide,
         zaloUserId: zaloUserId ? "(có)" : "(thiếu)",
         message: cleanMsg(gasBody.message, defaultMsg),
         gas: gasBody,
