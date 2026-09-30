@@ -91,14 +91,20 @@ function OrderActions({
     if (
       !confirm(
         isResend
-          ? `Gửi lại đơn ${o.orderId}?`
-          : `Gửi đơn ${o.orderId} tới NCC?`
+          ? `Gửi lại đơn ${o.orderId}?\n(Theo hình thức NCC: Email / Zalo / APP)`
+          : `Gửi đơn ${o.orderId} tới NCC?\n(Email / Zalo / hoặc hướng dẫn APP)`
       )
     )
       return;
+    // V21: gửi lần đầu / gửi lại (GuiLaimail) đều gọi sendOrderEmail(maDon, email, null)
+    // sendAction "send"|"reset"|"cancel"|"markSent" CHỈ dùng khi modal gửi muộn
     const json = await apiPost(
       `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-      { year: new Date().getFullYear(), sendAction: isResend ? "send" : "" }
+      {
+        year: new Date().getFullYear(),
+        sendAction: "",
+        resend: isResend,
+      }
     );
     if (!json.success) {
       alert(
@@ -110,6 +116,9 @@ function OrderActions({
     const data = json.data as {
       needConfirm?: boolean;
       message?: string;
+      channel?: string;
+      notifiedNcc?: boolean;
+      appGuide?: boolean;
     };
     if (data?.needConfirm) {
       const choice = window.prompt(
@@ -126,11 +135,31 @@ function OrderActions({
         alert(json2.error?.message || "Thao tác thất bại");
         return;
       }
-      alert((json2.data as { message?: string })?.message || "OK");
+      const d2 = json2.data as { message?: string; channel?: string };
+      alert(d2?.message || "OK");
       onChanged?.();
       return;
     }
-    alert(data?.message || (isResend ? "Đã gửi lại" : "Đã gửi đơn"));
+    const ch = (data?.channel || "").toLowerCase();
+    // APP: cảnh báo mở app NCC — không gửi mail/Zalo
+    if (data?.appGuide || ch === "app") {
+      alert(
+        data?.message ||
+          `NCC nhận đơn qua APP.\nVui lòng mở ứng dụng nhà cung cấp để đặt đơn ${o.orderId}.`
+      );
+      onChanged?.();
+      return;
+    }
+    const base =
+      data?.message ||
+      (isResend ? "Đã gửi lại đơn." : "Đã gửi đơn.");
+    const extra =
+      ch.includes("zalo")
+        ? "\nKênh: Zalo — kiểm tra ZaloUserId trên DM_NCC và tin nhắn Zalo OA."
+        : ch.includes("email") || ch.includes("mail")
+          ? "\nKênh: Email."
+          : "";
+    alert(base + extra);
     onChanged?.();
   }
 

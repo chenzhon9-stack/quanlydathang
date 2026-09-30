@@ -983,7 +983,8 @@ export class OrderService {
     orderId: string,
     user: UserContext,
     year?: number,
-    sendAction?: string
+    sendAction?: string,
+    opts?: { resend?: boolean }
   ) {
     if (
       !hasPermission(user, "ORDER_SEND") &&
@@ -1004,15 +1005,88 @@ export class OrderService {
     const gasUrl =
       process.env.GAS_SEND_ORDER_URL || process.env.GAS_WEBHOOK_URL || "";
 
+    // Đọc đơn + NCC để biết hình thức gửi (Email / Zalo) — parity V21 HinhThucGui
+    let hinhThucGui = "";
+    let zaloUserId = "";
+    let emailNcc = "";
+    let lanGui = 0;
+    let guiLaiMail = false;
+    try {
+      const orders = await OrderRepository.findMany({ year: y });
+      const order = orders.find(
+        (o) => String(o.orderId).toUpperCase() === String(orderId).toUpperCase()
+      );
+      if (order) {
+        lanGui = Number(order.sendCount) || 0;
+        guiLaiMail = !!(order as { resendMail?: boolean }).resendMail;
+        const nccRows = await readSheetAsObjects(SHEETS.NCC, {});
+        const ncc = nccRows.find(
+          (r) =>
+            String(r.MaNCC || "").trim().toUpperCase() ===
+            String(order.supplierId || "").trim().toUpperCase()
+        );
+        if (ncc) {
+          hinhThucGui = String(
+            ncc.HinhThucGui || ncc.HinhThucgui || ncc.HinhThuc || ""
+          ).trim();
+          zaloUserId = String(ncc.ZaloUserId || ncc.ZaloUserID || "").trim();
+          emailNcc = String(ncc.EmailNCC || ncc.Email || "").trim();
+        }
+      }
+    } catch (e) {
+      console.warn("[sendOrder] load NCC channel", e);
+    }
+    const channelHint = (() => {
+      const h = hinhThucGui
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+      // APP / ứng dụng NCC — không gửi mail/Zalo
+      if (h.includes("app") || h.includes("ung dung") || h.includes("ungdung"))
+        return "app";
+      if (h.includes("zalo") && (h.includes("mail") || h.includes("email")))
+        return "email+zalo";
+      if (h.includes("zalo")) return "zalo";
+      if (h.includes("mail") || h.includes("email")) return "email";
+      if (h.includes("ca ") || h.includes("all")) return "email+zalo";
+      return hinhThucGui || "unknown";
+    })();
+
+    // ─── Kênh APP: cảnh báo mở app NCC — không gọi GAS mail/Zalo ───
+    if (channelHint === "app") {
+      return {
+        orderId,
+        via: "app" as const,
+        needConfirm: false,
+        notifiedNcc: false,
+        channel: "app",
+        hinhThucGui,
+        appGuide: true,
+        message:
+          `Nhà cung cấp nhận đơn qua ỨNG DỤNG (APP).\n` +
+          `Vui lòng mở app của NCC để đặt / xác nhận đơn ${orderId}.\n` +
+          `Hệ thống không gửi Email/Zalo cho hình thức này.`,
+      };
+    }
+
     // ─── Nhánh 1: Uỷ quyền GAS (mail/PDF/Zalo + ghi Sheet) ───
     if (gasUrl) {
       const secret = (process.env.GAS_WEBHOOK_SECRET || "").trim();
+      // V21 sendOrderEmail(maDon, email, action|null)
+      // action chỉ: null | send | reset | cancel | markSent (modal muộn)
+      // Gửi lại GuiLaimail: action = null (KHÔNG truyền "send")
       const payload = {
         action: "sendOrderEmail",
         maDon: orderId,
         email: user.email,
-        sendAction: action,
+        sendAction: action || null,
         year: y,
+        // Gợi ý thêm cho GAS (bản doPost mới có thể dùng; bản cũ bỏ qua)
+        resend: !!(opts?.resend || guiLaiMail || lanGui > 0),
+        hinhThucGui,
+        zaloUserId,
+        emailNcc,
+        lanGui,
         ...(secret ? { secret } : {}),
       };
       const bodyStr = JSON.stringify(payload);
@@ -1041,14 +1115,24 @@ export class OrderService {
         }
         const raw = await res.text();
         let body: Record<string, unknown> = {};
+        const trimmed = (raw || "").trim();
+        const looksHtml =
+          /^<!DOCTYPE/i.test(trimmed) ||
+          /^<html[\s>]/i.test(trimmed) ||
+          /<head[\s>]/i.test(trimmed.slice(0, 200));
         try {
+          if (looksHtml) throw new Error("html");
           body = JSON.parse(raw) as Record<string, unknown>;
         } catch {
+          // Không đưa HTML thô ra UI
           body = {
             success: false,
+            _gasHtml: true,
             error:
-              raw.slice(0, 300) ||
-              `GAS HTTP ${res.status} (không phải JSON — kiểm tra Deploy Web App / doPost)`,
+              `GAS trả về trang HTML (HTTP ${res.status}) thay vì JSON. ` +
+              `Đơn có thể đã được xử lý phía GAS — hãy kiểm tra cột LanGui / timeGuimail trên Sheet. ` +
+              `Cách sửa: Apps Script → Deploy → Web app → Execute as: Me, Who has access: Anyone; ` +
+              `đảm bảo doPost trả ContentService JSON (không dùng HtmlService).`,
           };
         }
         return { status: res.status, body, raw };
@@ -1065,7 +1149,26 @@ export class OrderService {
       }
 
       const gasBody = gasRes.body;
-      console.info("[sendOrder] GAS response", gasRes.status, JSON.stringify(gasBody).slice(0, 500));
+      console.info(
+        "[sendOrder] GAS response",
+        gasRes.status,
+        JSON.stringify(gasBody).slice(0, 500)
+      );
+
+      /** Làm sạch message — không bao giờ alert HTML */
+      const cleanMsg = (v: unknown, fallback: string) => {
+        const s = String(v ?? "").trim();
+        if (!s) return fallback;
+        if (
+          /^<!DOCTYPE/i.test(s) ||
+          /^<html[\s>]/i.test(s) ||
+          s.includes("<head") ||
+          s.includes("ppConfig")
+        ) {
+          return fallback;
+        }
+        return s.slice(0, 400);
+      };
 
       // needConfirm LATE_FIRST_SEND — UI hiện modal
       if (gasBody.needConfirm) {
@@ -1076,26 +1179,35 @@ export class OrderService {
           confirmType: gasBody.confirmType || "LATE_FIRST_SEND",
           isDuyenHa: !!gasBody.isDuyenHa,
           dayDiff: gasBody.dayDiff,
-          message: String(gasBody.error || gasBody.message || "Cần xác nhận gửi muộn"),
+          message: cleanMsg(
+            gasBody.error || gasBody.message,
+            "Cần xác nhận gửi muộn"
+          ),
           gas: gasBody,
         };
       }
 
-      if (gasBody.success === false || (gasRes.status >= 400 && gasBody.success !== true)) {
-        const errMsg = String(
-          gasBody.error || gasBody.message || `GAS HTTP ${gasRes.status}`
+      if (
+        gasBody.success === false ||
+        gasBody._gasHtml === true ||
+        (gasRes.status >= 400 && gasBody.success !== true)
+      ) {
+        const errMsg = cleanMsg(
+          gasBody.error || gasBody.message,
+          `GAS HTTP ${gasRes.status}`
         );
-        // Gợi ý lỗi secret phổ biến
         const hint =
           /unauthorized/i.test(errMsg)
-            ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp GAS_WEBHOOK_SECRET (Vercel), hoặc xóa cả hai để thử."
+            ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp GAS_WEBHOOK_SECRET (Vercel)."
             : /unknown action/i.test(errMsg)
-              ? " — doPost chưa nhận action sendOrderEmail (deploy bản Web App mới)."
-              : "";
+              ? " — doPost chưa nhận action sendOrderEmail (deploy Web App mới)."
+              : gasBody._gasHtml
+                ? ""
+                : "";
         throw {
           code: "GAS_SEND_FAILED",
           message: errMsg + hint,
-          gas: gasBody,
+          gas: { ...gasBody, rawPreview: undefined },
         };
       }
 
@@ -1108,17 +1220,33 @@ export class OrderService {
         newValue: JSON.stringify({
           sendAction: action,
           notifiedNcc: gasBody.notifiedNcc,
-          message: gasBody.message,
+          message: cleanMsg(gasBody.message, "ok"),
         }),
         year: y,
       });
 
+      const notified = gasBody.notifiedNcc !== false;
+      let defaultMsg = "Đã gửi đơn qua GAS.";
+      if (channelHint.includes("zalo")) {
+        defaultMsg = notified
+          ? "Đã gửi đơn qua Zalo (GAS)."
+          : "GAS đã xử lý đơn nhưng có thể chưa gửi được Zalo — kiểm tra ZaloUserId trên DM_NCC.";
+        if (!zaloUserId) {
+          defaultMsg =
+            "Hình thức gửi là Zalo nhưng DM_NCC thiếu ZaloUserId — bổ sung mã Zalo NCC rồi gửi lại.";
+        }
+      } else if (channelHint.includes("email") || channelHint.includes("mail")) {
+        defaultMsg = "Đã gửi đơn qua Email (GAS).";
+      }
       return {
         orderId,
         via: "gas" as const,
         needConfirm: false,
-        notifiedNcc: gasBody.notifiedNcc !== false,
-        message: String(gasBody.message || "Đã gửi đơn qua GAS (mail/PDF/Zalo)"),
+        notifiedNcc: notified,
+        channel: channelHint,
+        hinhThucGui,
+        zaloUserId: zaloUserId ? "(có)" : "(thiếu)",
+        message: cleanMsg(gasBody.message, defaultMsg),
         gas: gasBody,
       };
     }
