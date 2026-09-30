@@ -302,7 +302,7 @@ export class FinanceService {
     }
 
     const ngayCT = ymdDate(input.ngayCT) || ymdDate(new Date()) || "";
-    const y = input.year ?? Number(ngayCT.slice(0, 4)) || currentYearVN();
+    const y = input.year ?? (Number(ngayCT.slice(0, 4)) || currentYearVN());
     const codes = await nextCounterCodes("CN", ngayCT, {
       count: 1,
       email: user.email,
