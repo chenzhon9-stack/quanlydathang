@@ -1258,7 +1258,7 @@ export class OrderService {
       throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
     }
 
-    const lanGui = (Number(order.sendCount) || 0) + 1;
+    const lanGuiNext = (Number(order.sendCount) || 0) + 1;
     const timeLabel = formatDateTimeVN(new Date());
 
     await updateSheetRowByKey(
@@ -1266,7 +1266,7 @@ export class OrderService {
       "MaDon",
       orderId,
       {
-        LanGui: lanGui,
+        LanGui: lanGuiNext,
         timeGuimail: timeLabel,
         ChoGuiMail: false,
         GuiLaimail: false,
@@ -1306,10 +1306,10 @@ export class OrderService {
         SHEETS.SNAPSHOT,
         {
           MaDon: orderId,
-          LanGui: lanGui,
+          LanGui: lanGuiNext,
           SnapshotJSON: JSON.stringify({
             maDon: orderId,
-            lanGui,
+            lanGui: lanGuiNext,
             at: new Date().toISOString(),
             by: user.email,
           }),
@@ -1329,7 +1329,7 @@ export class OrderService {
           MaDon: orderId,
           NCC: order.supplierName || order.supplierId || "",
           Email: "",
-          "Lần gửi": lanGui,
+          "Lần gửi": lanGuiNext,
           "Ghi chú": "Gửi Sheet-only (chưa cấu hình GAS_SEND_ORDER_URL)",
           "Link PDF": order.orderFile || "",
         },
@@ -1345,14 +1345,14 @@ export class OrderService {
       action: "SEND_ORDER_SHEET_ONLY",
       maDon: orderId,
       targetId: orderId,
-      newValue: JSON.stringify({ lanGui, ctUpdated }),
+      newValue: JSON.stringify({ lanGui: lanGuiNext, ctUpdated }),
       year: y,
     });
 
     return {
       orderId,
       via: "sheet" as const,
-      lanGui,
+      lanGui: lanGuiNext,
       ctUpdated,
       needConfirm: false,
       notifiedNcc: false,
