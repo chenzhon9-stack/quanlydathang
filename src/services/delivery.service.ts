@@ -391,8 +391,10 @@ export class DeliveryService {
     // TyleChiahet từ HH của chi tiết — parity V21 saveDeliveryData plan
     let tyleChiahet = 0;
     let tenHH = detailId;
+    let orderIdForAudit = "";
     try {
       const ct = await DetailRepository.findById(detailId, y);
+      orderIdForAudit = ct?.orderId || "";
       if (ct?.productId) {
         const hhRows = await readSheetAsObjects(SHEETS.HH, {});
         const hh = hhRows.find(
@@ -538,7 +540,7 @@ export class DeliveryService {
       email: user.email,
       role: user.role,
       action: "SAVE_PLAN",
-      maDon: ct.orderId,
+      maDon: orderIdForAudit,
       idCt: detailId,
       targetId: detailId,
       newValue: { soLuong: sumKh, created, updated, deleted },
