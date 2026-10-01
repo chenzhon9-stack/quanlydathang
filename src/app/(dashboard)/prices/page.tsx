@@ -86,6 +86,54 @@ export default function PricesPage() {
     active: true,
   });
 
+  // Copy HH
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyForm, setCopyForm] = useState({
+    maHHNguon: "",
+    maHHDich: [] as string[],
+    maNCC: "",
+    makv: "",
+    tuNgayMode: "keep" as "keep" | "new",
+    tuNgayMoi: todayYmd(),
+    donGiaMode: "keep" as "keep" | "add" | "multiply",
+    donGiaValue: "",
+  });
+  const [copyResult, setCopyResult] = useState<{
+    created?: number;
+    skipped?: number;
+    skippedDetail?: Array<{
+      maNCC: string;
+      maHH: string;
+      makv: string;
+      reason: string;
+    }>;
+  } | null>(null);
+
+  // Adjust NCC
+  const [adjustModalOpen, setAdjustModalOpen] = useState(false);
+  const [adjustBusy, setAdjustBusy] = useState(false);
+  const [adjustForm, setAdjustForm] = useState({
+    maNCC: "",
+    tuNgayMoi: todayYmd(),
+    maHH: [] as string[],
+    makv: [] as string[],
+    mode: "amount" as "amount" | "percent",
+    direction: "increase" as "increase" | "decrease",
+    value: "",
+  });
+  const [adjustResult, setAdjustResult] = useState<{
+    created?: number;
+    skipped?: number;
+    preview?: Array<{
+      maHH: string;
+      makv: string;
+      giaCu: number;
+      giaMoi: number;
+    }>;
+    skippedDetail?: Array<{ maHH: string; makv: string; reason: string }>;
+  } | null>(null);
+
   const loadMasters = useCallback(async () => {
     try {
       const [ncc, hh, kv] = await Promise.all([
@@ -303,6 +351,158 @@ export default function PricesPage() {
     load();
   }
 
+  function openCopyModal() {
+    setCopyForm({
+      maHHNguon: "",
+      maHHDich: [],
+      maNCC: filterNcc || "",
+      makv: "",
+      tuNgayMode: "keep",
+      tuNgayMoi: todayYmd(),
+      donGiaMode: "keep",
+      donGiaValue: "",
+    });
+    setCopyResult(null);
+    setCopyModalOpen(true);
+  }
+
+  function openAdjustModal() {
+    setAdjustForm({
+      maNCC: filterNcc || "",
+      tuNgayMoi: todayYmd(),
+      maHH: [],
+      makv: [],
+      mode: "amount",
+      direction: "increase",
+      value: "",
+    });
+    setAdjustResult(null);
+    setAdjustModalOpen(true);
+  }
+
+  async function submitCopy() {
+    if (!copyForm.maHHNguon) {
+      alert("Chọn hàng hóa nguồn");
+      return;
+    }
+    if (!copyForm.maHHDich.length) {
+      alert("Chọn ít nhất 1 hàng hóa đích");
+      return;
+    }
+    if (copyForm.tuNgayMode === "new" && !copyForm.tuNgayMoi) {
+      alert("Chọn Từ ngày mới");
+      return;
+    }
+    if (
+      copyForm.donGiaMode !== "keep" &&
+      !(Number(copyForm.donGiaValue) > 0)
+    ) {
+      alert("Giá trị điều chỉnh đơn giá phải > 0");
+      return;
+    }
+    setCopyBusy(true);
+    try {
+      const json = await apiJson("/api/v1/finance/prices/copy", {
+        method: "POST",
+        body: JSON.stringify({
+          maHHNguon: copyForm.maHHNguon,
+          maHHDich: copyForm.maHHDich,
+          maNCC: copyForm.maNCC,
+          makv: copyForm.makv,
+          tuNgayMode: copyForm.tuNgayMode,
+          tuNgayMoi: copyForm.tuNgayMoi,
+          donGiaMode: copyForm.donGiaMode,
+          donGiaValue: Number(copyForm.donGiaValue) || 0,
+        }),
+      });
+      if (!json.success) {
+        alert(json.error?.message || "Copy thất bại");
+        return;
+      }
+      setCopyResult(
+        json.data as {
+          created?: number;
+          skipped?: number;
+          skippedDetail?: Array<{
+            maNCC: string;
+            maHH: string;
+            makv: string;
+            reason: string;
+          }>;
+        }
+      );
+      load();
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
+  async function submitAdjust() {
+    if (!adjustForm.maNCC) {
+      alert("Chọn nhà cung cấp");
+      return;
+    }
+    if (!adjustForm.tuNgayMoi) {
+      alert("Chọn Từ ngày áp dụng");
+      return;
+    }
+    if (!(Number(adjustForm.value) > 0)) {
+      alert("Giá trị điều chỉnh phải > 0");
+      return;
+    }
+    const modeText =
+      adjustForm.mode === "percent"
+        ? `${adjustForm.value}%`
+        : fmtMoney(Number(adjustForm.value));
+    const dirText = adjustForm.direction === "increase" ? "TĂNG" : "GIẢM";
+    if (
+      !confirm(
+        `Xác nhận ${dirText} giá ${modeText} cho các mốc giá hiện hành của NCC này?\nÁp dụng từ ${adjustForm.tuNgayMoi}.`
+      )
+    )
+      return;
+
+    setAdjustBusy(true);
+    try {
+      const json = await apiJson("/api/v1/finance/prices/adjust", {
+        method: "POST",
+        body: JSON.stringify({
+          maNCC: adjustForm.maNCC,
+          tuNgayMoi: adjustForm.tuNgayMoi,
+          maHH: adjustForm.maHH,
+          makv: adjustForm.makv,
+          mode: adjustForm.mode,
+          direction: adjustForm.direction,
+          value: Number(adjustForm.value),
+        }),
+      });
+      if (!json.success) {
+        alert(json.error?.message || "Điều chỉnh thất bại");
+        return;
+      }
+      setAdjustResult(
+        json.data as {
+          created?: number;
+          skipped?: number;
+          preview?: Array<{
+            maHH: string;
+            makv: string;
+            giaCu: number;
+            giaMoi: number;
+          }>;
+          skippedDetail?: Array<{
+            maHH: string;
+            makv: string;
+            reason: string;
+          }>;
+        }
+      );
+      load();
+    } finally {
+      setAdjustBusy(false);
+    }
+  }
+
   if (!canView) {
     return (
       <div className="p-6 text-sm text-slate-600">
@@ -330,13 +530,29 @@ export default function PricesPage() {
             Tải lại
           </button>
           {canUpdate && (
-            <button
-              type="button"
-              onClick={openCreate}
-              className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
-            >
-              + Thêm mốc giá
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={openCreate}
+                className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 text-white"
+              >
+                + Thêm mốc giá
+              </button>
+              <button
+                type="button"
+                onClick={openCopyModal}
+                className="px-3 py-2 text-xs font-medium rounded-lg bg-amber-100 text-amber-900 border border-amber-300"
+              >
+                📋 Copy giá theo HH
+              </button>
+              <button
+                type="button"
+                onClick={openAdjustModal}
+                className="px-3 py-2 text-xs font-medium rounded-lg bg-blue-100 text-blue-900 border border-blue-300"
+              >
+                📊 Điều chỉnh hàng loạt
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -716,6 +932,385 @@ export default function PricesPage() {
                 className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50"
               >
                 {busy ? "Đang lưu…" : "Lưu"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Copy giá theo HH */}
+      {copyModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !copyBusy)
+              setCopyModalOpen(false);
+          }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200">
+              <h3 className="font-bold text-slate-800">
+                Copy giá theo hàng hóa
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Copy mốc giá HH nguồn sang nhiều HH đích (V21)
+              </p>
+            </div>
+            <div className="px-5 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
+              <label className="block text-xs text-slate-600">
+                Hàng hóa nguồn *
+                <select
+                  value={copyForm.maHHNguon}
+                  onChange={(e) =>
+                    setCopyForm((f) => ({ ...f, maHHNguon: e.target.value }))
+                  }
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                >
+                  <option value="">— Chọn HH nguồn —</option>
+                  {hhOpts.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-600">
+                  Lọc NCC (tùy chọn)
+                  <select
+                    value={copyForm.maNCC}
+                    onChange={(e) =>
+                      setCopyForm((f) => ({ ...f, maNCC: e.target.value }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="">— Tất cả NCC —</option>
+                    {nccOpts.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs text-slate-600">
+                  Lọc Khu vực
+                  <select
+                    value={copyForm.makv}
+                    onChange={(e) =>
+                      setCopyForm((f) => ({ ...f, makv: e.target.value }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="">— Tất cả KV —</option>
+                    <option value="km">km (KM)</option>
+                    {kvOpts.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div>
+                <label className="text-xs text-slate-600 block mb-1">
+                  Hàng hóa đích *
+                </label>
+                <div className="border border-slate-300 rounded-lg max-h-40 overflow-y-auto p-2 bg-slate-50">
+                  {hhOpts
+                    .filter((o) => o.id !== copyForm.maHHNguon)
+                    .map((o) => {
+                      const checked = copyForm.maHHDich.includes(o.id);
+                      return (
+                        <label
+                          key={o.id}
+                          className="flex items-center gap-2 text-xs text-slate-700 py-1 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setCopyForm((f) => ({
+                                ...f,
+                                maHHDich: e.target.checked
+                                  ? [...f.maHHDich, o.id]
+                                  : f.maHHDich.filter((x) => x !== o.id),
+                              }))
+                            }
+                          />
+                          <span>{o.label}</span>
+                        </label>
+                      );
+                    })}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Đã chọn: <strong>{copyForm.maHHDich.length}</strong> HH
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-600">
+                  Từ ngày
+                  <select
+                    value={copyForm.tuNgayMode}
+                    onChange={(e) =>
+                      setCopyForm((f) => ({
+                        ...f,
+                        tuNgayMode: e.target.value as "keep" | "new",
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="keep">Giữ TuNgay gốc</option>
+                    <option value="new">Đặt TuNgay mới</option>
+                  </select>
+                </label>
+                {copyForm.tuNgayMode === "new" && (
+                  <label className="block text-xs text-slate-600">
+                    Từ ngày mới
+                    <input
+                      type="date"
+                      value={copyForm.tuNgayMoi}
+                      onChange={(e) =>
+                        setCopyForm((f) => ({
+                          ...f,
+                          tuNgayMoi: e.target.value,
+                        }))
+                      }
+                      className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                    />
+                  </label>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-600">
+                  Đơn giá
+                  <select
+                    value={copyForm.donGiaMode}
+                    onChange={(e) =>
+                      setCopyForm((f) => ({
+                        ...f,
+                        donGiaMode: e.target.value as
+                          | "keep"
+                          | "add"
+                          | "multiply",
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="keep">Giữ nguyên</option>
+                    <option value="add">Cộng thêm</option>
+                    <option value="multiply">Nhân hệ số</option>
+                  </select>
+                </label>
+                {copyForm.donGiaMode !== "keep" && (
+                  <label className="block text-xs text-slate-600">
+                    {copyForm.donGiaMode === "add" ? "Số tiền" : "Hệ số"}
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={copyForm.donGiaValue}
+                      onChange={(e) =>
+                        setCopyForm((f) => ({
+                          ...f,
+                          donGiaValue: e.target.value,
+                        }))
+                      }
+                      className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                    />
+                  </label>
+                )}
+              </div>
+              {copyResult && (
+                <div className="p-3 rounded-lg bg-slate-50 border text-xs">
+                  <div className="font-semibold text-emerald-700">
+                    ✅ Tạo {copyResult.created ?? 0} mốc
+                  </div>
+                  {(copyResult.skipped ?? 0) > 0 && (
+                    <div className="mt-1 text-amber-700">
+                      Bỏ qua {copyResult.skipped}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 bg-slate-50 border-t flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={copyBusy}
+                onClick={() => setCopyModalOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg border bg-white"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                disabled={copyBusy || !canUpdate}
+                onClick={submitCopy}
+                className="px-4 py-2 text-sm rounded-lg bg-amber-600 text-white disabled:opacity-50"
+              >
+                {copyBusy ? "Đang copy…" : "Copy giá"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Adjust NCC */}
+      {adjustModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !adjustBusy)
+              setAdjustModalOpen(false);
+          }}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200">
+              <h3 className="font-bold text-slate-800">
+                Điều chỉnh giá hàng loạt theo NCC
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Cộng/trừ số tiền hoặc % — tạo mốc mới (không đè mốc cũ)
+              </p>
+            </div>
+            <div className="px-5 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
+              <label className="block text-xs text-slate-600">
+                Nhà cung cấp *
+                <select
+                  value={adjustForm.maNCC}
+                  onChange={(e) =>
+                    setAdjustForm((f) => ({ ...f, maNCC: e.target.value }))
+                  }
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                >
+                  <option value="">— Chọn NCC —</option>
+                  {nccOpts.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-slate-600">
+                Từ ngày áp dụng *
+                <input
+                  type="date"
+                  value={adjustForm.tuNgayMoi}
+                  onChange={(e) =>
+                    setAdjustForm((f) => ({
+                      ...f,
+                      tuNgayMoi: e.target.value,
+                    }))
+                  }
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-600">
+                  Hình thức
+                  <select
+                    value={adjustForm.mode}
+                    onChange={(e) =>
+                      setAdjustForm((f) => ({
+                        ...f,
+                        mode: e.target.value as "amount" | "percent",
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="amount">Số tiền cố định</option>
+                    <option value="percent">Phần trăm (%)</option>
+                  </select>
+                </label>
+                <label className="block text-xs text-slate-600">
+                  Chiều
+                  <select
+                    value={adjustForm.direction}
+                    onChange={(e) =>
+                      setAdjustForm((f) => ({
+                        ...f,
+                        direction: e.target.value as "increase" | "decrease",
+                      }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  >
+                    <option value="increase">Tăng</option>
+                    <option value="decrease">Giảm</option>
+                  </select>
+                </label>
+              </div>
+              <label className="block text-xs text-slate-600">
+                Giá trị *
+                <input
+                  type="number"
+                  step="0.01"
+                  value={adjustForm.value}
+                  onChange={(e) =>
+                    setAdjustForm((f) => ({ ...f, value: e.target.value }))
+                  }
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  placeholder={
+                    adjustForm.mode === "percent" ? "VD: 5" : "VD: 50000"
+                  }
+                />
+              </label>
+              <p className="text-[11px] text-slate-500 italic">
+                Để trống phạm vi HH/KV → áp dụng tất cả mốc hiện hành của NCC.
+              </p>
+              {adjustResult && (
+                <div className="p-3 rounded-lg bg-slate-50 border text-xs">
+                  <div className="font-semibold text-emerald-700">
+                    ✅ Tạo {adjustResult.created ?? 0} mốc
+                  </div>
+                  {(adjustResult.preview?.length ?? 0) > 0 && (
+                    <details className="mt-2" open>
+                      <summary className="cursor-pointer text-slate-600">
+                        Preview ({adjustResult.preview?.length})
+                      </summary>
+                      <table className="w-full mt-1 text-[11px]">
+                        <thead>
+                          <tr className="text-slate-500">
+                            <th className="text-left">HH</th>
+                            <th className="text-left">KV</th>
+                            <th className="text-right">Cũ</th>
+                            <th className="text-right">Mới</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {adjustResult.preview?.map((p, i) => (
+                            <tr key={i} className="border-t border-slate-100">
+                              <td>{p.maHH}</td>
+                              <td>{p.makv || "—"}</td>
+                              <td className="text-right">
+                                {fmtMoney(p.giaCu)}
+                              </td>
+                              <td className="text-right font-semibold text-blue-700">
+                                {fmtMoney(p.giaMoi)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 bg-slate-50 border-t flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={adjustBusy}
+                onClick={() => setAdjustModalOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg border bg-white"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                disabled={adjustBusy || !canUpdate}
+                onClick={submitAdjust}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50"
+              >
+                {adjustBusy ? "Đang xử lý…" : "Thực hiện"}
               </button>
             </div>
           </div>
