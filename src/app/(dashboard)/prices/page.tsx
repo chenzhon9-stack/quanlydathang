@@ -134,6 +134,31 @@ export default function PricesPage() {
     skippedDetail?: Array<{ maHH: string; makv: string; reason: string }>;
   } | null>(null);
 
+  /** Phạm vi HH/KV có giá active theo NCC đã chọn (user tự tick) */
+  const adjustScopeFromPrices = useMemo(() => {
+    const ncc = adjustForm.maNCC;
+    const hhSet = new Set<string>();
+    const kvSet = new Set<string>();
+    if (!ncc) return { hhIds: [] as string[], kvIds: [] as string[] };
+    for (const r of items) {
+      if (!r.active) continue;
+      if (r.maNcc !== ncc) continue;
+      if (r.maHh) hhSet.add(r.maHh);
+      // makv rỗng = mặc định — vẫn cho chọn qua id ""
+      kvSet.add(r.makv || "");
+    }
+    return {
+      hhIds: Array.from(hhSet).sort(),
+      kvIds: Array.from(kvSet).sort((a, b) => {
+        if (a === "") return -1;
+        if (b === "") return 1;
+        if (a.toLowerCase() === "km") return -1;
+        if (b.toLowerCase() === "km") return 1;
+        return a.localeCompare(b);
+      }),
+    };
+  }, [items, adjustForm.maNCC]);
+
   const loadMasters = useCallback(async () => {
     try {
       const [ncc, hh, kv] = await Promise.all([
@@ -1154,7 +1179,7 @@ export default function PricesPage() {
         </div>
       )}
 
-      {/* Modal Adjust NCC */}
+      {/* Modal Adjust NCC — user tự chọn phạm vi HH / KV (V21) */}
       {adjustModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -1164,25 +1189,42 @@ export default function PricesPage() {
           }}
         >
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-200">
-              <h3 className="font-bold text-slate-800">
-                Điều chỉnh giá hàng loạt theo NCC
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Cộng/trừ số tiền hoặc % — tạo mốc mới (không đè mốc cũ)
-              </p>
+            <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="font-bold text-slate-800">
+                  Điều chỉnh giá hàng loạt theo NCC
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Chọn HH / khu vực cần điều chỉnh — để trống = tất cả mốc có
+                  giá của NCC
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-slate-700 text-lg leading-none"
+                onClick={() => !adjustBusy && setAdjustModalOpen(false)}
+                aria-label="Đóng"
+              >
+                ×
+              </button>
             </div>
             <div className="px-5 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
-              <label className="block text-xs text-slate-600">
+              <label className="block text-xs font-medium text-slate-700">
                 Nhà cung cấp *
                 <select
                   value={adjustForm.maNCC}
                   onChange={(e) =>
-                    setAdjustForm((f) => ({ ...f, maNCC: e.target.value }))
+                    setAdjustForm((f) => ({
+                      ...f,
+                      maNCC: e.target.value,
+                      // Đổi NCC → xóa lựa chọn phạm vi cũ
+                      maHH: [],
+                      makv: [],
+                    }))
                   }
-                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white"
                 >
-                  <option value="">— Chọn NCC —</option>
+                  <option value="">Chọn NCC…</option>
                   {nccOpts.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.label}
@@ -1190,8 +1232,9 @@ export default function PricesPage() {
                   ))}
                 </select>
               </label>
-              <label className="block text-xs text-slate-600">
-                Từ ngày áp dụng *
+
+              <label className="block text-xs font-medium text-slate-700">
+                Từ ngày áp dụng giá mới *
                 <input
                   type="date"
                   value={adjustForm.tuNgayMoi}
@@ -1204,8 +1247,134 @@ export default function PricesPage() {
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                 />
               </label>
+
+              {/* Phạm vi hàng hóa — user tự chọn */}
+              <div>
+                <div className="text-xs font-medium text-slate-700 mb-1">
+                  Phạm vi hàng hóa{" "}
+                  <span className="font-normal text-slate-500">
+                    (để trống = tất cả HH đang có giá của NCC này)
+                  </span>
+                </div>
+                {!adjustForm.maNCC ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Vui lòng chọn nhà cung cấp trước.
+                  </div>
+                ) : adjustScopeFromPrices.hhIds.length === 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    NCC này chưa có mốc giá đang hiệu lực.
+                  </div>
+                ) : (
+                  <div className="border border-slate-300 rounded-lg max-h-36 overflow-y-auto p-2 bg-slate-50">
+                    {adjustScopeFromPrices.hhIds.map((id) => {
+                      const checked = adjustForm.maHH.includes(id);
+                      const label =
+                        nameHh.get(id)?.split(" — ")[1] ||
+                        nameHh.get(id) ||
+                        id;
+                      return (
+                        <label
+                          key={id}
+                          className="flex items-center gap-2 text-xs text-slate-700 py-1 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setAdjustForm((f) => ({
+                                ...f,
+                                maHH: e.target.checked
+                                  ? [...f.maHH, id]
+                                  : f.maHH.filter((x) => x !== id),
+                              }))
+                            }
+                          />
+                          <span>
+                            {label}
+                            <span className="text-slate-400 ml-1">({id})</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {adjustForm.maNCC && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Đã chọn: <strong>{adjustForm.maHH.length}</strong> HH
+                    {adjustForm.maHH.length === 0 ? " (tất cả)" : ""}
+                  </p>
+                )}
+              </div>
+
+              {/* Phạm vi khu vực — user tự chọn từng vùng */}
+              <div>
+                <div className="text-xs font-medium text-slate-700 mb-1">
+                  Phạm vi khu vực{" "}
+                  <span className="font-normal text-slate-500">
+                    (để trống = tất cả khu vực đang có giá)
+                  </span>
+                </div>
+                {!adjustForm.maNCC ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Vui lòng chọn nhà cung cấp trước.
+                  </div>
+                ) : adjustScopeFromPrices.kvIds.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                    Không có khu vực gắn giá.
+                  </div>
+                ) : (
+                  <div className="border border-slate-300 rounded-lg max-h-40 overflow-y-auto p-2 bg-slate-50">
+                    {adjustScopeFromPrices.kvIds.map((id) => {
+                      const checked = adjustForm.makv.includes(id);
+                      const label =
+                        id === ""
+                          ? "— Mặc định (Makv trống) —"
+                          : id.toLowerCase() === "km"
+                            ? "Khuyến mãi (km)"
+                            : nameKv.get(id)?.split(" — ")[1] ||
+                              nameKv.get(id) ||
+                              id;
+                      return (
+                        <label
+                          key={id || "__empty__"}
+                          className="flex items-center gap-2 text-xs text-slate-700 py-1.5 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setAdjustForm((f) => ({
+                                ...f,
+                                makv: e.target.checked
+                                  ? [...f.makv, id]
+                                  : f.makv.filter((x) => x !== id),
+                              }))
+                            }
+                          />
+                          <span
+                            className={
+                              id.toLowerCase() === "km"
+                                ? "text-amber-700 font-semibold"
+                                : ""
+                            }
+                          >
+                            {label}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {adjustForm.maNCC && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Đã chọn: <strong>{adjustForm.makv.length}</strong> KV
+                    {adjustForm.makv.length === 0 ? " (tất cả vùng)" : ""}
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
-                <label className="block text-xs text-slate-600">
+                <label className="block text-xs font-medium text-slate-700">
                   Hình thức
                   <select
                     value={adjustForm.mode}
@@ -1217,12 +1386,12 @@ export default function PricesPage() {
                     }
                     className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                   >
-                    <option value="amount">Số tiền cố định</option>
-                    <option value="percent">Phần trăm (%)</option>
+                    <option value="amount">Theo số tiền cố định</option>
+                    <option value="percent">Theo phần trăm (%)</option>
                   </select>
                 </label>
-                <label className="block text-xs text-slate-600">
-                  Chiều
+                <label className="block text-xs font-medium text-slate-700">
+                  Chiều điều chỉnh
                   <select
                     value={adjustForm.direction}
                     onChange={(e) =>
@@ -1238,7 +1407,8 @@ export default function PricesPage() {
                   </select>
                 </label>
               </div>
-              <label className="block text-xs text-slate-600">
+
+              <label className="block text-xs font-medium text-slate-700">
                 Giá trị *
                 <input
                   type="number"
@@ -1253,9 +1423,7 @@ export default function PricesPage() {
                   }
                 />
               </label>
-              <p className="text-[11px] text-slate-500 italic">
-                Để trống phạm vi HH/KV → áp dụng tất cả mốc hiện hành của NCC.
-              </p>
+
               {adjustResult && (
                 <div className="p-3 rounded-lg bg-slate-50 border text-xs">
                   <div className="font-semibold text-emerald-700">
@@ -1279,7 +1447,11 @@ export default function PricesPage() {
                           {adjustResult.preview?.map((p, i) => (
                             <tr key={i} className="border-t border-slate-100">
                               <td>{p.maHH}</td>
-                              <td>{p.makv || "—"}</td>
+                              <td>
+                                {p.makv?.toLowerCase() === "km"
+                                  ? "KM"
+                                  : p.makv || "—"}
+                              </td>
                               <td className="text-right">
                                 {fmtMoney(p.giaCu)}
                               </td>
@@ -1300,17 +1472,17 @@ export default function PricesPage() {
                 type="button"
                 disabled={adjustBusy}
                 onClick={() => setAdjustModalOpen(false)}
-                className="px-4 py-2 text-sm rounded-lg border bg-white"
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white"
               >
-                Đóng
+                Hủy
               </button>
               <button
                 type="button"
-                disabled={adjustBusy || !canUpdate}
+                disabled={adjustBusy || !canUpdate || !adjustForm.maNCC}
                 onClick={submitAdjust}
                 className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white disabled:opacity-50"
               >
-                {adjustBusy ? "Đang xử lý…" : "Thực hiện"}
+                {adjustBusy ? "Đang xử lý…" : "Thực hiện điều chỉnh"}
               </button>
             </div>
           </div>
