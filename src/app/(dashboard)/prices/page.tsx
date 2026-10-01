@@ -296,6 +296,23 @@ export default function PricesPage() {
     setModalOpen(true);
   }
 
+  /** V21 nút Sao chép trên dòng: mở form thêm mới, prefill từ dòng nguồn */
+  function openCopyRow(row: GiaMua) {
+    setEditing(null);
+    setForm({
+      maNcc: row.maNcc,
+      maHh: row.maHh,
+      makv: row.makv || "",
+      donGia: String(row.donGia ?? ""),
+      tuNgay: todayYmd(),
+      ghiChu: row.idGia
+        ? `Sao chép từ ${row.idGia}`
+        : row.ghiChu || "",
+      active: true,
+    });
+    setModalOpen(true);
+  }
+
   async function saveForm() {
     const donGia = Number(
       String(form.donGia).replace(/\./g, "").replace(",", ".")
@@ -686,7 +703,7 @@ export default function PricesPage() {
               </span>
             </div>
             {canUpdate && (
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => openEdit(r)}
@@ -694,13 +711,20 @@ export default function PricesPage() {
                 >
                   Sửa
                 </button>
+                <button
+                  type="button"
+                  onClick={() => openCopyRow(r)}
+                  className="px-2.5 py-1 text-[11px] rounded bg-blue-600 text-white"
+                >
+                  Sao chép
+                </button>
                 {r.active && (
                   <button
                     type="button"
                     onClick={() => deactivate(r)}
                     className="px-2.5 py-1 text-[11px] rounded bg-amber-500 text-white"
                   >
-                    Ngưng
+                    Khoá
                   </button>
                 )}
               </div>
@@ -786,16 +810,26 @@ export default function PricesPage() {
                           type="button"
                           onClick={() => openEdit(r)}
                           className="px-2 py-1 text-[11px] rounded bg-slate-800 text-white"
+                          title="Sửa mốc giá"
                         >
                           Sửa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openCopyRow(r)}
+                          className="px-2 py-1 text-[11px] rounded bg-blue-600 text-white"
+                          title="Sao chép thành mốc mới"
+                        >
+                          Sao chép
                         </button>
                         {r.active && (
                           <button
                             type="button"
                             onClick={() => deactivate(r)}
                             className="px-2 py-1 text-[11px] rounded bg-amber-500 text-white"
+                            title="Ngưng hiệu lực (Khoá)"
                           >
-                            Ngưng
+                            Khoá
                           </button>
                         )}
                       </div>
@@ -830,10 +864,16 @@ export default function PricesPage() {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200">
               <h3 className="font-bold text-slate-800">
-                {editing ? `Sửa giá ${editing.idGia}` : "Thêm mốc giá mua"}
+                {editing
+                  ? `Sửa giá ${editing.idGia}`
+                  : form.ghiChu?.startsWith("Sao chép từ")
+                    ? "Sao chép mốc giá (thêm mới)"
+                    : "Thêm mốc giá mua"}
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Khóa: NCC + Hàng hóa + Khu vực + Từ ngày
+                {!editing &&
+                  " · Sao chép: chỉnh TuNgay/Đơn giá rồi Lưu để tạo mốc mới"}
               </p>
             </div>
             <div className="px-5 py-4 space-y-3">
