@@ -20,7 +20,6 @@ const OPTIONS: Array<{
   description: string;
   icon: string;
   color: "primary" | "warning" | "danger" | "neutral";
-  showForDuyenHaOnly?: boolean;
 }> = [
   {
     action: "send",
@@ -31,11 +30,11 @@ const OPTIONS: Array<{
   },
   {
     action: "reset",
-    label: "Reset đơn (Duyên Hà)",
-    description: "Tạo mã đơn mới, chuyển xe chưa nhận sang đơn mới.",
+    label: "Reset đơn",
+    description:
+      "Tạo mã đơn mới, chuyển xe chưa nhận sang đơn mới (áp dụng mọi NCC).",
     icon: "🔄",
     color: "warning",
-    showForDuyenHaOnly: true,
   },
   {
     action: "cancel",
@@ -81,21 +80,19 @@ export function SendActionModal({
       if (loading) return;
       if (e.key === "Escape") onCancel();
       if (e.key === "1") setSelected("send");
-      if (e.key === "2" && isDuyenHa) setSelected("reset");
+      if (e.key === "2") setSelected("reset");
       if (e.key === "3") setSelected("cancel");
       if (e.key === "4") setSelected("markSent");
       if (e.key === "Enter" && selected) onConfirm(selected);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, loading, selected, isDuyenHa, onCancel, onConfirm]);
+  }, [open, loading, selected, onCancel, onConfirm]);
 
   if (!open) return null;
 
-  const visibleOptions = OPTIONS.filter((opt) => {
-    if (opt.showForDuyenHaOnly && !isDuyenHa) return false;
-    return true;
-  });
+  // Reset áp dụng mọi NCC (parity canResetOrder / resetOrder)
+  const visibleOptions = OPTIONS;
 
   return (
     <div

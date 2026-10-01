@@ -360,20 +360,31 @@ export default function OrdersPage() {
       setSendModal((s) => ({ ...s, loading: true }));
       try {
         const orderId = sendModal.orderId;
-        const json = await apiPost(
-          `/api/v1/orders/${encodeURIComponent(orderId)}/send`,
-          {
-            year: new Date().getFullYear(),
-            sendAction: action,
-          }
-        );
+        // reset → API resetOrder (mọi NCC); còn lại → send + sendAction
+        const path =
+          action === "reset"
+            ? `/api/v1/orders/${encodeURIComponent(orderId)}/reset`
+            : `/api/v1/orders/${encodeURIComponent(orderId)}/send`;
+        const body =
+          action === "reset"
+            ? { year: new Date().getFullYear() }
+            : {
+                year: new Date().getFullYear(),
+                sendAction: action,
+              };
+        const json = await apiPost(path, body);
         if (!json.success) {
           alert(json.error?.message || "Thao tác thất bại");
           setSendModal((s) => ({ ...s, loading: false }));
           return;
         }
-        const d2 = json.data as { message?: string };
-        alert(d2?.message || "OK");
+        const d2 = json.data as { message?: string; newOrderId?: string };
+        alert(
+          d2?.message ||
+            (action === "reset" && d2?.newOrderId
+              ? `Đã reset → ${d2.newOrderId}`
+              : "OK")
+        );
         setSendModal({
           open: false,
           orderId: "",

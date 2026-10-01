@@ -10,6 +10,7 @@ export type GiaMuaRow = {
   donGia: number;
   tuNgay: string;
   active: boolean;
+  ghiChu?: string;
 };
 
 export type ResolveGiaResult = {
@@ -90,5 +91,6 @@ export function mapGiaMuaSheetRow(r: Record<string, string>): GiaMuaRow | null {
     donGia: parseNumberVN(r.DonGia),
     tuNgay: normalizeSheetDate(r.TuNgay),
     active,
+    ghiChu: String(r.GhiChu || "").trim() || undefined,
   };
 }

@@ -56,6 +56,13 @@ export const NAV_ITEMS: NavItem[] = [
     anyOf: ["PAYABLE_VIEW", "*"],
   },
   {
+    href: "/prices",
+    label: "Giá mua",
+    icon: "🏷️",
+    anyOf: ["PURCHASE_PRICE_VIEW", "PURCHASE_PRICE_UPDATE", "PAYABLE_VIEW", "*"],
+    rolesOnly: ["ADMIN", "MANAGER", "PURCHASE", "ACCOUNTANT"],
+  },
+  {
     href: "/masters",
     label: "Danh mục",
     icon: "📚",
