@@ -94,12 +94,15 @@ export class FinanceService {
       }
     }
 
+    // Sort: Từ ngày DESC → NCC ASC → Hàng hóa ASC → Khu vực ASC
     items.sort((a, b) => {
-      const c = a.maNcc.localeCompare(b.maNcc);
+      const d = (b.tuNgay || "").localeCompare(a.tuNgay || "");
+      if (d) return d;
+      const c = (a.maNcc || "").localeCompare(b.maNcc || "");
       if (c) return c;
-      const h = a.maHh.localeCompare(b.maHh);
+      const h = (a.maHh || "").localeCompare(b.maHh || "");
       if (h) return h;
-      return (b.tuNgay || "").localeCompare(a.tuNgay || "");
+      return (a.makv || "").localeCompare(b.makv || "");
     });
     return { items, total: items.length };
   }
