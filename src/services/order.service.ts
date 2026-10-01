@@ -1659,7 +1659,7 @@ export class OrderService {
         targetId: orderId,
         oldValue: orderId,
         newValue: newMaDon,
-        lyDo: `Reset toàn bộ đơn (dayDiff=${dayDiff}, threshold=${threshold}, LanGui=${lanGui})`,
+        lyDo: `Reset toàn bộ đơn (dayDiff=${dayDiff}, threshold=${thresholdDays}, LanGui=${sendCount})`,
         year: y,
       });
       return {
@@ -1668,7 +1668,7 @@ export class OrderService {
         newMaDon,
         movedDetails: details.length,
         dayDiff,
-        threshold,
+        threshold: thresholdDays,
         message: `Đã reset đơn: ${orderId} → ${newMaDon}`,
       };
     }
@@ -1737,7 +1737,7 @@ export class OrderService {
       movedDetails: chuaNhan.length,
       keptDetails: daNhanHoacHuy.length,
       dayDiff,
-      threshold,
+      threshold: thresholdDays,
       message: `Đã tách đơn: ${chuaNhan.length} xe → ${newMaDon} (giữ ${orderId})`,
     };
   }
