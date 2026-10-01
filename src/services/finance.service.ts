@@ -134,6 +134,7 @@ export class FinanceService {
     const maNcc = String(input.maNcc || "").trim();
     const maHh = String(input.maHh || "").trim();
     const makv = String(input.makv || "").trim();
+    const isKm = makv.toLowerCase() === "km";
     const tuNgay = ymdDate(input.tuNgay) || "";
     const donGia = Number(input.donGia);
     if (!maNcc || !maHh) {
@@ -142,8 +143,22 @@ export class FinanceService {
     if (!tuNgay) {
       throw { code: "VALIDATION_ERROR", message: "Thiếu Từ ngày (mốc giá)" };
     }
-    if (!(donGia >= 0) || !Number.isFinite(donGia)) {
+    if (!Number.isFinite(donGia)) {
       throw { code: "VALIDATION_ERROR", message: "Đơn giá không hợp lệ" };
+    }
+    // V21 _validateGiaMuaRow_: Makv=km cho phép 0; còn lại > 0
+    if (isKm) {
+      if (donGia < 0) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Đơn giá khuyến mãi (km) không được âm.",
+        };
+      }
+    } else if (!(donGia > 0)) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message: "Đơn giá phải lớn hơn 0 (trừ mốc Makv=km).",
+      };
     }
 
     const now = formatDateTimeVN();
@@ -182,6 +197,8 @@ export class FinanceService {
           NgayCapNhat: now,
         }
       );
+      const today = ymdDate(new Date()) || "";
+      const backdated = !!tuNgay && !!today && tuNgay < today;
       await writeAudit({
         email: user.email,
         role: user.role,
@@ -194,7 +211,7 @@ export class FinanceService {
         newValue: { maNcc, maHh, makv, donGia, tuNgay },
         lyDo: "Cập nhật giá mua",
       });
-      return { idGia, created: false };
+      return { idGia, created: false, backdated };
     }
 
     const codes = await nextCounterCodes("GM", tuNgay, {
@@ -209,11 +226,13 @@ export class FinanceService {
       Makv: makv,
       DonGia: donGia,
       TuNgay: tuNgay,
-      HoatDong: true,
+      HoatDong: true, // V21: tạo mới luôn HL
       GhiChu: input.ghiChu || "",
       NguoiCapNhat: user.email,
       NgayCapNhat: now,
     });
+    const today = ymdDate(new Date()) || "";
+    const backdated = !!tuNgay && !!today && tuNgay < today;
     await writeAudit({
       email: user.email,
       role: user.role,
@@ -222,7 +241,7 @@ export class FinanceService {
       newValue: { maNcc, maHh, makv, donGia, tuNgay },
       lyDo: "Thêm mốc giá mua",
     });
-    return { idGia, created: true };
+    return { idGia, created: true, backdated };
   }
 
   static async deactivatePrice(idGia: string, user: UserContext) {
@@ -290,8 +309,8 @@ export class FinanceService {
           "Loại không hợp lệ. Dùng: " + PAYABLE_LOAI.join(", "),
       };
     }
-    if (!Number.isFinite(soTien) || soTien === 0) {
-      throw { code: "VALIDATION_ERROR", message: "Số tiền phải ≠ 0" };
+    if (!Number.isFinite(soTien) || soTien <= 0) {
+ 	 throw { code: "VALIDATION_ERROR", message: "Số tiền phải lớn hơn 0" };
     }
 
     if (scope.scopeType === "MANAGEMENT") {

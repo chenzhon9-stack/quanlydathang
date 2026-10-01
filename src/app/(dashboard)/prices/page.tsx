@@ -224,7 +224,9 @@ export default function PricesPage() {
   }
 
   async function saveForm() {
-    const donGia = Number(String(form.donGia).replace(/\./g, "").replace(",", "."));
+    const donGia = Number(
+      String(form.donGia).replace(/\./g, "").replace(",", ".")
+    );
     if (!form.maNcc || !form.maHh) {
       alert("Chọn NCC và Hàng hóa");
       return;
@@ -233,8 +235,19 @@ export default function PricesPage() {
       alert("Nhập Từ ngày (mốc giá)");
       return;
     }
-    if (!(donGia >= 0) || !Number.isFinite(donGia)) {
+    if (!Number.isFinite(donGia)) {
       alert("Đơn giá không hợp lệ");
+      return;
+    }
+    // V21: Makv=km cho phép 0; còn lại > 0
+    const isKm = form.makv.trim().toLowerCase() === "km";
+    if (isKm) {
+      if (donGia < 0) {
+        alert("Giá khuyến mãi (km) không được âm");
+        return;
+      }
+    } else if (!(donGia > 0)) {
+      alert("Đơn giá phải lớn hơn 0 (trừ mốc Makv = km)");
       return;
     }
     setBusy(true);
@@ -257,12 +270,18 @@ export default function PricesPage() {
         alert(json.error?.message || "Lưu thất bại");
         return;
       }
-      const r = json.data as { idGia?: string; created?: boolean };
-      alert(
-        r?.created
-          ? `Đã thêm mốc giá ${r.idGia || ""}`
-          : `Đã cập nhật mốc giá ${r.idGia || editing?.idGia || ""}`
-      );
+      const r = json.data as {
+        idGia?: string;
+        created?: boolean;
+        backdated?: boolean;
+      };
+      const base = r?.created
+        ? `Đã thêm mốc giá ${r.idGia || ""}`
+        : `Đã cập nhật mốc giá ${r.idGia || editing?.idGia || ""}`;
+      const warn = r?.backdated
+        ? "\n\n⚠️ Từ ngày áp dụng nằm trong quá khứ so với hôm nay (backdated)."
+        : "";
+      alert(base + warn);
       setModalOpen(false);
       load();
     } finally {
@@ -415,7 +434,11 @@ export default function PricesPage() {
             <div className="mt-1 flex justify-between text-sm">
               <span className="text-slate-500">
                 Từ {r.tuNgay || "—"}
-                {r.makv ? ` · KV ${r.makv}` : ""}
+                {String(r.makv || "").toLowerCase() === "km"
+                  ? " · KM"
+                  : r.makv
+                    ? ` · KV ${r.makv}`
+                    : ""}
               </span>
               <span className="font-bold text-blue-700">
                 {fmtMoney(r.donGia)}
@@ -490,9 +513,15 @@ export default function PricesPage() {
                     <div className="text-[11px] text-slate-400">{r.maHh}</div>
                   </td>
                   <td className="px-3 py-2 text-xs">
-                    {r.makv
-                      ? nameKv.get(r.makv)?.split(" — ")[1] || r.makv
-                      : "— (mặc định)"}
+                    {String(r.makv || "").toLowerCase() === "km" ? (
+                      <span className="text-amber-700 font-semibold">
+                        Khuyến mãi (km)
+                      </span>
+                    ) : r.makv ? (
+                      nameKv.get(r.makv)?.split(" — ")[1] || r.makv
+                    ) : (
+                      "— (mặc định)"
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right font-semibold tabular-nums">
                     {fmtMoney(r.donGia)}
@@ -613,11 +642,14 @@ export default function PricesPage() {
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                 >
                   <option value="">— Mặc định (trống) —</option>
-                  {kvOpts.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.label}
-                    </option>
-                  ))}
+                  <option value="km">km (khuyến mãi — giá 0)</option>
+                  {kvOpts
+                    .filter((o) => o.id.toLowerCase() !== "km")
+                    .map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-3">

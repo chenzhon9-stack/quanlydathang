@@ -50,24 +50,21 @@ export function resolveDonGiaMua(
     return { found: false, donGia: 0, idGia: "", makvMatched: "" };
   }
 
+  // V21 _resolveDonGiaMua_: exact Makv > Makv rỗng — KHÔNG fallback mọi Makv
   const exact = kv ? candidates.filter((r) => r.makv === kv) : [];
   const fallback = candidates.filter((r) => !r.makv);
-  let pool = exact.length ? exact : fallback;
-
-  // V21 không fallback “any makv”, nhưng nếu CT.Khuvuc lưu tên thay vì mã
-  // và không có dòng Makv trống → thử mọi Makv (TuNgay mới nhất) để tránh mất phát sinh.
-  if (!pool.length && candidates.length) {
-    pool = candidates.slice();
-  }
+  const pool = exact.length ? exact : fallback;
   if (!pool.length) {
     return { found: false, donGia: 0, idGia: "", makvMatched: "" };
   }
 
   pool.sort((a, b) => ymd(b.tuNgay).localeCompare(ymd(a.tuNgay)));
   const best = pool[0];
+  // donGia=0 hợp lệ (mốc KM); không dùng || 0 vì 0 là falsy
+  const gia = Number(best.donGia);
   return {
     found: true,
-    donGia: Number(best.donGia) || 0,
+    donGia: Number.isFinite(gia) ? gia : 0,
     idGia: best.idGia || "",
     makvMatched: best.makv || "",
   };
@@ -79,9 +76,10 @@ export function mapGiaMuaSheetRow(r: Record<string, string>): GiaMuaRow | null {
   if (!maNcc || !maHh) return null;
   const activeRaw = String(r.HoatDong ?? "true").toLowerCase();
   const active = !(
-    activeRaw === "false" ||
-    activeRaw === "0" ||
-    activeRaw === "không"
+  	activeRaw === "false" ||
+  	activeRaw === "0" ||
+ 	 activeRaw === "không" ||
+  	activeRaw === "no"
   );
   return {
     idGia: String(r.ID_Gia || "").trim(),
