@@ -1539,21 +1539,24 @@ export class OrderService {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
     }
 
-    // 1) Thời gian + status (chưa check CT)
+    // 1) Thời gian — parity canResetOrder (chưa gửi ≥1 ngày; đã gửi DHA 1 / khác 2)
     const isDha = isDuyenHaNcc(order.supplierId);
-    const threshold = isDha ? 1 : 2;
+    const sendCount = Number(order.sendCount) || 0;
+    const neverSent = sendCount === 0;
+    const thresholdDays = neverSent ? 1 : isDha ? 1 : 2;
     const dayDiff = businessDayDiff(order.orderDate, isDha);
-    const lanGui = Number(order.sendCount) || 0;
-    if (
-      dayDiff === null ||
-      (lanGui > 0 && dayDiff < threshold) ||
-      (lanGui === 0 && dayDiff < 1)
-    ) {
+    if (dayDiff === null) {
+      throw {
+        code: "INVALID_STATE",
+        message: "Không xác định được ngày đặt hàng.",
+      };
+    }
+    if (dayDiff < thresholdDays) {
       throw {
         code: "TOO_EARLY",
-        message: isDha
-          ? "Chỉ được reset đơn Duyên Hà sau 1 ngày kể từ ngày đặt."
-          : "Chỉ được reset đơn sau 2 ngày kể từ ngày đặt.",
+        message: neverSent
+          ? `Đơn chưa gửi — cần đợi ít nhất ${thresholdDays} ngày kể từ ngày đặt mới được reset.`
+          : `Đơn ${isDha ? "Duyên Hà" : "NCC này"} đã gửi — cần đợi ít nhất ${thresholdDays} ngày kể từ ngày đặt mới được reset.`,
       };
     }
 

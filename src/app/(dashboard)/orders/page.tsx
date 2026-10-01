@@ -17,6 +17,10 @@ import { downloadExcelHtml } from "@/lib/export-excel";
 import { CreateOrderModal } from "@/components/CreateOrderModal";
 import { AddDetailModal } from "@/components/AddDetailModal";
 import { OrderManageModal } from "@/components/OrderManageModal";
+import {
+  SendActionModal,
+  type SendAction,
+} from "@/components/SendActionModal";
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -43,10 +47,17 @@ function OrderActions({
   o,
   onChanged,
   onManageOrder,
+  onNeedSendAction,
 }: {
   o: Order;
   onChanged?: () => void;
   onManageOrder?: (o: Order) => void;
+  onNeedSendAction?: (payload: {
+    orderId: string;
+    message: string;
+    isDuyenHa?: boolean;
+    dayDiff?: number;
+  }) => void;
 }) {
   const user = readClientUser();
   const canUpdate = clientHasAny(user, [...ACTION.orderUpdate]);
@@ -129,43 +140,17 @@ function OrderActions({
       channel?: string;
       notifiedNcc?: boolean;
       appGuide?: boolean;
+      isDuyenHa?: boolean;
+      dayDiff?: number;
     };
     if (data?.needConfirm) {
-      const choiceMap: Record<string, string> = {
-        "1": "send",
-        "2": "reset",
-        "3": "cancel",
-        "4": "markSent",
-      };
-      const choiceInput = window.prompt(
-        (data.message || "Đơn gửi muộn.") +
-          "\n\nChọn hành động:\n" +
-          "  1. Gửi bình thường (send)\n" +
-          "  2. Reset đơn (reset)\n" +
-          "  3. Hủy đơn (cancel)\n" +
-          "  4. Đánh dấu đã gửi ngoài hệ thống (markSent)\n\n" +
-          "Nhập số 1 / 2 / 3 / 4:",
-        "1"
-      );
-      if (!choiceInput) return;
-      const sendAction =
-        choiceMap[String(choiceInput).trim()] ||
-        (["send", "reset", "cancel", "markSent"].includes(
-          String(choiceInput).trim().toLowerCase()
-        )
-          ? String(choiceInput).trim().toLowerCase()
-          : "send");
-      const json2 = await apiPost(
-        `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
-        { year: new Date().getFullYear(), sendAction }
-      );
-      if (!json2.success) {
-        alert(json2.error?.message || "Thao tác thất bại");
-        return;
-      }
-      const d2 = json2.data as { message?: string; channel?: string };
-      alert(d2?.message || "OK");
-      onChanged?.();
+      onNeedSendAction?.({
+        orderId: o.orderId,
+        message: data.message || "Đơn gửi muộn.",
+        isDuyenHa: data.isDuyenHa,
+        dayDiff:
+          typeof data.dayDiff === "number" ? data.dayDiff : undefined,
+      });
       return;
     }
     const ch = (data?.channel || "").toLowerCase();
@@ -309,6 +294,14 @@ export default function OrdersPage() {
   const canCreateOrder = clientHasAny(pageUser, [...ACTION.orderCreate]);
   const [addTarget, setAddTarget] = useState<Order | null>(null);
   const [manageOrderId, setManageOrderId] = useState<string | null>(null);
+  const [sendModal, setSendModal] = useState<{
+    open: boolean;
+    orderId: string;
+    message: string;
+    isDuyenHa?: boolean;
+    dayDiff?: number;
+    loading: boolean;
+  }>({ open: false, orderId: "", message: "", loading: false });
 
   const load = useCallback(async () => {
     const token = localStorage.getItem("token");
@@ -341,6 +334,66 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const handleNeedSendAction = useCallback(
+    (payload: {
+      orderId: string;
+      message: string;
+      isDuyenHa?: boolean;
+      dayDiff?: number;
+    }) => {
+      setSendModal({
+        open: true,
+        orderId: payload.orderId,
+        message: payload.message,
+        isDuyenHa: payload.isDuyenHa,
+        dayDiff: payload.dayDiff,
+        loading: false,
+      });
+    },
+    []
+  );
+
+  const handleSendActionConfirm = useCallback(
+    async (action: SendAction) => {
+      setSendModal((s) => ({ ...s, loading: true }));
+      try {
+        const orderId = sendModal.orderId;
+        const json = await apiPost(
+          `/api/v1/orders/${encodeURIComponent(orderId)}/send`,
+          {
+            year: new Date().getFullYear(),
+            sendAction: action,
+          }
+        );
+        if (!json.success) {
+          alert(json.error?.message || "Thao tác thất bại");
+          setSendModal((s) => ({ ...s, loading: false }));
+          return;
+        }
+        const d2 = json.data as { message?: string };
+        alert(d2?.message || "OK");
+        setSendModal({
+          open: false,
+          orderId: "",
+          message: "",
+          loading: false,
+        });
+        load();
+      } catch (e) {
+        alert("Lỗi: " + (e instanceof Error ? e.message : String(e)));
+        setSendModal((s) => ({ ...s, loading: false }));
+      }
+    },
+    [sendModal.orderId, load]
+  );
+
+  const handleSendActionCancel = useCallback(() => {
+    setSendModal((s) => {
+      if (s.loading) return s;
+      return { open: false, orderId: "", message: "", loading: false };
+    });
   }, []);
 
   useEffect(() => {
@@ -531,7 +584,12 @@ export default function OrdersPage() {
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-slate-200/80">
-                  <OrderActions o={o} onChanged={load} onManageOrder={(o) => setManageOrderId(o.orderId)} />
+                  <OrderActions
+                    o={o}
+                    onChanged={load}
+                    onManageOrder={(ord) => setManageOrderId(ord.orderId)}
+                    onNeedSendAction={handleNeedSendAction}
+                  />
                 </div>
               </div>
             ))}
@@ -635,7 +693,10 @@ export default function OrdersPage() {
                             <OrderActions
                               o={o}
                               onChanged={load}
-                              onManageOrder={(ord) => setManageOrderId(ord.orderId)}
+                              onManageOrder={(ord) =>
+                                setManageOrderId(ord.orderId)
+                              }
+                              onNeedSendAction={handleNeedSendAction}
                             />
                           </td>
                         </tr>
@@ -679,6 +740,15 @@ export default function OrdersPage() {
         year={new Date().getFullYear()}
         onClose={() => setManageOrderId(null)}
         onSaved={() => load()}
+      />
+      <SendActionModal
+        open={sendModal.open}
+        message={sendModal.message}
+        isDuyenHa={sendModal.isDuyenHa}
+        dayDiff={sendModal.dayDiff}
+        loading={sendModal.loading}
+        onCancel={handleSendActionCancel}
+        onConfirm={handleSendActionConfirm}
       />
     </div>
   );

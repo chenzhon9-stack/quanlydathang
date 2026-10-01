@@ -1,12 +1,11 @@
 /**
- * Điều kiện reset đơn — parity V21 _canResetDuyenHaOrder_
+ * Điều kiện reset đơn — mở rộng mọi NCC (không chỉ Duyên Hà).
  *
- * - Đơn đã Hủy → không
- * - isDha (MaNCC dha|btay): threshold = 1 ngày nghiệp vụ
- * - Đơn thường: threshold = 2 ngày nghiệp vụ
- * - LanGui === 0 (chưa gửi): cần dayDiff >= 1
- * - LanGui > 0 (đã gửi): cần dayDiff >= threshold
- * - Phải còn ít nhất 1 xe chưa nhận (ThucNhan=0 và không Hủy)
+ * Rule (2026-09-30):
+ * - Đơn CANCEL → không
+ * - Không còn xe chưa nhận → không
+ * - Chưa gửi (LanGui = 0): ≥ 1 ngày nghiệp vụ (mọi NCC)
+ * - Đã gửi (LanGui > 0): Duyên Hà ≥ 1 ngày; NCC khác ≥ 2 ngày
  *
  * dayDiff = businessTodayKey(isDha) − businessDateKey(NgayDatHang, isDha)
  */
@@ -15,7 +14,13 @@ import { businessDateKey, businessTodayKey } from "@/lib/sheets/date";
 
 export function isDuyenHaNcc(maNcc: string): boolean {
   const code = String(maNcc || "").trim().toLowerCase();
-  return code === "dha" || code === "btay";
+  if (code === "dha" || code === "btay") return true;
+  // Tên chứa "duyen ha" (không dấu) — phòng MaNCC khác mã
+  const fold = code
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
+  return fold.includes("duyen ha") || fold.includes("duyenha");
 }
 
 /** Số ngày nghiệp vụ giữa ngày đặt và hôm nay (V21 _businessDaysBetween_) */
@@ -26,7 +31,6 @@ export function businessDayDiff(
   const fromKey = businessDateKey(orderDate, isDha);
   const toKey = businessTodayKey(isDha);
   if (!fromKey || !toKey) return null;
-  // keys: YYYYMMDD
   const toYmd = `${toKey.slice(0, 4)}-${toKey.slice(4, 6)}-${toKey.slice(6, 8)}`;
   const fromYmd = `${fromKey.slice(0, 4)}-${fromKey.slice(4, 6)}-${fromKey.slice(6, 8)}`;
   const t0 = Date.parse(fromYmd + "T00:00:00");
@@ -44,37 +48,29 @@ export type CanResetInput = {
   hasUnreceivedVehicle?: boolean;
 };
 
+export type CanResetResult = {
+  ok: boolean;
+  error?: string;
+  thresholdDays?: number;
+  isDuyenHa?: boolean;
+};
+
 /**
  * Kiểm tra điều kiện reset (không gồm quyền user).
  * hasUnreceivedVehicle === false → không reset.
- * hasUnreceivedVehicle === undefined → chỉ check ngày/status (dùng cho UI list nhanh).
+ * hasUnreceivedVehicle === undefined → chỉ check ngày/status (list nhanh — coi như chưa có CT).
  */
-export function canResetOrder(input: CanResetInput): { ok: boolean; error?: string } {
+export function canResetOrder(input: CanResetInput): CanResetResult {
   const st = String(input.status || "").toUpperCase();
-  if (st === "CANCEL" || st.includes("HỦY") || st.includes("HUY")) {
+  const statusRaw = String(input.status || "");
+  if (
+    st === "CANCEL" ||
+    statusRaw.includes("Hủy") ||
+    statusRaw.includes("HUY")
+  ) {
     return { ok: false, error: "Đơn đã hủy, không thể reset." };
   }
 
-  const isDha = isDuyenHaNcc(input.supplierId);
-  const threshold = isDha ? 1 : 2;
-  const dayDiff = businessDayDiff(input.orderDate, isDha);
-  const lanGui = Number(input.sendCount) || 0;
-
-  // V21: (slan>0 && dayDiff < threshold) || (slan===0 && dayDiff < 1)
-  if (
-    dayDiff === null ||
-    (lanGui > 0 && dayDiff < threshold) ||
-    (lanGui === 0 && dayDiff < 1)
-  ) {
-    return {
-      ok: false,
-      error: isDha
-        ? "Chỉ được reset đơn Duyên Hà sau 1 ngày kể từ ngày đặt."
-        : "Chỉ được reset đơn sau 2 ngày kể từ ngày đặt.",
-    };
-  }
-
-  // Bắt buộc còn xe chưa nhận — không truyền / false → không cho reset
   if (input.hasUnreceivedVehicle !== true) {
     return {
       ok: false,
@@ -82,5 +78,27 @@ export function canResetOrder(input: CanResetInput): { ok: boolean; error?: stri
     };
   }
 
-  return { ok: true };
+  const isDha = isDuyenHaNcc(input.supplierId);
+  const sendCount = Number(input.sendCount) || 0;
+  const neverSent = sendCount === 0;
+  // Chưa gửi: mọi NCC ≥ 1 ngày; đã gửi: DHA 1 / khác 2
+  const thresholdDays = neverSent ? 1 : isDha ? 1 : 2;
+  const dayDiff = businessDayDiff(input.orderDate, isDha);
+
+  if (dayDiff === null) {
+    return { ok: false, error: "Không xác định được ngày đặt hàng." };
+  }
+  if (dayDiff < thresholdDays) {
+    const nccLabel = isDha ? "Duyên Hà" : "NCC này";
+    return {
+      ok: false,
+      error: neverSent
+        ? `Đơn chưa gửi — cần đợi ít nhất ${thresholdDays} ngày kể từ ngày đặt mới được reset.`
+        : `Đơn ${nccLabel} đã gửi — cần đợi ít nhất ${thresholdDays} ngày kể từ ngày đặt mới được reset.`,
+      thresholdDays,
+      isDuyenHa: isDha,
+    };
+  }
+
+  return { ok: true, thresholdDays, isDuyenHa: isDha };
 }
