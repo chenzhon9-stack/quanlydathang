@@ -59,15 +59,16 @@ function needsDvt(maHtvt: string, canChon: boolean) {
   return canChon || c === "THUE_NGOAI" || c.includes("THUE");
 }
 
-function emptyGh(): GhRow {
+function emptyGh(prev?: GhRow): GhRow {
   return {
     key: `gh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     idGh: "",
     isNew: true,
-    customerId: "",
-    customerName: "",
+    // V21: dòng KH mới mặc định MaKh dòng trước
+    customerId: prev?.customerId || "",
+    customerName: prev?.customerName || "",
     customerDetail: "",
-    requireCustomerDetail: false,
+    requireCustomerDetail: prev?.requireCustomerDetail || false,
     plannedQty: "",
     actualQty: 0,
   };
@@ -956,14 +957,14 @@ export function OrderManageModal({
                       className="text-xs font-semibold text-sky-600"
                       onClick={() =>
                         setBlocks((rows) =>
-                          rows.map((x, i) =>
-                            i === bi
-                              ? {
-                                  ...x,
-                                  deliveries: [...x.deliveries, emptyGh()],
-                                }
-                              : x
-                          )
+                          rows.map((x, i) => {
+                            if (i !== bi) return x;
+                            const last = x.deliveries[x.deliveries.length - 1];
+                            return {
+                              ...x,
+                              deliveries: [...x.deliveries, emptyGh(last)],
+                            };
+                          })
                         )
                       }
                     >

@@ -230,10 +230,22 @@ export function MasterPicker({
         if (type === "XE") {
           // Label đầy đủ V21: Biển/Mooc | Lái xe - SĐT - HTVT - ĐVT
           name = formatXeLabel(r, id);
+        } else if (type === "KH") {
+          // Hiện mã + tên để chọn đúng MaKh khi lập kế hoạch giao
+          const ten = pickField(r, NAME_KEYS.KH) || id;
+          name = ten !== id ? `${id} — ${ten}` : id;
+        } else if (type === "HH" || type === "NCC") {
+          const ten = pickField(r, NAME_KEYS[type]) || id;
+          name = ten !== id ? `${id} — ${ten}` : id;
         }
         mapped.push({ id, name, raw: r });
       }
-      mapped.sort((a, b) => a.name.localeCompare(b.name, "vi"));
+      // Sort khi mở picker: mã ASC, rồi tên (vi)
+      mapped.sort((a, b) => {
+        const byId = a.id.localeCompare(b.id, "vi", { numeric: true });
+        if (byId !== 0) return byId;
+        return a.name.localeCompare(b.name, "vi");
+      });
       setItems(mapped);
       setLoadedKey(cacheKey);
     } catch {

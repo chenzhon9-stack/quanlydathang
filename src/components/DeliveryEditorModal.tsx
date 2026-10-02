@@ -642,17 +642,21 @@ export function DeliveryEditorModal({
         <button
           type="button"
           onClick={() => {
-            setRows((prev) => [
-              ...prev,
-              {
-                deliveryId: `NEW-${Date.now()}`,
-                detailId: summary.detailId,
-                customerId: "",
-                customerName: "",
-                plannedQty: 0,
-                actualQty: 0,
-              } as Delivery,
-            ]);
+            setRows((prev) => {
+              const last = prev[prev.length - 1];
+              return [
+                ...prev,
+                {
+                  deliveryId: `NEW-${Date.now()}`,
+                  detailId: summary.detailId,
+                  // Mặc định MaKh dòng trước
+                  customerId: last?.customerId || "",
+                  customerName: last?.customerName || "",
+                  plannedQty: 0,
+                  actualQty: 0,
+                } as Delivery,
+              ];
+            });
           }}
           className="text-sm font-semibold text-sky-600 hover:underline"
         >

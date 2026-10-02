@@ -46,11 +46,12 @@ type DetailRow = {
   deliveries: DeliveryRow[];
 };
 
-function emptyDelivery(): DeliveryRow {
+function emptyDelivery(prev?: DeliveryRow): DeliveryRow {
   return {
     key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    customerId: "",
-    customerName: "",
+    // V21: dòng KH kế hoạch mới kế thừa MaKh dòng trước (nếu có)
+    customerId: prev?.customerId || "",
+    customerName: prev?.customerName || "",
     plannedQty: "",
   };
 }
@@ -626,14 +627,14 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                   className="text-xs font-semibold text-sky-600"
                   onClick={() =>
                     setDetails((rows) =>
-                      rows.map((x, i) =>
-                        i === di
-                          ? {
-                              ...x,
-                              deliveries: [...x.deliveries, emptyDelivery()],
-                            }
-                          : x
-                      )
+                      rows.map((x, i) => {
+                        if (i !== di) return x;
+                        const last = x.deliveries[x.deliveries.length - 1];
+                        return {
+                          ...x,
+                          deliveries: [...x.deliveries, emptyDelivery(last)],
+                        };
+                      })
                     )
                   }
                 >
