@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { createHash } from "crypto";
+import { getCurrentUserVerified } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
@@ -9,11 +10,30 @@ import { writeAudit } from "@/lib/sheets/audit";
 
 type Ctx = { params: Promise<{ email: string }> };
 
-function requireAdmin(token: string | null) {
-  const user = getCurrentUser(token);
+function hashPasswordV21(email: string, plain: string): string {
+  const salt =
+    process.env.SECRET_SALT ||
+    process.env.GOOGLE_AUTH_SALT ||
+    process.env.SALT ||
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
+    "";
+  const raw = `${String(email).toLowerCase().trim()}:${String(plain)}:${salt}`;
+  return createHash("sha256").update(raw, "utf8").digest("hex");
+}
+
+async function requireAdmin(req: NextRequest) {
+  const token =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null;
+  const user = await getCurrentUserVerified(token);
   if (!user)
     return {
-      error: jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401),
+      error: jsonResponse(
+        error(
+          "SESSION_REVOKED",
+          "Phiên hết hạn hoặc tài khoản đã khóa / đổi mật khẩu"
+        ),
+        401
+      ),
     };
   if (user.role !== "ADMIN" && !user.permissions.includes("*")) {
     return {
@@ -23,12 +43,14 @@ function requireAdmin(token: string | null) {
   return { user };
 }
 
-/** PATCH /api/v1/users/:email — cập nhật Role, Quanly, HoatDong, TrangThai */
+/**
+ * PATCH /api/v1/users/:email
+ * Cập nhật Role, Quanly, HoatDong, TrangThai, Password.
+ * Khóa user / đổi MK → session JWT cũ bị revoke (sv mismatch / status).
+ */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
-    const token =
-      req.headers.get("authorization")?.replace("Bearer ", "") || null;
-    const gate = requireAdmin(token);
+    const gate = await requireAdmin(req);
     if (gate.error) return gate.error;
 
     if (!isSheetsConfigured()) {
@@ -61,6 +83,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
     if (body.trangThai !== undefined) patch.TrangThai = String(body.trangThai);
 
+    // Đổi mật khẩu → revoke mọi JWT cũ (fingerprint Password đổi)
+    const newPassword = body.password ?? body.matKhau ?? body.newPassword;
+    if (newPassword !== undefined && String(newPassword).trim() !== "") {
+      const plain = String(newPassword).trim();
+      if (plain.length < 8) {
+        return jsonResponse(
+          error("VALIDATION_ERROR", "Mật khẩu tối thiểu 8 ký tự"),
+          400
+        );
+      }
+      patch.Password = hashPasswordV21(email, plain);
+    }
+
     if (!Object.keys(patch).length) {
       return jsonResponse(
         error("VALIDATION_ERROR", "Không có field cập nhật"),
@@ -73,13 +108,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       return jsonResponse(error("USER_NOT_FOUND", "Không tìm thấy user"), 404);
     }
 
+    const revoked =
+      patch.Password !== undefined ||
+      patch.TrangThai === "Locked" ||
+      patch.HoatDong === false;
+
     await writeAudit({
       email: gate.user!.email,
       role: gate.user!.role,
-      action: "USER_UPDATE",
+      action: revoked ? "USER_REVOKE_SESSIONS" : "USER_UPDATE",
       targetId: email,
-      newValue: patch,
-      lyDo: `Admin cập nhật user ${email}`,
+      newValue: {
+        ...patch,
+        Password: patch.Password ? "(hashed)" : undefined,
+      },
+      lyDo: revoked
+        ? `Admin cập nhật user ${email} — revoke session (khóa/đổi MK)`
+        : `Admin cập nhật user ${email}`,
     });
 
     if (patch.Role) {
@@ -98,7 +143,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     return jsonResponse(
-      success({ email, patch, row }, { message: "Đã cập nhật User" })
+      success(
+        { email, patch: { ...patch, Password: patch.Password ? "(set)" : undefined }, row, sessionsRevoked: revoked },
+        {
+          message: revoked
+            ? "Đã cập nhật User — phiên đăng nhập cũ của user này đã vô hiệu"
+            : "Đã cập nhật User",
+        }
+      )
     );
   } catch (e) {
     console.error(e);

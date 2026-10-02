@@ -39,7 +39,16 @@ function b64urlDecode<T>(s: string): T | null {
 type TokenPayload = {
   user: UserContext;
   exp: number;
+  /** Session version — fingerprint mật khẩu lúc login; đổi MK / khóa → token cũ invalid */
+  sv?: string;
 };
+
+/** Fingerprint ổn định từ ô Password (không lưu plain). */
+function passwordFingerprint(sheetPass: string): string {
+  const s = String(sheetPass || "").trim();
+  if (!s) return "0";
+  return createHash("sha256").update(s, "utf8").digest("hex").slice(0, 12);
+}
 
 function pick(row: Record<string, string>, keys: string[]): string {
   for (const k of keys) {
@@ -264,12 +273,14 @@ export async function login(
   // 1) Sheet User
   const sheetResult = await loginFromSheet(emailLc, pass);
   let user = sheetResult.user;
+  let sv = "mock";
 
   // 2) Fallback mock (dev accounts)
   if (!user) {
     user = loginFromMock(emailLc, pass);
     if (user) {
       console.info("[Auth] Mock login OK", user.email);
+      sv = "mock";
     } else {
       console.info(
         "[Auth] Login failed",
@@ -278,19 +289,41 @@ export async function login(
         sheetResult.reason || "none"
       );
     }
+  } else {
+    // Lấy fingerprint từ sheet để revoke khi đổi MK
+    try {
+      const found = await findUserRow(emailLc);
+      if (found) {
+        const sheetPass = pick(found.row, [
+          "Password",
+          "MatKhau",
+          "Mật khẩu",
+          "password",
+          "Pass",
+          "MK",
+        ]);
+        sv = passwordFingerprint(sheetPass);
+      }
+    } catch {
+      sv = "0";
+    }
   }
   if (!user) return null;
 
   const exp = Date.now() + TOKEN_TTL_MS;
-  const payload: TokenPayload = { user, exp };
+  const payload: TokenPayload = { user, exp, sv };
   const token = `vh1.${b64urlEncode(payload)}`;
   return { user, token };
 }
 
 export function logout(_token: string) {
-  // Stateless
+  // Stateless — client xóa token; revoke thật qua sv/status trên Sheet
 }
 
+/**
+ * Parse token đồng bộ (không đọc Sheet).
+ * Dùng cho đọc nhẹ; write nhạy cảm nên dùng getCurrentUserVerified.
+ */
 export function getCurrentUser(token: string | null): UserContext | null {
   if (!token) return null;
   if (!token.startsWith("vh1.")) return null;
@@ -307,6 +340,69 @@ export function getCurrentUser(token: string | null): UserContext | null {
     payload.user.permissions = permissionsForRole(role);
   }
   return payload.user;
+}
+
+/**
+ * V21.06 Session Manager (tinh thần):
+ * - User Locked / HoatDong=false → token vô hiệu
+ * - Đổi mật khẩu (Password cell đổi) → sv mismatch → vô hiệu
+ * Mock token (sv=mock) bỏ qua check Sheet.
+ */
+export async function getCurrentUserVerified(
+  token: string | null
+): Promise<UserContext | null> {
+  if (!token || !token.startsWith("vh1.")) return null;
+  const raw = token.slice(4);
+  const payload = b64urlDecode<TokenPayload>(raw);
+  if (!payload?.user?.email || !payload.exp) return null;
+  if (payload.exp < Date.now()) return null;
+
+  const base = getCurrentUser(token);
+  if (!base) return null;
+
+  // Mock / dev
+  if (payload.sv === "mock" || !isSheetsConfigured()) return base;
+
+  try {
+    const found = await findUserRow(base.email.toLowerCase());
+    if (!found) return null;
+    const status = checkUserStatus(found.row);
+    if (!status.ok) {
+      console.info(
+        "[Auth] session revoked (status)",
+        base.email,
+        status.reason
+      );
+      return null;
+    }
+    const sheetPass = pick(found.row, [
+      "Password",
+      "MatKhau",
+      "Mật khẩu",
+      "password",
+      "Pass",
+      "MK",
+    ]);
+    const nowSv = passwordFingerprint(sheetPass);
+    // Token cũ không có sv → cho qua 1 lần (tương thích), khuyến nghị login lại sau
+    if (payload.sv && payload.sv !== "0" && payload.sv !== nowSv) {
+      console.info("[Auth] session revoked (password changed)", base.email);
+      return null;
+    }
+    return base;
+  } catch (e) {
+    console.warn("[Auth] verify session sheet error — allow token", e);
+    return base;
+  }
+}
+
+/** Helper route: Bearer → user đã verify Sheet (null nếu revoke). */
+export async function requireVerifiedUser(
+  req: { headers: { get(name: string): string | null } }
+): Promise<UserContext | null> {
+  const token =
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null;
+  return getCurrentUserVerified(token);
 }
 
 export function resolveScope(user: UserContext): AccessScope {
