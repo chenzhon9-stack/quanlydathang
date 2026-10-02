@@ -435,7 +435,7 @@ export default function OrdersPage() {
       const db = orderDateKey(b.orderDate);
       const d = db.localeCompare(da);
       if (d) return d;
-      return String(b.orderId || "").localeCompare(String(a.orderId || ""));
+      return String(a.orderId || "").localeCompare(String(b.orderId || ""));
     });
 
   const filtered = useMemo(() => {
