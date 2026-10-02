@@ -51,6 +51,31 @@ function isActive(v: unknown) {
   return !["false", "0", "no", "không", "khoa", "khóa"].includes(s);
 }
 
+/** Biển số hiển thị: BienSo / SoMooc (V21 _vehicleDisplayPlate_) */
+function xeDisplayPlate(r: Record<string, string>, fallback = ""): string {
+  const bien = String(r.BienSoXe || r.BienSo || "").trim();
+  const mooc = String(r.SoMooc || "").trim();
+  if (bien && mooc) return `${bien} / ${mooc}`;
+  return bien || fallback;
+}
+
+/**
+ * Nhãn xe đầy đủ để chọn đúng mã khi nhận/giao hàng.
+ * Dòng 1 (name): Biển/Mooc | Lái xe - SĐT - Bằng lái - HTVT - ĐVT
+ */
+function formatXeLabel(r: Record<string, string>, id: string): string {
+  const plate = xeDisplayPlate(r, id);
+  const bits = [
+    r.Tenlaixe,
+    r.Dienthoai || r.DienThoai || r.Banglai,
+    r.TenHTVT || r.MaHTVT,
+    r.TenDVT || r.MaDVT,
+  ]
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  return bits.length ? `${plate} | ${bits.join(" · ")}` : plate;
+}
+
 /**
  * Picker danh mục — panel chọn dạng modal giữa màn hình (mobile-friendly, parity V21).
  * - type=HH + supplierId → chỉ HH có trong NCC_Hanghoa của NCC đó
@@ -203,11 +228,8 @@ export function MasterPicker({
         }
         let name = pickField(r, NAME_KEYS[type]) || id;
         if (type === "XE") {
-          const plate = String(r.BienSoXe || r.BienSo || name).trim();
-          const sub = [r.Tenlaixe, r.TenHTVT, r.TenDVT]
-            .filter(Boolean)
-            .join(" - ");
-          name = sub ? `${plate} | ${sub}` : plate;
+          // Label đầy đủ V21: Biển/Mooc | Lái xe - SĐT - HTVT - ĐVT
+          name = formatXeLabel(r, id);
         }
         mapped.push({ id, name, raw: r });
       }
@@ -227,7 +249,28 @@ export function MasterPicker({
     const parts = s.split(/\s+/).filter(Boolean);
     return items
       .filter((it) => {
-        const hay = foldVn(`${it.id} ${it.name}`);
+        const r = it.raw || {};
+        // Tìm trên mã + nhãn + toàn bộ field xe
+        const hay = foldVn(
+          [
+            it.id,
+            it.name,
+            r.BienSoXe,
+            r.BienSo,
+            r.SoMooc,
+            r.Tenlaixe,
+            r.Banglai,
+            r.Dienthoai,
+            r.DienThoai,
+            r.MaHTVT,
+            r.TenHTVT,
+            r.MaDVT,
+            r.TenDVT,
+            r.Ghichu,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        );
         return parts.every((p) => hay.includes(p));
       })
       .slice(0, 150);
@@ -640,33 +683,93 @@ export function MasterPicker({
                         : "Không có dữ liệu"}
                   </div>
                 ) : (
-                  filtered.map((it) => (
-                    <button
-                      key={it.id}
-                      type="button"
-                      className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
-                        it.id === value ? "bg-sky-50" : ""
-                      }`}
-                      onClick={() => {
-                        onChange(it.id, it.name, it.raw);
-                        setLabel(it.name);
-                        close();
-                      }}
-                    >
-                      <div
-                        className={`text-sm sm:text-[15px] leading-snug ${
-                          it.id === value
-                            ? "font-semibold text-sky-800"
-                            : "font-medium text-slate-800"
+                  filtered.map((it) => {
+                    const r = it.raw || {};
+                    if (type === "XE") {
+                      const plate = xeDisplayPlate(r, it.id);
+                      const laiXe = String(r.Tenlaixe || "").trim();
+                      const phone = String(
+                        r.Dienthoai || r.DienThoai || ""
+                      ).trim();
+                      const bangLai = String(r.Banglai || "").trim();
+                      const htvt = String(r.TenHTVT || r.MaHTVT || "").trim();
+                      const dvt = String(r.TenDVT || r.MaDVT || "").trim();
+                      const mooc = String(r.SoMooc || "").trim();
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 hover:bg-sky-50 ${
+                            it.id === value ? "bg-sky-50" : ""
+                          }`}
+                          onClick={() => {
+                            onChange(it.id, it.name, it.raw);
+                            setLabel(it.name);
+                            close();
+                          }}
+                        >
+                          {/* Dòng 1: Biển số / Mooc */}
+                          <div
+                            className={`text-sm sm:text-[15px] leading-snug ${
+                              it.id === value
+                                ? "font-semibold text-sky-800"
+                                : "font-semibold text-slate-900"
+                            }`}
+                          >
+                            {plate}
+                          </div>
+                          {/* Dòng 2: Lái xe · SĐT · Bằng lái */}
+                          {(laiXe || phone || bangLai) && (
+                            <div className="text-[12px] text-slate-700 mt-0.5 leading-snug">
+                              {[laiXe, phone, bangLai]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </div>
+                          )}
+                          {/* Dòng 3: HTVT · ĐVT */}
+                          {(htvt || dvt) && (
+                            <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                              {[htvt, dvt].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          {/* Dòng 4: Mã xe + phụ */}
+                          <div className="text-[11px] font-mono text-slate-400 mt-0.5 break-all">
+                            {it.id}
+                            {mooc ? ` · Mooc ${mooc}` : ""}
+                            {r.MaHTVT ? ` · ${r.MaHTVT}` : ""}
+                            {r.MaDVT ? ` · ${r.MaDVT}` : ""}
+                          </div>
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        key={it.id}
+                        type="button"
+                        className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
+                          it.id === value ? "bg-sky-50" : ""
                         }`}
+                        onClick={() => {
+                          onChange(it.id, it.name, it.raw);
+                          setLabel(it.name);
+                          close();
+                        }}
                       >
-                        {it.name}
-                      </div>
-                      <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                        {it.id}
-                      </div>
-                    </button>
-                  ))
+                        <div
+                          className={`text-sm sm:text-[15px] leading-snug ${
+                            it.id === value
+                              ? "font-semibold text-sky-800"
+                              : "font-medium text-slate-800"
+                          }`}
+                        >
+                          {it.name}
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                          {it.id}
+                        </div>
+                      </button>
+                    );
+                  })
                 )}
               </div>
 
