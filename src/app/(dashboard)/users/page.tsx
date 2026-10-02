@@ -52,9 +52,12 @@ export default function AdminUsersPage() {
     hoTen: "",
     active: true,
     trangThai: "Approved",
+    password: "",
+    password2: "",
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [msgOk, setMsgOk] = useState(false);
 
   const token = () => localStorage.getItem("token") || "";
 
@@ -125,15 +128,44 @@ export default function AdminUsersPage() {
       hoTen: u.hoTen || "",
       active: u.active,
       trangThai: u.trangThai || (u.active ? "Approved" : "Locked"),
+      password: "",
+      password2: "",
     });
     setMsg("");
+    setMsgOk(false);
   }
 
   async function saveEdit() {
     if (!edit) return;
     setSaving(true);
     setMsg("");
+    setMsgOk(false);
+
+    const pw = form.password.trim();
+    const pw2 = form.password2.trim();
+    if (pw || pw2) {
+      if (pw.length < 8) {
+        setMsg("Mật khẩu mới tối thiểu 8 ký tự");
+        setSaving(false);
+        return;
+      }
+      if (pw !== pw2) {
+        setMsg("Hai ô mật khẩu không khớp");
+        setSaving(false);
+        return;
+      }
+    }
+
     try {
+      const body: Record<string, unknown> = {
+        role: form.role,
+        quanly: form.quanly,
+        hoTen: form.hoTen,
+        active: form.active,
+        trangThai: form.trangThai,
+      };
+      if (pw) body.password = pw;
+
       const res = await fetch(
         `/api/v1/users/${encodeURIComponent(edit.email)}`,
         {
@@ -142,13 +174,7 @@ export default function AdminUsersPage() {
             Authorization: `Bearer ${token()}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            role: form.role,
-            quanly: form.quanly,
-            hoTen: form.hoTen,
-            active: form.active,
-            trangThai: form.trangThai,
-          }),
+          body: JSON.stringify(body),
         }
       );
       const json = await res.json();
@@ -156,8 +182,19 @@ export default function AdminUsersPage() {
         setMsg(json.error?.message || "Lỗi lưu");
         return;
       }
-      setMsg("Đã lưu");
-      setEdit(null);
+      const revoked = Boolean(json.data?.sessionsRevoked);
+      setMsgOk(true);
+      setMsg(
+        revoked
+          ? "Đã lưu — phiên đăng nhập cũ của user đã bị thu hồi (đổi MK / khóa)."
+          : "Đã lưu"
+      );
+      // Giữ modal vài giây nếu đổi MK để admin đọc thông báo
+      if (pw) {
+        setForm((f) => ({ ...f, password: "", password2: "" }));
+      } else {
+        setEdit(null);
+      }
       await loadUsers();
       await loadRbac();
     } catch {
@@ -460,8 +497,51 @@ export default function AdminUsersPage() {
               Hoạt động (HoatDong)
             </label>
 
+            {/* Đặt lại mật khẩu — để trống = không đổi */}
+            <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-900">
+                Đặt lại mật khẩu
+              </p>
+              <p className="text-[11px] text-amber-800/90 leading-snug">
+                Để trống nếu không đổi. Khi đổi: mật khẩu được hash V21
+                (SHA-256), mọi phiên đăng nhập cũ của user sẽ bị thu hồi.
+              </p>
+              <label className="block text-xs font-semibold text-slate-600">
+                Mật khẩu mới
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={form.password}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, password: e.target.value }))
+                  }
+                  placeholder="Tối thiểu 8 ký tự"
+                />
+              </label>
+              <label className="block text-xs font-semibold text-slate-600">
+                Nhập lại mật khẩu
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+                  value={form.password2}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, password2: e.target.value }))
+                  }
+                  placeholder="Nhập lại mật khẩu mới"
+                />
+              </label>
+            </div>
+
             {msg && (
-              <div className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
+              <div
+                className={`text-xs rounded px-2 py-1 ${
+                  msgOk
+                    ? "text-emerald-700 bg-emerald-50"
+                    : "text-red-600 bg-red-50"
+                }`}
+              >
                 {msg}
               </div>
             )}
@@ -472,7 +552,7 @@ export default function AdminUsersPage() {
                 onClick={() => setEdit(null)}
                 className="px-3 py-2 text-xs rounded-lg border border-slate-200"
               >
-                Hủy
+                Đóng
               </button>
               <button
                 type="button"
@@ -480,7 +560,11 @@ export default function AdminUsersPage() {
                 onClick={saveEdit}
                 className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 text-white disabled:opacity-50"
               >
-                {saving ? "Đang lưu…" : "Lưu"}
+                {saving
+                  ? "Đang lưu…"
+                  : form.password.trim()
+                    ? "Lưu & đổi mật khẩu"
+                    : "Lưu"}
               </button>
             </div>
           </div>
