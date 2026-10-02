@@ -60,8 +60,7 @@ function xeDisplayPlate(r: Record<string, string>, fallback = ""): string {
 }
 
 /**
- * Nhãn xe đầy đủ để chọn đúng mã khi nhận/giao hàng.
- * Dòng 1 (name): Biển/Mooc | Lái xe - SĐT - Bằng lái - HTVT - ĐVT
+ * Nhãn xe trong danh sách (đủ chi tiết để chọn đúng).
  */
 function formatXeLabel(r: Record<string, string>, id: string): string {
   const plate = xeDisplayPlate(r, id);
@@ -74,6 +73,45 @@ function formatXeLabel(r: Record<string, string>, id: string): string {
     .map((x) => String(x || "").trim())
     .filter(Boolean);
   return bits.length ? `${plate} | ${bits.join(" · ")}` : plate;
+}
+
+/** Nhãn đóng ô (V21): chỉ Biển / Mooc */
+function formatXeClosed(r: Record<string, string>, id: string): string {
+  return xeDisplayPlate(r, id);
+}
+
+/** KH đóng: Tên (hoặc Mã — Tên nếu trùng tên) */
+function formatKhClosed(r: Record<string, string>, id: string): string {
+  const ten = String(
+    r.TenKhachhang || r.TenKhachHang || r.TenKH || ""
+  ).trim();
+  if (ten && ten !== id) return ten;
+  return id;
+}
+
+/** HH đóng: Tên hàng (V21) */
+function formatHhClosed(r: Record<string, string>, id: string): string {
+  const ten = String(r.TenHangHoa || r.TenHH || "").trim();
+  if (ten && ten !== id) return ten;
+  return id;
+}
+
+/** Tên gửi lên onChange khi chọn (ô đóng gọn như V21) */
+function closedNameFor(
+  type: MasterType,
+  id: string,
+  listName: string,
+  raw?: Record<string, string>
+): string {
+  if (!raw) return listName;
+  if (type === "XE") return formatXeClosed(raw, id);
+  if (type === "KH") return formatKhClosed(raw, id);
+  if (type === "HH") return formatHhClosed(raw, id);
+  if (type === "NCC") {
+    const ten = String(raw.TenNCC || raw.TenNcc || "").trim();
+    return ten && ten !== id ? ten : id;
+  }
+  return listName;
 }
 
 /**
@@ -388,8 +426,9 @@ export function MasterPicker({
             raw?: Record<string, string>;
           };
           if (confirm((json.error.message || "Trùng") + "\nChọn bản ghi đã có?")) {
-            onChange(it.id, it.name, it.raw);
-            setLabel(it.name);
+            const closed = closedNameFor(type, it.id, it.name, it.raw);
+            onChange(it.id, closed, it.raw);
+            setLabel(closed);
             close();
           } else {
             setQuickErr(json.error.message || "Trùng");
@@ -404,11 +443,12 @@ export function MasterPicker({
         name: string;
         raw?: Record<string, string>;
       };
-      // Invalidate cache list + chọn item mới
+      // Invalidate cache list + chọn item mới (ô đóng gọn như V21)
       setLoadedKey("");
       setItems([]);
-      onChange(data.id, data.name, data.raw);
-      setLabel(data.name);
+      const closed = closedNameFor(type, data.id, data.name, data.raw);
+      onChange(data.id, closed, data.raw);
+      setLabel(closed);
       resetQuickForm();
       close();
     } catch (e: unknown) {
@@ -697,6 +737,12 @@ export function MasterPicker({
                 ) : (
                   filtered.map((it) => {
                     const r = it.raw || {};
+                    const pick = () => {
+                      const closed = closedNameFor(type, it.id, it.name, it.raw);
+                      onChange(it.id, closed, it.raw);
+                      setLabel(closed);
+                      close();
+                    };
                     if (type === "XE") {
                       const plate = xeDisplayPlate(r, it.id);
                       const laiXe = String(r.Tenlaixe || "").trim();
@@ -714,11 +760,7 @@ export function MasterPicker({
                           className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 hover:bg-sky-50 ${
                             it.id === value ? "bg-sky-50" : ""
                           }`}
-                          onClick={() => {
-                            onChange(it.id, it.name, it.raw);
-                            setLabel(it.name);
-                            close();
-                          }}
+                          onClick={pick}
                         >
                           {/* Dòng 1: Biển số / Mooc */}
                           <div
@@ -754,6 +796,38 @@ export function MasterPicker({
                         </button>
                       );
                     }
+                    // KH / HH / NCC: tên nổi, mã mono phía dưới
+                    if (type === "KH" || type === "HH" || type === "NCC") {
+                      const ten =
+                        type === "KH"
+                          ? formatKhClosed(r, it.id)
+                          : type === "HH"
+                            ? formatHhClosed(r, it.id)
+                            : String(r.TenNCC || r.TenNcc || it.id).trim();
+                      return (
+                        <button
+                          key={it.id}
+                          type="button"
+                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 hover:bg-sky-50 ${
+                            it.id === value ? "bg-sky-50" : ""
+                          }`}
+                          onClick={pick}
+                        >
+                          <div
+                            className={`text-sm sm:text-[15px] leading-snug ${
+                              it.id === value
+                                ? "font-semibold text-sky-800"
+                                : "font-semibold text-slate-900"
+                            }`}
+                          >
+                            {ten}
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-400 mt-0.5 break-all">
+                            {it.id}
+                          </div>
+                        </button>
+                      );
+                    }
                     return (
                       <button
                         key={it.id}
@@ -761,11 +835,7 @@ export function MasterPicker({
                         className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
                           it.id === value ? "bg-sky-50" : ""
                         }`}
-                        onClick={() => {
-                          onChange(it.id, it.name, it.raw);
-                          setLabel(it.name);
-                          close();
-                        }}
+                        onClick={pick}
                       >
                         <div
                           className={`text-sm sm:text-[15px] leading-snug ${

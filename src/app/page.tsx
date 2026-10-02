@@ -1,15 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { firstAllowedPath, type ClientUser } from "@/lib/nav-access";
 
+const REMEMBER_EMAIL_KEY = "vh_login_email";
+
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("admin@viethai.local (mock) hoặc email sheet User");
-  const [password, setPassword] = useState("Admin@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [rememberEmail, setRememberEmail] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
+      if (saved) setEmail(saved);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -19,7 +31,10 @@ export default function LoginPage() {
       const res = await fetch("/api/v1/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
       });
       const json = await res.json();
       if (!json.success) {
@@ -28,6 +43,16 @@ export default function LoginPage() {
       }
       localStorage.setItem("token", json.data.session.token);
       localStorage.setItem("user", JSON.stringify(json.data.user));
+      try {
+        if (rememberEmail && email.trim()) {
+          localStorage.setItem(REMEMBER_EMAIL_KEY, email.trim());
+        } else {
+          localStorage.removeItem(REMEMBER_EMAIL_KEY);
+        }
+      } catch {
+        /* ignore */
+      }
+      // Mật khẩu: trình duyệt lưu qua autocomplete (không lưu trong app)
       const u = (json.data.user || {}) as ClientUser;
       router.push(firstAllowedPath(u));
     } catch {
@@ -52,31 +77,61 @@ export default function LoginPage() {
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form
+          onSubmit={handleLogin}
+          className="space-y-4"
+          autoComplete="on"
+          method="post"
+        >
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label
+              htmlFor="login-email"
+              className="block text-xs font-medium text-slate-600 mb-1"
+            >
               Email
             </label>
             <input
+              id="login-email"
+              name="username"
               type="email"
+              autoComplete="username"
+              inputMode="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="email@example.com"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-600 mb-1">
+            <label
+              htmlFor="login-password"
+              className="block text-xs font-medium text-slate-600 mb-1"
+            >
               Mật khẩu
             </label>
             <input
+              id="login-password"
+              name="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               required
             />
           </div>
+
+          <label className="flex items-center gap-2 text-xs text-slate-600 select-none">
+            <input
+              type="checkbox"
+              checked={rememberEmail}
+              onChange={(e) => setRememberEmail(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Ghi nhớ email trên thiết bị này
+          </label>
 
           {error && (
             <div className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">
@@ -92,13 +147,6 @@ export default function LoginPage() {
             {loading ? "Đang đăng nhập..." : "Đăng nhập"}
           </button>
         </form>
-
-        <div className="mt-5 pt-4 border-t border-slate-100 text-[11px] text-slate-400 space-y-0.5">
-          <p className="font-medium text-slate-500">Tài khoản demo:</p>
-          <p>admin@viethai.local / Admin@123</p>
-          <p>purchase@viethai.local / Purchase@123</p>
-          <p>manager@viethai.local / Manager@123</p>
-        </div>
       </div>
     </div>
   );

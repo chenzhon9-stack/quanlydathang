@@ -318,6 +318,7 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                       type="KH"
                       value={g.customerId}
                       displayName={g.customerName}
+                      placeholder="Chọn khách hàng…"
                       onChange={(id, name) =>
                         setDetails((rows) =>
                           rows.map((x, i) =>
