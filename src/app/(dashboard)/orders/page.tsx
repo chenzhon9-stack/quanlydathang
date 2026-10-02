@@ -411,8 +411,35 @@ export default function OrdersPage() {
     load();
   }, [load]);
 
+  /** Chuẩn hóa ngày đặt → yyyy-MM-dd (nhóm ổn định dù API trả full datetime) */
+  const orderDateKey = (d?: string) => {
+    const s = String(d || "").trim();
+    if (!s) return "";
+    // yyyy-MM-dd or yyyy-MM-ddTHH:mm...
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    // dd/MM/yyyy
+    const m2 = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    if (m2) {
+      const dd = m2[1].padStart(2, "0");
+      const mm = m2[2].padStart(2, "0");
+      return `${m2[3]}-${mm}-${dd}`;
+    }
+    return s.slice(0, 10);
+  };
+
+  /** Sort: Ngày đặt DESC → Mã đơn DESC */
+  const sortOrders = (list: Order[]) =>
+    [...list].sort((a, b) => {
+      const da = orderDateKey(a.orderDate);
+      const db = orderDateKey(b.orderDate);
+      const d = db.localeCompare(da);
+      if (d) return d;
+      return String(b.orderId || "").localeCompare(String(a.orderId || ""));
+    });
+
   const filtered = useMemo(() => {
-    return orders.filter((o) => {
+    const list = orders.filter((o) => {
       if (!matchStatuses(o.status, statuses)) return false;
       const hay = [
         o.orderId,
@@ -424,17 +451,26 @@ export default function OrdersPage() {
       ].join(" ");
       return matchSearch(hay, search);
     });
+    return sortOrders(list);
   }, [orders, statuses, search]);
 
-  const byDate = filtered.reduce<Record<string, Order[]>>((acc, o) => {
-    if (!acc[o.orderDate]) acc[o.orderDate] = [];
-    acc[o.orderDate].push(o);
-    return acc;
-  }, {});
-  const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
-  const displayGroups: { key: string; items: Order[] }[] = groupByDate
-    ? dates.map((d) => ({ key: d, items: byDate[d] }))
-    : [{ key: "all", items: filtered }];
+  const displayGroups: { key: string; items: Order[] }[] = useMemo(() => {
+    if (!groupByDate) {
+      return [{ key: "all", items: filtered }];
+    }
+    const byDate: Record<string, Order[]> = {};
+    for (const o of filtered) {
+      const k = orderDateKey(o.orderDate) || "(không ngày)";
+      if (!byDate[k]) byDate[k] = [];
+      byDate[k].push(o);
+    }
+    // Ngày đặt DESC; trong nhóm đã sort mã đơn DESC từ filtered
+    const dates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
+    return dates.map((d) => ({
+      key: d,
+      items: sortOrders(byDate[d]),
+    }));
+  }, [filtered, groupByDate]);
 
   return (
     <div className="space-y-4 max-w-full">
@@ -511,9 +547,20 @@ export default function OrdersPage() {
         <div className="text-center py-12 text-slate-400 text-sm">Đang tải đơn hàng...</div>
       ) : (
         <>
-          {/* Mobile cards */}
+          {/* Mobile cards — nhóm theo ngày đặt khi bật */}
           <div className="md:hidden space-y-3">
-            {filtered.map((o) => (
+            {displayGroups.map((g) => (
+              <React.Fragment key={`m-${g.key}`}>
+                {groupByDate && g.key !== "all" && (
+                  <div className="sticky top-0 z-10 rounded-lg bg-slate-700 text-white text-xs font-medium px-3 py-2">
+                    📅 Ngày đặt:{" "}
+                    {/^\d{4}-\d{2}-\d{2}$/.test(g.key)
+                      ? g.key.split("-").reverse().join("/")
+                      : g.key}
+                    <span className="ml-2 opacity-80">({g.items.length})</span>
+                  </div>
+                )}
+                {g.items.map((o) => (
               <div
                 key={o.orderId}
                 className={`rounded-2xl border p-4 shadow-sm ${
@@ -603,6 +650,8 @@ export default function OrdersPage() {
                   />
                 </div>
               </div>
+                ))}
+              </React.Fragment>
             ))}
             {filtered.length === 0 && !err && (
               <div className="text-center py-12 text-slate-500 text-sm space-y-2">
@@ -632,14 +681,22 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {dates.map((date) => (
-                    <React.Fragment key={`g-${date}`}>
-                      <tr className="bg-slate-700 text-white">
-                        <td colSpan={8} className="px-3 py-2 text-xs font-medium">
-                          📅 Ngày đặt lệnh: {date.split("-").reverse().join("/")}
-                        </td>
-                      </tr>
-                      {byDate[date].map((o) => {
+                  {displayGroups.map((g) => (
+                    <React.Fragment key={`g-${g.key}`}>
+                      {groupByDate && g.key !== "all" && (
+                        <tr className="bg-slate-700 text-white">
+                          <td colSpan={8} className="px-3 py-2 text-xs font-medium">
+                            📅 Ngày đặt lệnh:{" "}
+                            {/^\d{4}-\d{2}-\d{2}$/.test(g.key)
+                              ? g.key.split("-").reverse().join("/")
+                              : g.key}
+                            <span className="ml-2 opacity-80">
+                              ({g.items.length} đơn)
+                            </span>
+                          </td>
+                        </tr>
+                      )}
+                      {g.items.map((o) => {
                         const stU = String(o.status || "").toUpperCase();
                         const terminalRow =
                           stU === "CANCEL" ||
