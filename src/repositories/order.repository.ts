@@ -22,10 +22,11 @@ function applyFilters(
     out = out.filter((o) => o.status === filter.status);
   if (filter.supplierId)
     out = out.filter((o) => o.supplierId === filter.supplierId);
+  // Ngày đặt DESC → Mã đơn ASC
   return out.sort((a, b) => {
     const d = (b.orderDate || "").localeCompare(a.orderDate || "");
     if (d !== 0) return d;
-    return (b.orderId || "").localeCompare(a.orderId || "");
+    return (a.orderId || "").localeCompare(b.orderId || "");
   });
 }
 

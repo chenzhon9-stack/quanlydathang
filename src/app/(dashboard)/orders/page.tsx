@@ -428,7 +428,7 @@ export default function OrdersPage() {
     return s.slice(0, 10);
   };
 
-  /** Sort: Ngày đặt DESC → Mã đơn DESC */
+  /** Sort: Ngày đặt DESC → Mã đơn ASC */
   const sortOrders = (list: Order[]) =>
     [...list].sort((a, b) => {
       const da = orderDateKey(a.orderDate);
