@@ -39,6 +39,8 @@ type LedgerLine = {
   duCuoi: number;
   thieuGia?: boolean;
   type?: string;
+  /** ID_CN — chỉ dòng sổ phát sinh (SO_CO) */
+  ledgerId?: string;
 };
 
 type DetailData = {
@@ -335,6 +337,7 @@ export function PayablesSummary() {
         return;
       }
       alert("Đã ghi chứng từ: " + (json.data?.idCn || ""));
+      const savedNcc = entryForm.maNcc.trim();
       setEntryOpen(false);
       setEntryForm({
         maNcc: "",
@@ -345,11 +348,59 @@ export function PayablesSummary() {
         dienGiai: "",
       });
       void load();
+      // Refresh sổ chi tiết nếu đang mở cùng NCC
+      if (detail && detail.supplierId === savedNcc) {
+        void openDetail({
+          supplierId: detail.supplierId,
+          supplierName: detail.supplierName,
+          opening: detail.duDauNam,
+          paid: 0,
+          increase: 0,
+          closing: detail.duCuoiKy,
+        });
+      }
     } catch {
       alert("Lỗi mạng");
     } finally {
       setEntryBusy(false);
     }
+  }
+
+  /** Mở form ghi chứng từ — prefill NCC đang xem chi tiết */
+  function openAddEntryFromDetail() {
+    if (!detail) return;
+    setEntryForm({
+      maNcc: detail.supplierId,
+      loai: "THANH_TOAN",
+      soTien: "",
+      ngayCT: toDate,
+      soChungTu: "",
+      dienGiai: "",
+    });
+    setEntryOpen(true);
+  }
+
+  /**
+   * Copy dòng sổ Có (phát sinh) — parity V21 copyCongNoPhatSinh:
+   * prefill loai/số tiền/diễn giải; bắt nhập lại Ngày CT + Số chứng từ.
+   */
+  function copySoCoLine(l: LedgerLine) {
+    if (!detail) return;
+    const loai = String(l.type || "THANH_TOAN").toUpperCase();
+    const soTien = l.thanhToan || l.thanhTien || 0;
+    // Bỏ suffix " | số CT" nếu có trong diễn giải
+    let dienGiai = l.dienGiai || "";
+    const pipe = dienGiai.lastIndexOf(" | ");
+    if (pipe > 0) dienGiai = dienGiai.slice(0, pipe).trim();
+    setEntryForm({
+      maNcc: detail.supplierId,
+      loai: loai || "THANH_TOAN",
+      soTien: soTien ? String(soTien) : "",
+      ngayCT: toDate, // V21: bắt nhập lại ngày
+      soChungTu: "", // V21: bắt nhập lại số CT
+      dienGiai,
+    });
+    setEntryOpen(true);
   }
 
   return (
@@ -388,10 +439,16 @@ export function PayablesSummary() {
       </div>
 
       {entryOpen && (
-        <div className="bg-white border border-sky-200 rounded-xl p-4 shadow-sm space-y-3">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-3">
+        <div className="bg-white border border-sky-200 rounded-xl p-4 shadow-xl space-y-3 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex justify-between items-center">
             <h3 className="font-bold text-slate-800 text-sm">
               Ghi chứng từ công nợ
+              {entryForm.maNcc ? (
+                <span className="ml-2 font-normal text-slate-500">
+                  · {entryForm.maNcc}
+                </span>
+              ) : null}
             </h3>
             <button
               type="button"
@@ -498,6 +555,7 @@ export function PayablesSummary() {
               {entryBusy ? "Đang lưu…" : "Lưu chứng từ"}
             </button>
           </div>
+        </div>
         </div>
       )}
 
@@ -641,7 +699,14 @@ export function PayablesSummary() {
                   {detail.supplierId} · {detail.fromDate} → {detail.toDate}
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={openAddEntryFromDetail}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 text-white hover:bg-sky-500"
+                >
+                  + Thêm chi tiết
+                </button>
                 <button
                   type="button"
                   onClick={exportDetailExcel}
@@ -653,8 +718,9 @@ export function PayablesSummary() {
                   type="button"
                   onClick={() => setDetail(null)}
                   className="px-3 py-1.5 text-xs rounded-lg border border-slate-200"
+                  title="Đóng"
                 >
-                  Đóng
+                  ✕
                 </button>
               </div>
             </div>
@@ -699,6 +765,7 @@ export function PayablesSummary() {
                     <th className="px-2 py-2 text-right font-semibold">Thanh toán</th>
                     <th className="px-2 py-2 text-left font-semibold">Ghi chú</th>
                     <th className="px-2 py-2 text-right font-semibold">Dư cuối</th>
+                    <th className="px-2 py-2 text-center font-semibold">Hành động</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -721,49 +788,77 @@ export function PayablesSummary() {
                     <td className="px-2 py-1.5 text-right tabular-nums text-red-600">
                       {fmtMoney(detail.duCuoiKy)}
                     </td>
+                    <td />
                   </tr>
-                  {detail.ledger.map((l, i) => (
-                    <tr
-                      key={i}
-                      className={`border-t border-slate-100 ${
-                        l.thieuGia ? "bg-amber-50" : l.kind === "SO_CO" ? "bg-sky-50/50" : ""
-                      }`}
-                    >
-                      <td className="px-2 py-1.5 whitespace-nowrap">
-                        {l.ngayHienThi || l.date.split("-").reverse().join("/")}
-                      </td>
-                      <td className="px-2 py-1.5 max-w-[200px]">{l.dienGiai}</td>
-                      <td className="px-2 py-1.5">{l.congTrinh || "—"}</td>
-                      <td className="px-2 py-1.5 font-mono text-[10px]">{l.soXe || "—"}</td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {l.soLuong != null ? fmtTons(l.soLuong) : "—"}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums">
-                        {l.thieuGia ? (
-                          <span className="text-amber-600">thiếu</span>
-                        ) : l.donGia != null ? (
-                          fmtMoney(l.donGia)
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums font-medium">
-                        {l.thanhTien ? fmtMoney(l.thanhTien) : "—"}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">
-                        {l.thanhToan ? fmtMoney(l.thanhToan) : "—"}
-                      </td>
-                      <td className="px-2 py-1.5 text-slate-500 max-w-[120px] truncate">
-                        {l.ghiChu || "—"}
-                      </td>
-                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">
-                        {fmtMoney(l.duCuoi)}
-                      </td>
-                    </tr>
-                  ))}
+                  {detail.ledger.map((l, i) => {
+                    const isSoCo =
+                      l.kind === "SO_CO" ||
+                      !!l.ledgerId ||
+                      (Number(l.thanhToan) > 0 && !l.soLuong);
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-t border-slate-100 ${
+                          l.thieuGia
+                            ? "bg-amber-50"
+                            : isSoCo
+                              ? "bg-sky-50/50"
+                              : ""
+                        }`}
+                      >
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          {l.ngayHienThi ||
+                            l.date.split("-").reverse().join("/")}
+                        </td>
+                        <td className="px-2 py-1.5 max-w-[200px]">{l.dienGiai}</td>
+                        <td className="px-2 py-1.5">{l.congTrinh || "—"}</td>
+                        <td className="px-2 py-1.5 font-mono text-[10px]">
+                          {l.soXe || "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {l.soLuong != null ? fmtTons(l.soLuong) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {l.thieuGia ? (
+                            <span className="text-amber-600">thiếu</span>
+                          ) : l.donGia != null ? (
+                            fmtMoney(l.donGia)
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-medium">
+                          {l.thanhTien ? fmtMoney(l.thanhTien) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-emerald-700">
+                          {l.thanhToan ? fmtMoney(l.thanhToan) : "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-slate-500 max-w-[120px] truncate">
+                          {l.ghiChu || "—"}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-slate-700">
+                          {fmtMoney(l.duCuoi)}
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          {isSoCo ? (
+                            <button
+                              type="button"
+                              onClick={() => copySoCoLine(l)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded border border-slate-300 bg-white hover:bg-slate-50 text-slate-700"
+                              title="Sao chép phát sinh (nhập lại Ngày CT + Số CT)"
+                            >
+                              📋 Copy
+                            </button>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!detail.ledger.length && (
                     <tr>
-                      <td colSpan={10} className="text-center py-8 text-slate-400">
+                      <td colSpan={11} className="text-center py-8 text-slate-400">
                         Không có phát sinh trong kỳ
                       </td>
                     </tr>
