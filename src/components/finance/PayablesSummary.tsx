@@ -136,6 +136,11 @@ export function PayablesSummary() {
   async function openDetail(r: Summary) {
     const token = localStorage.getItem("token");
     if (!token) return;
+    const sid = String(r.supplierId || "").trim();
+    if (!sid) {
+      alert("Thiếu mã NCC");
+      return;
+    }
     setDetailLoading(true);
     try {
       const qs = new URLSearchParams({
@@ -143,18 +148,44 @@ export function PayablesSummary() {
         toDate,
         year: fromDate.slice(0, 4),
       });
-      const res = await fetch(
-        `/api/v1/finance/payables/${encodeURIComponent(r.supplierId)}?${qs}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const json = await res.json();
-      if (!json.success) {
-        alert(json.error?.message || "Lỗi chi tiết");
+      // Chi tiết theo MaNCC — chỉ dùng [id], không còn [supplierId] (trùng dynamic segment)
+      const url = `/api/v1/finance/payables/${encodeURIComponent(sid)}?${qs}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await res.text();
+      let json: {
+        success?: boolean;
+        data?: DetailData;
+        error?: { message?: string; code?: string };
+      } = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        alert(
+          `Không tải được chi tiết (HTTP ${res.status}).` +
+            (res.status >= 500
+              ? " Server lỗi — kiểm tra log Vercel / quyền Sheets."
+              : " Phản hồi không phải JSON.")
+        );
         return;
       }
-      setDetail(json.data as DetailData);
-    } catch {
-      alert("Không tải được chi tiết");
+      if (!res.ok || !json.success) {
+        alert(
+          json.error?.message ||
+            `Lỗi chi tiết (${json.error?.code || res.status})`
+        );
+        return;
+      }
+      const data = json.data;
+      if (!data || !Array.isArray(data.ledger)) {
+        alert("Dữ liệu chi tiết không hợp lệ (thiếu ledger).");
+        return;
+      }
+      setDetail(data);
+    } catch (e) {
+      console.error("[PayablesSummary] openDetail", e);
+      alert("Không tải được chi tiết — kiểm tra mạng hoặc đăng nhập lại.");
     } finally {
       setDetailLoading(false);
     }
@@ -524,11 +555,14 @@ export function PayablesSummary() {
       {loading ? (
         <div className="text-center text-slate-400 py-10 text-sm">Đang tải…</div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead>
+        /* max-height: thanh cuộn ngang nằm trong khung nhìn thấy, không phải cuối trang */
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-auto max-h-[min(70vh,calc(100dvh-14rem))]">
+          <table className="min-w-[1100px] w-full text-sm border-separate border-spacing-0">
+            <thead className="sticky top-0 z-20">
               <tr className="bg-slate-100 text-slate-600 text-xs">
-                <th className="px-3 py-2.5 text-left font-semibold">NCC</th>
+                <th className="px-3 py-2.5 text-left font-semibold sticky left-0 z-30 bg-slate-100 min-w-[160px]">
+                  NCC
+                </th>
                 <th className="px-3 py-2.5 text-right font-semibold">Dư đầu năm</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Dư đầu kỳ</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Phải trả</th>
@@ -540,13 +574,15 @@ export function PayablesSummary() {
                 <th className="px-3 py-2.5 text-right font-semibold">ĐC giảm</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Dư cuối</th>
                 <th className="px-3 py-2.5 text-right font-semibold">Thiếu giá</th>
-                <th className="px-3 py-2.5 text-right font-semibold">Hành động</th>
+                <th className="px-3 py-2.5 text-right font-semibold sticky right-0 z-30 bg-slate-100">
+                  Hành động
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r) => (
-                <tr key={r.supplierId} className="border-t border-slate-100 hover:bg-slate-50">
-                  <td className="px-3 py-2">
+                <tr key={r.supplierId} className="border-t border-slate-100 hover:bg-slate-50 group">
+                  <td className="px-3 py-2 sticky left-0 z-10 bg-white group-hover:bg-slate-50 min-w-[160px]">
                     <div className="font-medium">{r.supplierName || r.supplierId}{!r.coDuDauNam && <span className="ml-1 text-amber-500 text-[10px]">▲</span>}</div>
                     <div className="text-[11px] text-slate-400 font-mono">{r.supplierId}</div>
                   </td>
@@ -561,14 +597,16 @@ export function PayablesSummary() {
                   <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(r.dieuChinhGiam || 0)}</td>
                   <td className={`px-3 py-2 text-right tabular-nums font-bold ${(r.duCuoi ?? r.closing) > 0 ? "text-red-600" : "text-slate-800"}`}>{fmtMoney(r.duCuoi ?? r.closing)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-amber-600">{r.soDongThieuGia || 0}</td>
-                  <td className="px-3 py-2 text-right">
-                    <button type="button" onClick={() => openDetail(r)} disabled={detailLoading} className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500">Chi tiết</button>
+                  <td className="px-3 py-2 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]">
+                    <button type="button" onClick={() => openDetail(r)} disabled={detailLoading} className="px-2.5 py-1 text-[11px] font-medium rounded bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50">
+                      {detailLoading ? "…" : "Chi tiết"}
+                    </button>
                   </td>
                 </tr>
               ))}
               {filtered.length > 0 && (
                 <tr className="border-t-2 border-slate-300 bg-slate-50 font-semibold">
-                  <td className="px-3 py-2">TỔNG ({filtered.length} NCC)</td>
+                  <td className="px-3 py-2 sticky left-0 z-10 bg-slate-50">TỔNG ({filtered.length} NCC)</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(totals.duDauNam)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(totals.duDauKy)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmtMoney(totals.phaiTra)}</td>
