@@ -144,12 +144,13 @@ export function PayablesSummary() {
     setDetailLoading(true);
     try {
       const qs = new URLSearchParams({
+        supplierId: sid,
         fromDate,
         toDate,
         year: fromDate.slice(0, 4),
       });
-      // Chi tiết theo MaNCC — chỉ dùng [id], không còn [supplierId] (trùng dynamic segment)
-      const url = `/api/v1/finance/payables/${encodeURIComponent(sid)}?${qs}`;
+      // Query-based — tránh 404 dynamic /payables/[id] trên một số deploy Vercel
+      const url = `/api/v1/finance/payables/detail?${qs}`;
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
