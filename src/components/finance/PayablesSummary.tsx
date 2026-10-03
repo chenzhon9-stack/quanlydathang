@@ -101,29 +101,27 @@ export function PayablesSummary() {
     setLoading(true);
     setErr("");
     try {
+      // Tổng hợp công nợ = ReportService.getPayables (summary)
+      // KHÔNG gọi GET /api/v1/finance/payables — endpoint đó là sổ phát sinh (items)
       const qs = new URLSearchParams({
         fromDate,
         toDate,
         year: fromDate.slice(0, 4),
         pageSize: "500",
       });
-      let res = await fetch(`/api/v1/finance/payables?${qs}`, {
+      const res = await fetch(`/api/v1/reports/payables?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) {
-        res = await fetch(`/api/v1/reports/payables?${qs}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
       const json = await res.json();
       if (!json.success) {
         setErr(json.error?.message || "Lỗi tải công nợ");
         setSummary([]);
         return;
       }
-      setSummary(json.data?.summary || []);
+      const rows = json.data?.summary || json.data?.items || [];
+      setSummary(Array.isArray(rows) ? rows : []);
       setFormula(json.data?.formula || "");
-      setMeta(json.meta || {});
+      setMeta(json.meta || json.data?.meta || {});
     } catch {
       setErr("Không kết nối API");
     } finally {
