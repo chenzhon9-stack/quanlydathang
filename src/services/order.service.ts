@@ -79,9 +79,15 @@ export class OrderService {
     }
 
     const nccMap = await MasterRepository.nccNames();
+    const nccSend = await MasterRepository.nccSendMethods();
     orders = orders.map((o) => ({
       ...o,
       supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
+      sendMethod:
+        o.sendMethod ||
+        nccSend[o.supplierId] ||
+        nccSend[String(o.supplierId || "").toUpperCase()] ||
+        "",
     }));
 
     const page = Math.max(1, filter.page ?? 1);
@@ -143,6 +149,7 @@ export class OrderService {
       const reset = canResetOrder({
         status: o.status,
         orderDate: o.orderDate,
+        orderDateTime: o.orderDateTime,
         supplierId: o.supplierId,
         sendCount: o.sendCount,
         hasUnreceivedVehicle: hasUnreceived.get(o.orderId) === true,
@@ -204,7 +211,18 @@ export class OrderService {
       }
     }
 
-    return order;
+    const nccMap = await MasterRepository.nccNames();
+    const nccSend = await MasterRepository.nccSendMethods();
+    return {
+      ...order,
+      supplierName:
+        order.supplierName || nccMap[order.supplierId] || order.supplierId,
+      sendMethod:
+        order.sendMethod ||
+        nccSend[order.supplierId] ||
+        nccSend[String(order.supplierId || "").toUpperCase()] ||
+        "",
+    };
   }
 
 
@@ -1043,8 +1061,9 @@ export class OrderService {
     })();
 
     // ─── APP: không phụ thuộc GAS (V21 cũng không gửi mail/Zalo) ───
-    // GAS hiện HTTP 500 HTML (thường thiếu PDF_FOLDER_ID / doPost lỗi) → Sheet không đổi + chờ lâu.
-    // Vercel tự ghi LanGui + mark ORDERED + báo mở APP — nhanh, ổn định.
+    // Vercel tự ghi LanGui + mark ORDERED + báo mở APP.
+    // Gửi muộn (LanGui=0, dayDiff≥1): trả needConfirm để UI mở modal chọn
+    // send | reset | cancel | markSent (parity Email/Zalo).
     if (channelHint === "app") {
       if (!isSheetsConfigured()) {
         throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
@@ -1059,7 +1078,47 @@ export class OrderService {
       const tenNcc =
         String(orderApp.supplierName || orderApp.supplierId || "").trim() ||
         "nhà cung cấp";
-      const lanGuiNext = (Number(orderApp.sendCount) || 0) + 1;
+      const lanGuiCur = Number(orderApp.sendCount) || 0;
+      const isDha = isDuyenHaNcc(orderApp.supplierId);
+      const dayDiff = businessDayDiff(orderApp.orderDate, isDha);
+      const lateFirst =
+        lanGuiCur === 0 && dayDiff !== null && dayDiff >= 1;
+
+      // Chưa chọn phương án gửi muộn → UI mở SendActionModal
+      if (!action && lateFirst) {
+        return {
+          orderId,
+          via: "app" as const,
+          needConfirm: true,
+          confirmType: "LATE_FIRST_SEND",
+          isDuyenHa: isDha,
+          dayDiff,
+          channel: "app",
+          hinhThucGui,
+          appGuide: false,
+          message:
+            `Đơn ${orderId} gửi muộn ${dayDiff} ngày (hình thức APP — ${tenNcc}).\n` +
+            `Chọn cách xử lý: Gửi bình thường / Reset đơn / Hủy / Đánh dấu đã gửi.`,
+        };
+      }
+
+      // User chọn "cancel" trên modal muộn
+      if (action === "cancel") {
+        return {
+          orderId,
+          via: "app" as const,
+          needConfirm: false,
+          channel: "app",
+          hinhThucGui,
+          cancelled: true,
+          message: "Đã hủy thao tác gửi đơn (APP).",
+        };
+      }
+
+      // markSent: ghi nhận đã gửi ngoài hệ thống, tăng LanGui, không bắt buộc mở app
+      // send (hoặc rỗng khi không muộn): cập nhật Sheet + hướng dẫn APP
+      const markOnly = action === "markSent";
+      const lanGuiNext = lanGuiCur + 1;
       const timeLabel = formatDateTimeVN(new Date());
       await updateSheetRowByKey(
         SHEETS.DH,
@@ -1101,27 +1160,35 @@ export class OrderService {
       await writeAudit({
         email: user.email,
         role: user.role,
-        action: "SEND_ORDER_APP",
+        action: markOnly ? "SEND_ORDER_APP_MARK_SENT" : "SEND_ORDER_APP",
         maDon: orderId,
         targetId: orderId,
-        newValue: JSON.stringify({ lanGui: lanGuiNext, ctUpdated, channel: "app" }),
-        lyDo: "Hình thức APP — cập nhật Sheet, hướng dẫn mở app NCC",
+        newValue: JSON.stringify({
+          lanGui: lanGuiNext,
+          ctUpdated,
+          channel: "app",
+          sendAction: action || "send",
+        }),
+        lyDo: markOnly
+          ? "APP — đánh dấu đã gửi (xử lý ngoài hệ thống)"
+          : "Hình thức APP — cập nhật Sheet, hướng dẫn mở app NCC",
         year: y,
       });
       return {
         orderId,
         via: "app" as const,
         needConfirm: false,
-        notifiedNcc: true,
+        notifiedNcc: !markOnly,
         channel: "app",
         hinhThucGui,
-        appGuide: true,
+        appGuide: !markOnly,
         lanGui: lanGuiNext,
         ctUpdated,
-        message:
-          `Đơn hàng ${orderId} đã sẵn sàng (Lần gửi ${lanGuiNext}).\n` +
-          `Vui lòng mở APP của ${tenNcc} để đặt hàng.\n` +
-          `Hệ thống không gửi Email/Zalo cho hình thức APP.`,
+        message: markOnly
+          ? `Đã đánh dấu đơn ${orderId} đã gửi (Lần ${lanGuiNext}). Hình thức APP.`
+          : `Đơn hàng ${orderId} đã sẵn sàng (Lần gửi ${lanGuiNext}).\n` +
+            `Vui lòng mở APP của ${tenNcc} để đặt hàng.\n` +
+            `Hệ thống không gửi Email/Zalo cho hình thức APP.`,
       };
     }
 
@@ -1301,7 +1368,7 @@ export class OrderService {
         return s.slice(0, 400);
       };
 
-      // needConfirm LATE_FIRST_SEND — UI hiện modal
+      // needConfirm LATE_FIRST_SEND — UI hiện modal (mọi kênh kể cả APP)
       if (gasBody.needConfirm) {
         return {
           orderId,
@@ -1310,6 +1377,8 @@ export class OrderService {
           confirmType: gasBody.confirmType || "LATE_FIRST_SEND",
           isDuyenHa: !!gasBody.isDuyenHa,
           dayDiff: gasBody.dayDiff,
+          channel: channelHint,
+          hinhThucGui,
           message: cleanMsg(
             gasBody.error || gasBody.message,
             "Cần xác nhận gửi muộn"

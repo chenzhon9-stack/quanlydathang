@@ -41,9 +41,19 @@ export interface AccessScope {
 
 export interface Order {
   orderId: string;
+  /** yyyy-MM-dd — lọc / hiển thị */
   orderDate: string;
+  /**
+   * NgayDatHang gốc (có giờ nếu Sheet có) — canReset / DHA 14h.
+   */
+  orderDateTime?: string;
   supplierId: string;
   supplierName?: string;
+  /**
+   * Hình thức gửi từ DM_NCC.HinhThucGui (Email | Zalo | APP…).
+   * BE listOrders/getOrder gắn từ master — UI cảnh báo sớm khi bấm Gửi.
+   */
+  sendMethod?: string;
   sendCount: number;
   status: OrderStatus;
   detailCount: number;

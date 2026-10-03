@@ -59,14 +59,17 @@ function needsDvt(maHtvt: string, canChon: boolean) {
   return canChon || c === "THUE_NGOAI" || c.includes("THUE");
 }
 
+const DEFAULT_PLAN_KH_ID = "acghang";
+const DEFAULT_PLAN_KH_NAME = "acghang";
+
 function emptyGh(prev?: GhRow): GhRow {
   return {
     key: `gh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     idGh: "",
     isNew: true,
-    // V21: dòng KH mới mặc định MaKh dòng trước
-    customerId: prev?.customerId || "",
-    customerName: prev?.customerName || "",
+    // Dòng đầu: acghang; dòng thêm: kế thừa MaKh trước
+    customerId: prev?.customerId || DEFAULT_PLAN_KH_ID,
+    customerName: prev?.customerName || DEFAULT_PLAN_KH_NAME,
     customerDetail: "",
     requireCustomerDetail: prev?.requireCustomerDetail || false,
     plannedQty: "",

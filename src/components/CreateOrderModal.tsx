@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
@@ -46,12 +46,16 @@ type DetailRow = {
   deliveries: DeliveryRow[];
 };
 
+/** Mã KH mặc định dòng kế hoạch đầu (V21: acghang) */
+const DEFAULT_PLAN_KH_ID = "acghang";
+const DEFAULT_PLAN_KH_NAME = "acghang";
+
 function emptyDelivery(prev?: DeliveryRow): DeliveryRow {
   return {
     key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    // V21: dòng KH kế hoạch mới kế thừa MaKh dòng trước (nếu có)
-    customerId: prev?.customerId || "",
-    customerName: prev?.customerName || "",
+    // Dòng đầu: mặc định acghang; dòng thêm: kế thừa MaKh dòng trước
+    customerId: prev?.customerId || DEFAULT_PLAN_KH_ID,
+    customerName: prev?.customerName || DEFAULT_PLAN_KH_NAME,
     plannedQty: "",
   };
 }
@@ -94,6 +98,61 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
   const [details, setDetails] = useState<DetailRow[]>([emptyDetail()]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Mỗi lần mở modal: dòng KH kế hoạch mặc định acghang (+ tên từ master nếu có)
+  useEffect(() => {
+    if (!open) return;
+    setOrderDateTime(toDatetimeLocalValue());
+    setDetails([emptyDetail()]);
+    setErr(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const token =
+          typeof window !== "undefined"
+            ? localStorage.getItem("token") || ""
+            : "";
+        const res = await fetch("/api/v1/masters?type=KH", {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const json = await res.json();
+        const items = (json?.data?.items || json?.data || []) as Array<{
+          id?: string;
+          name?: string;
+          MaKh?: string;
+          TenKhachhang?: string;
+        }>;
+        const hit = items.find(
+          (x) =>
+            String(x.id || x.MaKh || "").toLowerCase() === DEFAULT_PLAN_KH_ID
+        );
+        if (!hit || cancelled) return;
+        const ten = String(
+          hit.name || hit.TenKhachhang || DEFAULT_PLAN_KH_NAME
+        ).trim();
+        setDetails((rows) =>
+          rows.map((d) => ({
+            ...d,
+            deliveries: d.deliveries.map((g, i) =>
+              i === 0 &&
+              (!g.customerId || g.customerId === DEFAULT_PLAN_KH_ID)
+                ? {
+                    ...g,
+                    customerId: DEFAULT_PLAN_KH_ID,
+                    customerName: ten || DEFAULT_PLAN_KH_NAME,
+                  }
+                : g
+            ),
+          }))
+        );
+      } catch {
+        /* giữ acghang */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!open) return null;
 

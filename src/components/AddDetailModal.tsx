@@ -32,11 +32,14 @@ type DetailRow = {
   deliveries: DeliveryRow[];
 };
 
+const DEFAULT_PLAN_KH_ID = "acghang";
+const DEFAULT_PLAN_KH_NAME = "acghang";
+
 function emptyDelivery(prev?: DeliveryRow): DeliveryRow {
   return {
     key: `d-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    customerId: prev?.customerId || "",
-    customerName: prev?.customerName || "",
+    customerId: prev?.customerId || DEFAULT_PLAN_KH_ID,
+    customerName: prev?.customerName || DEFAULT_PLAN_KH_NAME,
     plannedQty: "",
   };
 }

@@ -374,6 +374,9 @@ export function counterDateKey(
 /**
  * Business date key yyyyMMdd — V21 _businessDateKey_
  * isDuyenHa + giờ ≥ 14 (HCM) → ngày +1
+ *
+ * Quan trọng: chuỗi chỉ ngày (yyyy-MM-dd) → giờ = 0 (đầu ngày),
+ * KHÔNG lấy giờ hiện tại (tránh dayDiff sai → bật Reset nhầm).
  */
 export function businessDateKey(
   value: string | number | Date | null | undefined,
@@ -385,19 +388,37 @@ export function businessDateKey(
       : ymdDate(value) || todayYmdVN();
 
   if (isDuyenHa) {
-    const hasTime =
-      value instanceof Date ||
-      (typeof value === "string" && /\d{1,2}:\d{2}/.test(value));
-    const hour = hasTime
-      ? value instanceof Date
-        ? hourVN(value)
-        : hourVN(parseLocalDate(value) || new Date())
-      : hourVN(new Date());
+    let hour = 0;
+    if (value instanceof Date) {
+      hour = hourVN(value);
+    } else if (typeof value === "string" && /\d{1,2}:\d{2}/.test(value)) {
+      const parsed = parseLocalDate(value);
+      hour = parsed ? hourFromParsedOrString(value, parsed) : 0;
+    } else if (typeof value === "number") {
+      // serial Sheets có thể có phần thập phân = giờ
+      const frac = value - Math.floor(value);
+      if (frac > 0.0001) {
+        hour = Math.floor(frac * 24 + 1e-9);
+      }
+    }
+    // value rỗng / chỉ ngày → hour=0 (parity V21 date 00:00)
     if (hour >= 14) {
       ymd = addDaysYmd(ymd, 1);
     }
   }
   return ymd.replace(/-/g, "");
+}
+
+/** Giờ từ chuỗi có time (civil) hoặc Date đã parse */
+function hourFromParsedOrString(
+  raw: string,
+  parsed: Date
+): number {
+  const m = raw.match(/(?:T|\s)(\d{1,2}):(\d{2})/);
+  if (m) return Number(m[1]) || 0;
+  // ISO Z → wall HCM
+  if (/Z$|[+-]\d{2}:\d{2}$/.test(raw.trim())) return hourVN(parsed);
+  return parsed.getUTCHours();
 }
 
 export function businessTodayKey(isDuyenHa: boolean): string {

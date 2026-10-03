@@ -100,25 +100,41 @@ function OrderActions({
 
   async function sendOrder(isResend: boolean) {
     const lan = Number(o.sendCount) || 0;
+    const method = String(
+      (o as { sendMethod?: string }).sendMethod || ""
+    ).trim();
+    const methodNorm = method
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    const isAppMethod =
+      methodNorm === "app" || methodNorm.includes("ung dung");
     const nccLine = o.supplierName
       ? `\nNCC: ${o.supplierName} (${o.supplierId || ""})`
       : o.supplierId
         ? `\nNCC: ${o.supplierId}`
         : "";
+    const methodLine = method
+      ? `\nHình thức gửi: ${method}`
+      : "\nHình thức gửi: (chưa có trên DM_NCC)";
+    const appHint = isAppMethod
+      ? "\n⚠ NCC nhận qua APP — hệ thống chỉ cập nhật Sheet, bạn mở app NCC để đặt hàng."
+      : "";
     if (
       !confirm(
         (isResend
           ? `Gửi lại đơn ${o.orderId}?`
           : `Gửi đơn ${o.orderId} tới NCC?`) +
           nccLine +
+          methodLine +
           `\nLần gửi hiện tại: ${lan}` +
-          `\n(Hình thức theo DM_NCC: Email / Zalo / APP)` +
+          appHint +
           `\n\nXác nhận?`
       )
     )
       return;
-    // V21: gửi lần đầu / gửi lại (GuiLaimail) đều gọi sendOrderEmail(maDon, email, null)
-    // sendAction "send"|"reset"|"cancel"|"markSent" CHỈ dùng khi modal gửi muộn
+    // V21: gửi lần đầu / gửi lại đều gọi send; sendAction chỉ khi modal gửi muộn
+    // APP gửi muộn cũng mở modal (send | reset | cancel | markSent)
     const json = await apiPost(
       `/api/v1/orders/${encodeURIComponent(o.orderId)}/send`,
       {
@@ -138,11 +154,14 @@ function OrderActions({
       needConfirm?: boolean;
       message?: string;
       channel?: string;
+      hinhThucGui?: string;
       notifiedNcc?: boolean;
       appGuide?: boolean;
       isDuyenHa?: boolean;
       dayDiff?: number;
     };
+    const ch = (data?.channel || methodNorm || "").toLowerCase();
+    // Gửi muộn (mọi kênh kể cả APP) → mở modal chọn phương án
     if (data?.needConfirm) {
       onNeedSendAction?.({
         orderId: o.orderId,
@@ -153,9 +172,8 @@ function OrderActions({
       });
       return;
     }
-    const ch = (data?.channel || "").toLowerCase();
-    // APP: cảnh báo mở app NCC — không gửi mail/Zalo
-    if (data?.appGuide || ch === "app") {
+    // APP (sau khi đã chọn send hoặc không muộn): hướng dẫn mở app NCC
+    if (data?.appGuide || ch === "app" || isAppMethod) {
       alert(
         data?.message ||
           `NCC nhận đơn qua APP.\nVui lòng mở ứng dụng nhà cung cấp để đặt đơn ${o.orderId}.`
@@ -171,7 +189,9 @@ function OrderActions({
         ? "\nKênh: Zalo — kiểm tra ZaloUserId trên DM_NCC và tin nhắn Zalo OA."
         : ch.includes("email") || ch.includes("mail")
           ? "\nKênh: Email."
-          : "";
+          : method
+            ? `\nKênh: ${method}.`
+            : "";
     alert(base + extra);
     onChanged?.();
   }

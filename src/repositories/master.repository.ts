@@ -111,6 +111,30 @@ export class MasterRepository {
   static nccNames() {
     return loadMap("ncc", SHEETS.NCC, ["MaNCC", "MaNcc"], ["TenNCC", "TenNcc"]);
   }
+
+  /**
+   * MaNCC → HinhThucGui (Email | Zalo | APP…) — dùng cảnh báo gửi đơn sớm trên list.
+   */
+  static async nccSendMethods(): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    if (!isSheetsConfigured()) return out;
+    try {
+      const rows = await readSheetAsObjects(SHEETS.NCC, {});
+      for (const r of rows) {
+        const id = String(r.MaNCC || r.MaNcc || "").trim();
+        if (!id) continue;
+        const ht = String(
+          r.HinhThucGui || r.HinhThucgui || r.HinhThuc || ""
+        ).trim();
+        if (!ht) continue;
+        out[id] = ht;
+        out[id.toUpperCase()] = ht;
+      }
+    } catch (e) {
+      console.warn("[MasterRepository.nccSendMethods]", e);
+    }
+    return out;
+  }
   static khNames() {
     return loadMap(
       "kh",

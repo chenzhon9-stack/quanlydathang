@@ -52,11 +52,17 @@ export function mapOrderRow(row: Record<string, string>): Order {
     return s === "true" || s === "1" || s === "yes" || s === "x";
   };
 
+  const ngayDatRaw = pick(row, [
+    "NgayDatHang",
+    "NgayDat",
+    "orderDate",
+    "NGAYDATHANG",
+  ]);
   return {
     orderId: pick(row, ["MaDon", "Ma_Don", "orderId", "MADON"]),
-    orderDate: normalizeSheetDate(
-      pick(row, ["NgayDatHang", "NgayDat", "orderDate", "NGAYDATHANG"])
-    ),
+    orderDate: normalizeSheetDate(ngayDatRaw),
+    // Giữ chuỗi gốc (có giờ) để canReset / DHA 14h — không cắt yyyy-MM-dd
+    orderDateTime: ngayDatRaw ? String(ngayDatRaw) : undefined,
     supplierId: pick(row, ["MaNCC", "Ma_NCC", "supplierId", "MANCC"]),
     supplierName:
       pick(row, ["TenNCC", "Ten_NCC", "supplierName", "TENNCC"]) || undefined,

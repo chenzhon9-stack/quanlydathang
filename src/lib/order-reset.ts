@@ -42,6 +42,8 @@ export function businessDayDiff(
 export type CanResetInput = {
   status: string;
   orderDate: string;
+  /** NgayDatHang có giờ — ưu tiên khi tính dayDiff (DHA 14h) */
+  orderDateTime?: string;
   supplierId: string;
   sendCount: number;
   /** true nếu còn xe ThucNhan=0 và không Hủy/Xóa; undefined = chưa kiểm tra CT */
@@ -83,7 +85,9 @@ export function canResetOrder(input: CanResetInput): CanResetResult {
   const neverSent = sendCount === 0;
   // Chưa gửi: mọi NCC ≥ 1 ngày; đã gửi: DHA 1 / khác 2
   const thresholdDays = neverSent ? 1 : isDha ? 1 : 2;
-  const dayDiff = businessDayDiff(input.orderDate, isDha);
+  // Ưu tiên orderDateTime (có giờ) — parity V21 _businessDaysBetween_(NgayDatHang)
+  const dateForDiff = input.orderDateTime || input.orderDate;
+  const dayDiff = businessDayDiff(dateForDiff, isDha);
 
   if (dayDiff === null) {
     return { ok: false, error: "Không xác định được ngày đặt hàng." };
