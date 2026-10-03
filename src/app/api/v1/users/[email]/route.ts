@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { requireAdminVerified } from "@/lib/auth";
+import { requireAdminVerified, invalidateUserRowCache } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
@@ -86,6 +86,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (row < 0) {
       return jsonResponse(error("USER_NOT_FOUND", "Không tìm thấy user"), 404);
     }
+    invalidateUserRowCache(email);
 
     const revoked =
       patch.TrangThai === "Locked" || patch.HoatDong === false;

@@ -14,7 +14,24 @@ import { SHEETS } from "@/lib/sheets/constants";
  * Password: plain text (V21 legacy) hoặc SHA-256 / MD5 hex.
  */
 
-const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
+/** TTL JWT — export để login/route và chỗ khác dùng chung (tránh hardcode lệch). */
+export const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
+
+/** Cache dòng User theo email — giảm spam Sheets khi /me / admin verify. */
+const USER_ROW_TTL_MS = 30_000;
+const userRowCache = new Map<
+  string,
+  { row: Record<string, string>; sheet: string; exp: number }
+>();
+
+/** Xóa cache user (sau đổi MK / khóa / admin update). */
+export function invalidateUserRowCache(email?: string): void {
+  if (!email) {
+    userRowCache.clear();
+    return;
+  }
+  userRowCache.delete(String(email).toLowerCase().trim());
+}
 
 function b64urlEncode(obj: unknown): string {
   const json = JSON.stringify(obj);
@@ -153,19 +170,31 @@ function userFromSheetRow(row: Record<string, string>): UserContext | null {
 async function findUserRow(
   emailLc: string
 ): Promise<{ row: Record<string, string>; sheet: string } | null> {
-  // Thử tab User / Users
+  const key = emailLc.toLowerCase().trim();
+  const hit = userRowCache.get(key);
+  if (hit && hit.exp > Date.now()) {
+    return { row: hit.row, sheet: hit.sheet };
+  }
+
+  // Chuẩn V21: chỉ sheet User (SHEETS.USER). Legacy tên chỉ fallback nếu tab chuẩn lỗi.
   const candidates = [SHEETS.USER, "Users", "USER", "TaiKhoan"];
   for (const name of candidates) {
     try {
       const rows = await readSheetAsObjects(name, {});
       if (!rows.length) continue;
-      console.info(
-        `[Auth] sheet="${name}" rows=${rows.length} headers=${Object.keys(rows[0] || {}).slice(0, 8).join("|")}`
-      );
       const row = rows.find(
-        (r) => pick(r, ["Email", "email", "E-mail"]).toLowerCase() === emailLc
+        (r) => pick(r, ["Email", "email", "E-mail"]).toLowerCase() === key
       );
-      if (row) return { row, sheet: name };
+      if (row) {
+        userRowCache.set(key, {
+          row,
+          sheet: name,
+          exp: Date.now() + USER_ROW_TTL_MS,
+        });
+        return { row, sheet: name };
+      }
+      // Tab User chuẩn đã đọc được nhưng không có email → không thử tên legacy
+      if (name === SHEETS.USER) break;
     } catch (e) {
       console.info(`[Auth] skip sheet ${name}:`, (e as Error)?.message || e);
     }
@@ -333,13 +362,15 @@ export function getCurrentUser(token: string | null): UserContext | null {
   if (!payload?.user?.email || !payload.exp) return null;
   if (payload.exp < Date.now()) return null;
 
-  const role = payload.user.role;
-  if (role === "ADMIN") {
-    payload.user.permissions = ["*"];
-  } else if (!payload.user.permissions?.length) {
-    payload.user.permissions = permissionsForRole(role);
+  // Không mutate payload decode — clone user
+  const user: UserContext = { ...payload.user };
+  const role = user.role;
+  if (String(role).toUpperCase() === "ADMIN") {
+    user.permissions = ["*"];
+  } else if (!user.permissions?.length) {
+    user.permissions = permissionsForRole(role);
   }
-  return payload.user;
+  return user;
 }
 
 /**
@@ -391,6 +422,18 @@ export async function getCurrentUserVerified(
     }
     return base;
   } catch (e) {
+    // Sheets lỗi: dùng cache stale ≤60s nếu có; không thì cho qua JWT (nội bộ)
+    const stale = userRowCache.get(base.email.toLowerCase());
+    const graceMs = 60_000;
+    if (stale && stale.exp + graceMs > Date.now()) {
+      const status = checkUserStatus(stale.row);
+      if (!status.ok) return null;
+      const sheetPass = pick(stale.row, ["Password", "MatKhau", "password"]);
+      const nowSv = passwordFingerprint(sheetPass);
+      if (payload.sv && payload.sv !== "0" && payload.sv !== nowSv) return null;
+      console.warn("[Auth] verify sheet error — use stale cache", base.email);
+      return base;
+    }
     console.warn("[Auth] verify session sheet error — allow token", e);
     return base;
   }
@@ -446,17 +489,19 @@ export async function requireAdminVerified(
 }
 
 export function resolveScope(user: UserContext): AccessScope {
-  if (user.role === "ADMIN") {
+  const role = String(user.role || "").toUpperCase();
+  if (role === "ADMIN") {
     return { role: user.role, scopeType: "ALL" };
   }
-  if (user.role === "DISPATCHER") {
+  if (role === "DISPATCHER") {
     return {
       role: user.role,
       scopeType: "OWNER",
       ownerEmail: user.email,
     };
   }
-  if (user.role === "ACCOUNT") {
+  // ACCOUNT (viết tắt) hoặc ACCOUNTANT (chuẩn permissions.ts) → scope khách hàng
+  if (role === "ACCOUNT" || role === "ACCOUNTANT") {
     return {
       role: user.role,
       scopeType: "OWN_CUSTOMER",
@@ -503,7 +548,7 @@ export function requireAnyPermission(
 
 
 export function isAdmin(user: UserContext): boolean {
-  return user.role === ("ADMIN" as Role);
+  return isAdminRole(user);
 }
 
 /** List users from sheet (Admin) — no passwords */

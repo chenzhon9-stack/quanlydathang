@@ -13,6 +13,7 @@ import {
   updateSheetRowByKey,
 } from "@/lib/sheets/dal";
 import { writeAudit } from "@/lib/sheets/audit";
+import { invalidateUserRowCache } from "@/lib/auth";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const PURPOSE_RESET = "reset_password";
@@ -267,6 +268,7 @@ export async function resetPasswordWithOtp(input: {
     Password: hashed,
   });
   if (row < 0) return { success: false, error: "Không tìm thấy tài khoản." };
+  invalidateUserRowCache(email);
 
   await writeAudit({
     email,

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { login } from "@/lib/auth";
+import { login, TOKEN_TTL_MS } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 
 export async function POST(req: NextRequest) {
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
         user: result.user,
         session: {
           token: result.token,
-          expiresAt: new Date(Date.now() + 8 * 3600 * 1000).toISOString(),
+          expiresAt: new Date(Date.now() + TOKEN_TTL_MS).toISOString(),
         },
       })
     );
