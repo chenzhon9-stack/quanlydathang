@@ -405,6 +405,46 @@ export async function requireVerifiedUser(
   return getCurrentUserVerified(token);
 }
 
+/** Role ADMIN (case-insensitive) hoặc permission `*`. */
+export function isAdminRole(user: UserContext | null | undefined): boolean {
+  if (!user) return false;
+  const role = String(user.role || "").toUpperCase();
+  if (role === "ADMIN") return true;
+  return Array.isArray(user.permissions) && user.permissions.includes("*");
+}
+
+/**
+ * Admin gate chuẩn: verified session + isAdminRole.
+ * Dùng cho /admin/*, /debug/*, PATCH users.
+ */
+export async function requireAdminVerified(
+  req: { headers: { get(name: string): string | null } }
+): Promise<
+  | { user: UserContext; error?: undefined }
+  | { user?: undefined; error: { code: string; message: string; status: number } }
+> {
+  const user = await requireVerifiedUser(req);
+  if (!user) {
+    return {
+      error: {
+        code: "SESSION_REVOKED",
+        message: "Phiên hết hạn hoặc tài khoản đã khóa / đổi mật khẩu",
+        status: 401,
+      },
+    };
+  }
+  if (!isAdminRole(user)) {
+    return {
+      error: {
+        code: "PERMISSION_DENIED",
+        message: "Chỉ ADMIN",
+        status: 403,
+      },
+    };
+  }
+  return { user };
+}
+
 export function resolveScope(user: UserContext): AccessScope {
   if (user.role === "ADMIN") {
     return { role: user.role, scopeType: "ALL" };

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { requireAdminVerified } from "@/lib/auth";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
@@ -14,17 +14,16 @@ import { success, error, jsonResponse } from "@/lib/api";
  *   ?probe=1&year=2026  → đọc CT + GH 2 lần, đo ms (MISS rồi HIT)
  *   ?clear=1            → xóa toàn bộ cache
  *
- * Chỉ Admin.
+ * Chỉ Admin (session verified).
  */
 export async function GET(req: NextRequest) {
   try {
-    const token =
-      req.headers.get("authorization")?.replace("Bearer ", "") || null;
-    const user = getCurrentUser(token);
-    if (!user)
-      return jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401);
-    if (String(user.role || "").toUpperCase() !== "ADMIN") {
-      return jsonResponse(error("PERMISSION_DENIED", "Chỉ Admin"), 403);
+    const gate = await requireAdminVerified(req);
+    if (gate.error) {
+      return jsonResponse(
+        error(gate.error.code, gate.error.message),
+        gate.error.status
+      );
     }
 
     const { searchParams } = new URL(req.url);

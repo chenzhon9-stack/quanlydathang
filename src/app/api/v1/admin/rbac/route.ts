@@ -1,27 +1,21 @@
 import { NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { requireAdminVerified } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { ROLE_PERMISSIONS } from "@/lib/permissions";
 
-function requireAdmin(token: string | null) {
-  const user = getCurrentUser(token);
-  if (!user) return { error: jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401) };
-  if (user.role !== "ADMIN" && !user.permissions.includes("*")) {
-    return { error: jsonResponse(error("PERMISSION_DENIED", "Chỉ ADMIN"), 403) };
-  }
-  return { user };
-}
-
 /** GET /api/v1/admin/rbac?section=roles|permissions|rolePermissions|userRoles|matrix */
 export async function GET(req: NextRequest) {
   try {
-    const token =
-      req.headers.get("authorization")?.replace("Bearer ", "") || null;
-    const gate = requireAdmin(token);
-    if (gate.error) return gate.error;
+    const gate = await requireAdminVerified(req);
+    if (gate.error) {
+      return jsonResponse(
+        error(gate.error.code, gate.error.message),
+        gate.error.status
+      );
+    }
 
     const section = req.nextUrl.searchParams.get("section") || "all";
 

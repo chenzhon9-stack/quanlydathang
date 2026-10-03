@@ -16,6 +16,25 @@ import { writeAudit } from "@/lib/sheets/audit";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const PURPOSE_RESET = "reset_password";
+/** Rate limit: 5 request / email / 15 phút (per serverless instance). */
+const OTP_RL_MAX = 5;
+const OTP_RL_WINDOW_MS = 15 * 60 * 1000;
+const otpRateLimit = new Map<string, { count: number; resetAt: number }>();
+
+function checkOtpRateLimit(email: string): string | null {
+  const key = email.toLowerCase();
+  const now = Date.now();
+  const cur = otpRateLimit.get(key);
+  if (!cur || cur.resetAt < now) {
+    otpRateLimit.set(key, { count: 1, resetAt: now + OTP_RL_WINDOW_MS });
+    return null;
+  }
+  if (cur.count >= OTP_RL_MAX) {
+    return "Bạn đã yêu cầu OTP quá nhiều lần. Vui lòng thử lại sau 15 phút.";
+  }
+  cur.count += 1;
+  return null;
+}
 
 function hashPasswordV21(email: string, plain: string): string {
   const salt =
@@ -131,11 +150,17 @@ export async function requestPasswordReset(emailRaw: string): Promise<{
     return { success: false, message: "", error: "Email không hợp lệ." };
   }
 
+  const rlErr = checkOtpRateLimit(email);
+  if (rlErr) {
+    return { success: false, message: "", error: rlErr };
+  }
+
   const user = await findUserRow(email);
   if (!user) {
+    // Không leak: luôn message giống khi có user
     return {
       success: true,
-      message: "Nếu email tồn tại, mã OTP đã được gửi.",
+      message: "Nếu email tồn tại, mã OTP đã được gửi (hiệu lực 15 phút).",
     };
   }
 
@@ -174,9 +199,10 @@ export async function requestPasswordReset(emailRaw: string): Promise<{
     lyDo: `Yêu cầu OTP đổi MK via=${mail.via}`,
   });
 
+  // Cùng message khi có/không user — không leak
   return {
     success: true,
-    message: "Mã OTP đã được gửi đến email của bạn (hiệu lực 15 phút).",
+    message: "Nếu email tồn tại, mã OTP đã được gửi (hiệu lực 15 phút).",
   };
 }
 

@@ -26,6 +26,7 @@ export default function DashboardLayout({
       router.push("/");
       return;
     }
+    let cancelled = false;
     try {
       const parsed = JSON.parse(u) as ClientUser;
       setUser(parsed);
@@ -34,7 +35,34 @@ export default function DashboardLayout({
       }
     } catch {
       router.push("/");
+      return;
     }
+    // Session verify (V21 refreshUserSession): khóa / đổi MK → 401 → logout
+    (async () => {
+      try {
+        const res = await fetch("/api/v1/auth/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+        if (res.status === 401) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          router.push("/");
+          return;
+        }
+        const json = await res.json().catch(() => null);
+        if (json?.success && json.data?.user) {
+          const next = json.data.user as ClientUser;
+          localStorage.setItem("user", JSON.stringify(next));
+          if (!cancelled) setUser(next);
+        }
+      } catch {
+        /* offline — giữ session local */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [router, pathname]);
 
   function logout() {

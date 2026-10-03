@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getCurrentUserVerified } from "@/lib/auth";
+import { requireAdminVerified } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
@@ -10,25 +10,16 @@ import { writeAudit } from "@/lib/sheets/audit";
 type Ctx = { params: Promise<{ email: string }> };
 
 async function requireAdmin(req: NextRequest) {
-  const token =
-    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") || null;
-  const user = await getCurrentUserVerified(token);
-  if (!user)
+  const gate = await requireAdminVerified(req);
+  if (gate.error) {
     return {
       error: jsonResponse(
-        error(
-          "SESSION_REVOKED",
-          "Phiên hết hạn hoặc tài khoản đã khóa / đổi mật khẩu"
-        ),
-        401
+        error(gate.error.code, gate.error.message),
+        gate.error.status
       ),
     };
-  if (user.role !== "ADMIN" && !user.permissions.includes("*")) {
-    return {
-      error: jsonResponse(error("PERMISSION_DENIED", "Chỉ ADMIN"), 403),
-    };
   }
-  return { user };
+  return { user: gate.user };
 }
 
 /**
