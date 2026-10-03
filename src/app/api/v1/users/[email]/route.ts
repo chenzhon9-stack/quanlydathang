@@ -1,5 +1,4 @@
 import { NextRequest } from "next/server";
-import { createHash } from "crypto";
 import { getCurrentUserVerified } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
@@ -9,17 +8,6 @@ import { normalizeRole } from "@/lib/permissions";
 import { writeAudit } from "@/lib/sheets/audit";
 
 type Ctx = { params: Promise<{ email: string }> };
-
-function hashPasswordV21(email: string, plain: string): string {
-  const salt =
-    process.env.SECRET_SALT ||
-    process.env.GOOGLE_AUTH_SALT ||
-    process.env.SALT ||
-    process.env.GOOGLE_SHEETS_SPREADSHEET_ID ||
-    "";
-  const raw = `${String(email).toLowerCase().trim()}:${String(plain)}:${salt}`;
-  return createHash("sha256").update(raw, "utf8").digest("hex");
-}
 
 async function requireAdmin(req: NextRequest) {
   const token =
@@ -45,8 +33,9 @@ async function requireAdmin(req: NextRequest) {
 
 /**
  * PATCH /api/v1/users/:email
- * Cập nhật Role, Quanly, HoatDong, TrangThai, Password.
- * Khóa user / đổi MK → session JWT cũ bị revoke (sv mismatch / status).
+ * Cập nhật Role, Quanly, HoatDong, TrangThai, hồ sơ.
+ * V21: Admin KHÔNG được đặt Password — user tự đổi qua OTP (Quên/Đổi mật khẩu).
+ * Khóa user → session JWT cũ bị revoke.
  */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
@@ -63,6 +52,18 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const { email: rawEmail } = await ctx.params;
     const email = decodeURIComponent(rawEmail).trim().toLowerCase();
     const body = await req.json();
+
+    // Chặn admin đặt MK hộ (parity V21 — cột Password không editable)
+    const attemptedPw = body.password ?? body.matKhau ?? body.newPassword;
+    if (attemptedPw !== undefined && String(attemptedPw).trim() !== "") {
+      return jsonResponse(
+        error(
+          "FORBIDDEN",
+          "Mật khẩu do chính user đặt/đổi (Quên/Đổi mật khẩu + OTP). Admin không đặt hộ."
+        ),
+        403
+      );
+    }
 
     const patch: Record<string, string | boolean> = {};
     if (body.role !== undefined) {
@@ -83,19 +84,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
     if (body.trangThai !== undefined) patch.TrangThai = String(body.trangThai);
 
-    // Đổi mật khẩu → revoke mọi JWT cũ (fingerprint Password đổi)
-    const newPassword = body.password ?? body.matKhau ?? body.newPassword;
-    if (newPassword !== undefined && String(newPassword).trim() !== "") {
-      const plain = String(newPassword).trim();
-      if (plain.length < 8) {
-        return jsonResponse(
-          error("VALIDATION_ERROR", "Mật khẩu tối thiểu 8 ký tự"),
-          400
-        );
-      }
-      patch.Password = hashPasswordV21(email, plain);
-    }
-
     if (!Object.keys(patch).length) {
       return jsonResponse(
         error("VALIDATION_ERROR", "Không có field cập nhật"),
@@ -109,21 +97,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     const revoked =
-      patch.Password !== undefined ||
-      patch.TrangThai === "Locked" ||
-      patch.HoatDong === false;
+      patch.TrangThai === "Locked" || patch.HoatDong === false;
 
     await writeAudit({
       email: gate.user!.email,
       role: gate.user!.role,
       action: revoked ? "USER_REVOKE_SESSIONS" : "USER_UPDATE",
       targetId: email,
-      newValue: {
-        ...patch,
-        Password: patch.Password ? "(hashed)" : undefined,
-      },
+      newValue: patch,
       lyDo: revoked
-        ? `Admin cập nhật user ${email} — revoke session (khóa/đổi MK)`
+        ? `Admin khóa/cập nhật user ${email} — revoke session`
         : `Admin cập nhật user ${email}`,
     });
 
