@@ -797,6 +797,96 @@ export class FinanceService {
     return { idCn, maNcc, loai: loaiNorm, soTien, ngayCT };
   }
 
+  /**
+   * Sổ phát sinh CN — parity V21 listCongNoPhatSinh
+   */
+  static async listPayableEntries(
+    filter: {
+      fromDate?: string;
+      toDate?: string;
+      maNcc?: string | string[];
+      loai?: string | string[];
+      onlyActive?: boolean;
+      year?: number;
+    },
+    user: UserContext,
+    scope: AccessScope
+  ) {
+    if (
+      !hasPermission(user, "PAYABLE_VIEW") &&
+      !hasPermission(user, "*")
+    ) {
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Không có quyền xem sổ phát sinh công nợ",
+      };
+    }
+    requireSheets();
+    const y = filter.year ?? currentYearVN();
+    const onlyActive = filter.onlyActive !== false;
+    const maNccArr = Array.isArray(filter.maNcc)
+      ? filter.maNcc.map((x) => String(x).trim()).filter(Boolean)
+      : filter.maNcc
+        ? [String(filter.maNcc).trim()]
+        : [];
+    const loaiArr = Array.isArray(filter.loai)
+      ? filter.loai.map((x) => String(x).trim().toUpperCase()).filter(Boolean)
+      : filter.loai
+        ? [String(filter.loai).trim().toUpperCase()]
+        : [];
+
+    let rows = await readSheetAsObjects(SHEETS.CN, { year: y });
+    if (onlyActive) rows = rows.filter((r) => isActiveFlag(r.HoatDong));
+    if (maNccArr.length) {
+      const set = new Set(maNccArr.map((x) => x.toUpperCase()));
+      rows = rows.filter((r) =>
+        set.has(String(r.MaNCC || "").trim().toUpperCase())
+      );
+    }
+    if (loaiArr.length) {
+      const set = new Set(loaiArr);
+      rows = rows.filter((r) =>
+        set.has(String(r.Loai || "").trim().toUpperCase())
+      );
+    }
+    if (filter.fromDate || filter.toDate) {
+      const from = filter.fromDate || "0000-01-01";
+      const to = filter.toDate || "9999-12-31";
+      rows = rows.filter((r) => {
+        const d = ymdDate(r.NgayCT);
+        if (!d) return false;
+        return d >= from && d <= to;
+      });
+    }
+    if (scope.scopeType === "MANAGEMENT") {
+      const allowed = await resolveAllowedSupplierIds(scope);
+      if (allowed) {
+        rows = rows.filter((r) => allowed.has(String(r.MaNCC || "").trim()));
+      }
+    }
+
+    const items = rows
+      .map((r) => ({
+        idCn: String(r.ID_CN || "").trim(),
+        ngayCT: ymdDate(r.NgayCT),
+        maNcc: String(r.MaNCC || "").trim(),
+        loai: String(r.Loai || "").trim().toUpperCase(),
+        soTien: Number(r.SoTien) || 0,
+        maHh: String(r.MaHH || "").trim(),
+        makv: String(r.Makv || "").trim(),
+        idCt: String(r.ID_Chitiet || "").trim(),
+        soChungTu: String(r.SoChungTu || "").trim(),
+        dienGiai: String(r.DienGiai || "").trim(),
+        nguoiTao: String(r.NguoiTao || "").trim(),
+        ngayTao: String(r.NgayTao || "").trim(),
+        active: isActiveFlag(r.HoatDong),
+      }))
+      .filter((x) => x.idCn)
+      .sort((a, b) => (b.ngayCT || "").localeCompare(a.ngayCT || ""));
+
+    return { items, total: items.length, year: y };
+  }
+
   /** Void — chỉ Admin / PAYABLE_CANCEL */
   static async voidPayable(
     idCn: string,
@@ -976,5 +1066,47 @@ export class FinanceService {
       year: nam,
     });
     return { idDd, created: true, chot: !!input.chot };
+  }
+
+  /** Hủy dòng dư đầu năm (HoatDong=false) — parity voidDuDauNam */
+  static async voidOpening(idDd: string, user: UserContext, year?: number) {
+    if (
+      !hasPermission(user, "PAYABLE_CANCEL") &&
+      !hasPermission(user, "*") &&
+      String(user.role).toUpperCase() !== "ADMIN"
+    ) {
+      throw {
+        code: "PERMISSION_DENIED",
+        message: "Chỉ Admin được hủy dư đầu năm",
+      };
+    }
+    requireSheets();
+    const id = String(idDd || "").trim();
+    if (!id) throw { code: "VALIDATION_ERROR", message: "Thiếu ID_DD" };
+    const y = year ?? currentYearVN();
+    let row = await updateSheetRowByKey(
+      SHEETS.DD,
+      "ID_DD",
+      id,
+      { HoatDong: false },
+      y
+    );
+    if (row < 0) {
+      row = await updateSheetRowByKey(SHEETS.DD, "ID_DD", id, {
+        HoatDong: false,
+      });
+    }
+    if (row < 0) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy " + id };
+    }
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "OPENING_VOID",
+      targetId: id,
+      lyDo: "Hủy dư đầu năm (HoatDong=false)",
+      year: y,
+    });
+    return { idDd: id, voided: true };
   }
 }

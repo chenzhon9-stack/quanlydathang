@@ -51,16 +51,14 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/payables",
-    label: "Công nợ NCC",
+    label: "Tài chính NCC",
     icon: "💰",
-    anyOf: ["PAYABLE_VIEW", "*"],
-  },
-  {
-    href: "/prices",
-    label: "Giá mua",
-    icon: "🏷️",
-    anyOf: ["PURCHASE_PRICE_VIEW", "PURCHASE_PRICE_UPDATE", "PAYABLE_VIEW", "*"],
-    rolesOnly: ["ADMIN", "MANAGER", "PURCHASE", "ACCOUNTANT"],
+    anyOf: [
+      "PAYABLE_VIEW",
+      "PURCHASE_PRICE_VIEW",
+      "PURCHASE_PRICE_UPDATE",
+      "*",
+    ],
   },
   {
     href: "/masters",
