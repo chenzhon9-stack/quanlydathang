@@ -46,6 +46,7 @@ function getTransporter(): Transporter {
     env("SMTP_SECURE", port === 465 ? "true" : "false").toLowerCase() !==
     "false";
 
+  // Chỉ dùng field có trong SMTPTransport.Options (tránh lỗi TS trên Vercel build)
   const options: SMTPTransport.Options = {
     host,
     port,
@@ -54,8 +55,6 @@ function getTransporter(): Transporter {
       user: env("SMTP_USER"),
       pass: env("SMTP_PASS").replace(/\s+/g, ""),
     },
-    // Vercel serverless: không pool connection
-    pool: false,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 20_000,
