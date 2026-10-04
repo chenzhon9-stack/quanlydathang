@@ -17,14 +17,31 @@ import { invalidateUserRowCache } from "@/lib/auth";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const PURPOSE_RESET = "reset_password";
-/** Rate limit: 5 request / email / 15 phút — Sheet PasswordReset (shared mọi instance). */
+/** Rate limit: 5 request / email / 15 phút. */
 const OTP_RL_MAX = 5;
 const OTP_RL_WINDOW_MS = 15 * 60 * 1000;
-/** Cache ngắn tránh spam đọc Sheet trên cùng instance. */
+/** Lớp 1: in-memory — chặn spam mọi email (kể cả không tồn tại) trên cùng instance. */
+const otpRateLimitMemory = new Map<string, { count: number; resetAt: number }>();
+/** Cache ngắn kết quả đếm Sheet. */
 const otpSheetRlCache = new Map<string, { count: number; at: number }>();
 
-/** Rate-limit OTP theo số dòng PasswordReset gần đây (shared). */
-async function checkOtpRateLimit(email: string): Promise<string | null> {
+function checkOtpRateLimitMemory(email: string): string | null {
+  const key = email.toLowerCase();
+  const now = Date.now();
+  const cur = otpRateLimitMemory.get(key);
+  if (!cur || cur.resetAt < now) {
+    otpRateLimitMemory.set(key, { count: 1, resetAt: now + OTP_RL_WINDOW_MS });
+    return null;
+  }
+  if (cur.count >= OTP_RL_MAX) {
+    return "Bạn đã yêu cầu OTP quá nhiều lần. Vui lòng thử lại sau 15 phút.";
+  }
+  cur.count += 1;
+  return null;
+}
+
+/** Lớp 2: đếm dòng PasswordReset (shared giữa instance) — email đã từng request. */
+async function checkOtpRateLimitSheet(email: string): Promise<string | null> {
   const key = email.toLowerCase();
   const now = Date.now();
   const cached = otpSheetRlCache.get(key);
@@ -186,9 +203,15 @@ export async function requestPasswordReset(emailRaw: string): Promise<{
     return { success: false, message: "", error: "Email không hợp lệ." };
   }
 
-  const rlErr = await checkOtpRateLimit(email);
-  if (rlErr) {
-    return { success: false, message: "", error: rlErr };
+  // Lớp 1: memory — chặn mọi email (kể cả không tồn tại) → TC09 / anti-spam
+  const memErr = checkOtpRateLimitMemory(email);
+  if (memErr) {
+    return { success: false, message: "", error: memErr };
+  }
+  // Lớp 2: Sheet — shared khi email đã có dòng OTP
+  const sheetErr = await checkOtpRateLimitSheet(email);
+  if (sheetErr) {
+    return { success: false, message: "", error: sheetErr };
   }
 
   const user = await findUserRow(email);

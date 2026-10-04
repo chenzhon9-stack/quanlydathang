@@ -18,8 +18,12 @@ const store = new Map<string, CacheEntry>();
 const DEFAULT_TTL_MS = 45_000;
 
 function ttlMs(): number {
-  const n = Number(process.env.SHEET_CACHE_TTL_MS || "");
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_TTL_MS;
+  // Quan trọng: Number("") === 0 → trước đây tắt cache nhầm khi env chưa set.
+  const raw = process.env.SHEET_CACHE_TTL_MS;
+  if (raw == null || String(raw).trim() === "") return DEFAULT_TTL_MS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_TTL_MS;
+  return n;
 }
 
 export function sheetCacheKey(sheetName: string, year?: number): string {
