@@ -82,12 +82,25 @@ async function findUserRow(email: string): Promise<Record<string, unknown> | nul
   );
 }
 
-/** Gửi OTP qua GAS webhook (nếu cấu hình) hoặc log server. */
+/** Gửi OTP: ưu tiên SMTP Gmail (Vercel), fallback GAS sendOtp, cuối cùng log server. */
 async function deliverOtpMail(
   email: string,
   otp: string,
   purpose: string
 ): Promise<{ ok: boolean; via: string; error?: string }> {
+  // 1) Vercel SMTP (Gmail App Password) — lib/mail.ts
+  try {
+    const { isSmtpConfigured, sendOtpEmail } = await import("@/lib/mail");
+    if (isSmtpConfigured()) {
+      const r = await sendOtpEmail(email, otp, purpose);
+      if (r.ok) return { ok: true, via: "smtp" };
+      console.warn("[password] SMTP OTP fail:", r.error);
+    }
+  } catch (e) {
+    console.warn("[password] SMTP module:", e);
+  }
+
+  // 2) GAS webhook action sendOtp (MailApp)
   const gasUrl =
     process.env.GAS_SEND_ORDER_URL ||
     process.env.GAS_WEBAPP_URL ||
@@ -121,16 +134,15 @@ async function deliverOtpMail(
         /* HTML redirect */
       }
       if (json.success) return { ok: true, via: "gas" };
-      // GAS chưa có action sendOtp → vẫn coi đã ghi sheet; user cần admin/GAS mail
       console.warn("[password] GAS sendOtp:", json.error || text.slice(0, 120));
     } catch (e) {
       console.warn("[password] GAS sendOtp fail", e);
     }
   }
 
-  // Dev / fallback: log OTP (không trả về client)
+  // 3) Dev fallback — chỉ log (không lộ OTP ra client)
   console.info(
-    `[password] OTP ${purpose} for ${email}: ${otp} (TTL 15m) — cấu hình GAS action sendOtp hoặc SMTP để gửi mail thật`
+    `[password] OTP ${purpose} for ${email}: ${otp} (TTL 15m) — cấu hình SMTP_* hoặc GAS sendOtp`
   );
   return { ok: true, via: "sheet_log" };
 }
