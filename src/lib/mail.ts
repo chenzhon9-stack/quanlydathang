@@ -1,20 +1,11 @@
 /**
  * Gửi mail từ Vercel — Gmail SMTP (App Password) qua nodemailer.
  *
- * Env (Vercel Project → Settings → Environment Variables):
- *   SMTP_HOST=smtp.gmail.com
- *   SMTP_PORT=465
- *   SMTP_SECURE=true
- *   SMTP_USER=your@gmail.com
- *   SMTP_PASS=<App Password 16 ký tự>
- *   SMTP_FROM="Viết Hải <your@gmail.com>"   // optional
- *
- * Tạo App Password: Google Account → Security → 2-Step Verification → App passwords
- * (Bắt buộc bật xác minh 2 bước).
- *
- * Lưu ý Gmail: ~100–500 mail/ngày (free). Không dùng mật khẩu đăng nhập thường.
+ * Env: SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM
  */
+import nodemailer from "nodemailer";
 import type { Transporter } from "nodemailer";
+import type SMTPTransport from "nodemailer/lib/smtp-transport";
 
 export type SendMailInput = {
   to: string | string[];
@@ -46,30 +37,31 @@ export function isSmtpConfigured(): boolean {
 
 let _transporter: Transporter | null = null;
 
-async function getTransporter(): Promise<Transporter> {
+function getTransporter(): Transporter {
   if (_transporter) return _transporter;
-  // dynamic import — tránh crash nếu chưa npm i nodemailer
-  const nodemailer = await import("nodemailer");
+
   const host = env("SMTP_HOST", "smtp.gmail.com");
   const port = Number(env("SMTP_PORT", "465")) || 465;
   const secure =
     env("SMTP_SECURE", port === 465 ? "true" : "false").toLowerCase() !==
     "false";
 
-  _transporter = nodemailer.createTransport({
+  const options: SMTPTransport.Options = {
     host,
     port,
     secure,
     auth: {
       user: env("SMTP_USER"),
-      pass: env("SMTP_PASS").replace(/\s+/g, ""), // App Password có thể có khoảng trắng
+      pass: env("SMTP_PASS").replace(/\s+/g, ""),
     },
-    // Vercel serverless: tránh giữ connection quá lâu
+    // Vercel serverless: không pool connection
     pool: false,
     connectionTimeout: 15_000,
     greetingTimeout: 15_000,
     socketTimeout: 20_000,
-  });
+  };
+
+  _transporter = nodemailer.createTransport(options);
   return _transporter;
 }
 
@@ -95,12 +87,10 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
     return { ok: false, error: "Thiếu nội dung text/html." };
   }
 
-  const from =
-    env("SMTP_FROM") ||
-    `Viết Hải <${env("SMTP_USER")}>`;
+  const from = env("SMTP_FROM") || `Viết Hải <${env("SMTP_USER")}>`;
 
   try {
-    const transporter = await getTransporter();
+    const transporter = getTransporter();
     const info = await transporter.sendMail({
       from,
       to,
