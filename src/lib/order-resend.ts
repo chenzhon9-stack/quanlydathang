@@ -51,8 +51,8 @@ export async function markOrderResendIfSent(opts: {
   role?: string;
   action: string;
   changedFields: string[];
-  oldValue?: unknown;
-  newValue?: unknown;
+  oldValue?: string | object;
+  newValue?: string | object;
   year?: number;
 }): Promise<{ marked: boolean; reason?: string; changedFields: string[] }> {
   const changedFields = (opts.changedFields || []).filter(Boolean);
