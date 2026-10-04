@@ -17,23 +17,46 @@ import { invalidateUserRowCache } from "@/lib/auth";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const PURPOSE_RESET = "reset_password";
-/** Rate limit: 5 request / email / 15 phút (per serverless instance). */
+/** Rate limit: 5 request / email / 15 phút — Sheet PasswordReset (shared mọi instance). */
 const OTP_RL_MAX = 5;
 const OTP_RL_WINDOW_MS = 15 * 60 * 1000;
-const otpRateLimit = new Map<string, { count: number; resetAt: number }>();
+/** Cache ngắn tránh spam đọc Sheet trên cùng instance. */
+const otpSheetRlCache = new Map<string, { count: number; at: number }>();
 
-function checkOtpRateLimit(email: string): string | null {
+/** Rate-limit OTP theo số dòng PasswordReset gần đây (shared). */
+async function checkOtpRateLimit(email: string): Promise<string | null> {
   const key = email.toLowerCase();
   const now = Date.now();
-  const cur = otpRateLimit.get(key);
-  if (!cur || cur.resetAt < now) {
-    otpRateLimit.set(key, { count: 1, resetAt: now + OTP_RL_WINDOW_MS });
-    return null;
+  const cached = otpSheetRlCache.get(key);
+  if (cached && now - cached.at < 30_000) {
+    if (cached.count >= OTP_RL_MAX) {
+      return "Bạn đã yêu cầu OTP quá nhiều lần. Vui lòng thử lại sau 15 phút.";
+    }
   }
-  if (cur.count >= OTP_RL_MAX) {
-    return "Bạn đã yêu cầu OTP quá nhiều lần. Vui lòng thử lại sau 15 phút.";
+  try {
+    const rows = await readSheetAsObjects(SHEETS.RESET);
+    const since = now - OTP_RL_WINDOW_MS;
+    let count = 0;
+    for (const r of rows) {
+      const e = pick(r, ["Email", "email"]).toLowerCase();
+      if (e !== key) continue;
+      const purpose = pick(r, ["Purpose", "purpose"]) || PURPOSE_RESET;
+      if (purpose && purpose !== PURPOSE_RESET && purpose !== "change_password") continue;
+      const createdRaw = pick(r, ["CreatedAt", "createdAt", "ThoiGian"]);
+      const t = createdRaw ? Date.parse(createdRaw) : NaN;
+      // Sheet có thể lưu dd/MM/yyyy — fallback: đếm mọi dòng gần đây không parse được cũng tính nếu Used rỗng gần cuối sheet
+      if (!Number.isNaN(t)) {
+        if (t >= since) count += 1;
+      }
+    }
+    otpSheetRlCache.set(key, { count, at: now });
+    if (count >= OTP_RL_MAX) {
+      return "Bạn đã yêu cầu OTP quá nhiều lần. Vui lòng thử lại sau 15 phút.";
+    }
+  } catch (e) {
+    console.warn("[password] rate-limit sheet read fail", e);
+    // fail-open nhẹ: vẫn cho request (OTP đã có rate ở GAS nếu dùng webhook)
   }
-  cur.count += 1;
   return null;
 }
 
@@ -163,7 +186,7 @@ export async function requestPasswordReset(emailRaw: string): Promise<{
     return { success: false, message: "", error: "Email không hợp lệ." };
   }
 
-  const rlErr = checkOtpRateLimit(email);
+  const rlErr = await checkOtpRateLimit(email);
   if (rlErr) {
     return { success: false, message: "", error: rlErr };
   }

@@ -1205,27 +1205,27 @@ export class OrderService {
 
     // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
     if (gasUrl) {
-      const secret = (process.env.GAS_WEBHOOK_SECRET || "").trim();
+      const secret = (
+        process.env.WEBHOOK_SECRET ||
+        process.env.GAS_WEBHOOK_SECRET ||
+        ""
+      ).trim();
       // V21 sendOrderEmail(maDon, email, action|null)
-      // action chỉ: null | send | reset | cancel | markSent (modal muộn)
-      // Gửi lại GuiLaimail: action = null (KHÔNG truyền "send")
-      const payload = {
+      // action: null | send | reset | cancel | markSent
+      // Payload tối giản + idempotencyKey (chống gửi trùng khi HTML/timeout).
+      const GAS_TIMEOUT_MS = 55_000;
+      const baselineLanGui = Number(lanGui) || 0;
+      const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
+      const payload: Record<string, unknown> = {
         action: "sendOrderEmail",
         maDon: orderId,
         email: user.email,
         sendAction: action || null,
-        year: y,
-        resend: !!(opts?.resend || guiLaiMail || lanGui > 0),
-        hinhThucGui,
-        zaloUserId,
-        emailNcc,
-        lanGui,
-        ...(secret ? { secret } : {}),
+        idempotencyKey,
       };
+      if (secret) payload.secret = secret;
       const bodyStr = JSON.stringify(payload);
-      // PDF + MailApp thực tế 20–45s; Hobby max ~60s serverless → 55s
-      const GAS_TIMEOUT_MS = 55_000;
-      const baselineLanGui = Number(lanGui) || 0;
+      // PDF + MailApp 20–45s; Hobby ~60s → 55s
 
       // GAS Web App 302 → googleusercontent. Thử follow trước; fallback manual POST.
       async function postGas(url: string, mode: "follow" | "manual" = "follow"): Promise<{
@@ -1403,17 +1403,35 @@ export class OrderService {
         gasBody._gasHtml === true ||
         (gasRes.status >= 400 && gasBody.success !== true)
       ) {
+        // HTML/timeout body: GAS có thể đã gửi xong — recover LanGui trước khi báo lỗi
+        const recovered = await resolveAfterGasAbort();
+        if (recovered) {
+          await writeAudit({
+            email: user.email,
+            role: user.role,
+            action: "SEND_ORDER_GAS_RECOVERED",
+            maDon: orderId,
+            targetId: orderId,
+            newValue: JSON.stringify({
+              baselineLanGui,
+              viaHtmlOrFail: true,
+              message: recovered.message,
+            }),
+            year: y,
+          });
+          return recovered;
+        }
         const errMsg = cleanMsg(
           gasBody.error || gasBody.message,
           `GAS HTTP ${gasRes.status}`
         );
         const hint =
           /unauthorized/i.test(errMsg)
-            ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp GAS_WEBHOOK_SECRET (Vercel)."
+            ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp WEBHOOK_SECRET/GAS_WEBHOOK_SECRET (Vercel)."
             : /unknown action/i.test(errMsg)
               ? " — doPost chưa nhận action sendOrderEmail (deploy Web App mới)."
               : gasBody._gasHtml
-                ? ""
+                ? " — GAS trả HTML; kiểm tra LanGui trên Sheet trước khi gửi lại."
                 : "";
         throw {
           code: "GAS_SEND_FAILED",

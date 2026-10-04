@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { getCurrentUser } from "@/lib/auth";
+import { requireVerifiedUser } from "@/lib/auth";
 import { OrderService } from "@/services/order.service";
 import { success, error, jsonResponse } from "@/lib/api";
 
@@ -8,11 +8,13 @@ type Ctx = { params: Promise<{ maDon: string }> };
 /** POST /api/v1/orders/:maDon/send — body: { year?, sendAction?, resend? } */
 export async function POST(req: NextRequest, ctx: Ctx) {
   try {
-    const token =
-      req.headers.get("authorization")?.replace("Bearer ", "") || null;
-    const user = getCurrentUser(token);
+    // Verified: khóa user / đổi MK → không gửi được (D148+)
+    const user = await requireVerifiedUser(req);
     if (!user) {
-      return jsonResponse(error("UNAUTHORIZED", "Chưa đăng nhập"), 401);
+      return jsonResponse(
+        error("SESSION_REVOKED", "Phiên không hợp lệ hoặc đã bị thu hồi"),
+        401
+      );
     }
     const { maDon } = await ctx.params;
     const orderId = decodeURIComponent(maDon || "");
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
         ? 403
         : err.code === "NOT_FOUND"
           ? 404
-          : err.code === "UNAUTHORIZED"
+          : err.code === "UNAUTHORIZED" || err.code === "SESSION_REVOKED"
             ? 401
             : 400;
     return jsonResponse(
