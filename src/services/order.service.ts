@@ -948,15 +948,26 @@ export class OrderService {
 
     // Cập nhật TongSoChitiet
     const newTong = active.length + details.length;
+    // Đơn đã gửi → bật GuiLaimail + Đang xử lý (V21 _markOrderChoGuiMailIfSent_)
+    const alreadySent =
+      Number(order.sendCount || 0) > 0 ||
+      order.resendMail ||
+      order.pendingMail ||
+      !!order.mailSentAt ||
+      String(order.status || "").toUpperCase() === "PROCESSING" ||
+      String(order.status || "").toUpperCase() === "DONE";
     await updateSheetRowByKey(
       SHEETS.DH,
       "MaDon",
       orderId,
       {
         TongSoChitiet: newTong,
-        // đơn đã gửi → bật gửi lại nếu có LanGui
-        ...(Number(order.sendCount || 0) > 0 || order.resendMail
-          ? { GuiLaimail: true, ChoGuiMail: true }
+        ...(alreadySent
+          ? {
+              GuiLaimail: true,
+              ChoGuiMail: true,
+              TrangThaiDon: "Đang xử lý",
+            }
           : {}),
       },
       y

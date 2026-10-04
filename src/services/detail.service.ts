@@ -7,6 +7,7 @@ import {
   resolveAllowedSupplierIds,
 } from "@/lib/scope";
 import { DetailRepository } from "@/repositories/detail.repository";
+import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
@@ -23,6 +24,10 @@ import {
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
+import {
+  diffDetailMasterFields,
+  markOrderResendIfSent,
+} from "@/lib/order-resend";
 
 export class DetailService {
   static async listDetails(
@@ -512,13 +517,18 @@ export class DetailService {
   }
 
 
-  /** Sửa hàng / khu vực / ghi chú — V21 saveEditDetail */
+  /**
+   * Sửa hàng / khu vực / ghi chú / xe — V21 saveEditDetail + _updateDetailAndMarkResend_
+   * Đơn đã gửi + đổi field quan trọng → GuiLaimail=true (gửi lại NCC).
+   */
   static async updateDetail(
     detailId: string,
     payload: {
       productId?: string;
       regionId?: string;
       note?: string;
+      vehicleId?: string;
+      quantity?: number;
     },
     user: UserContext,
     year?: number
@@ -532,6 +542,12 @@ export class DetailService {
     if (!isSheetsConfigured()) {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
     }
+    const y = year ?? currentYearVN();
+    const oldCt = await DetailRepository.findById(detailId, y);
+    if (!oldCt) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+
     const patch: Record<string, string | number | boolean> = {
       TimeChange: formatDateTimeVN(),
       User: user.email,
@@ -539,7 +555,27 @@ export class DetailService {
     if (payload.productId !== undefined) patch.MaHH = payload.productId;
     if (payload.regionId !== undefined) patch.Khuvuc = payload.regionId;
     if (payload.note !== undefined) patch.GhiChu = payload.note;
-    const y = year ?? currentYearVN();
+    if (payload.vehicleId !== undefined) patch.MaXe = payload.vehicleId;
+    if (payload.quantity !== undefined) patch.SoLuong = qty3(Number(payload.quantity) || 0);
+
+    const changed = diffDetailMasterFields(
+      {
+        vehicleId: oldCt.vehicleId,
+        productId: oldCt.productId,
+        regionId: oldCt.regionId,
+        note: oldCt.note,
+        quantity: oldCt.quantity,
+      },
+      {
+        vehicleId: payload.vehicleId,
+        productId: payload.productId,
+        regionId: payload.regionId,
+        note: payload.note,
+        quantity: payload.quantity,
+        hasQuantity: payload.quantity !== undefined,
+      }
+    );
+
     const row = await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",
@@ -548,6 +584,50 @@ export class DetailService {
       y
     );
     if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
-    return { detailId, ...payload, row };
+
+    let resendMarked = false;
+    let changedFields: string[] = [];
+    if (changed.length && oldCt.orderId) {
+      const order = await OrderRepository.findById(oldCt.orderId, y);
+      const action = changed.includes("Số lượng kế hoạch")
+        ? "DETAIL_MASTER_OR_PLAN_QTY_CHANGED"
+        : "DETAIL_MASTER_CHANGED";
+      const mark = await markOrderResendIfSent({
+        orderId: oldCt.orderId,
+        order,
+        email: user.email,
+        role: user.role,
+        action,
+        changedFields: changed,
+        oldValue: {
+          MaXe: oldCt.vehicleId,
+          MaHH: oldCt.productId,
+          Khuvuc: oldCt.regionId,
+          GhiChu: oldCt.note,
+          SoLuong: oldCt.quantity,
+        },
+        newValue: {
+          MaXe: payload.vehicleId ?? oldCt.vehicleId,
+          MaHH: payload.productId ?? oldCt.productId,
+          Khuvuc: payload.regionId ?? oldCt.regionId,
+          GhiChu: payload.note ?? oldCt.note,
+          SoLuong:
+            payload.quantity !== undefined
+              ? qty3(Number(payload.quantity) || 0)
+              : oldCt.quantity,
+        },
+        year: y,
+      });
+      resendMarked = mark.marked;
+      changedFields = mark.changedFields;
+    }
+
+    return {
+      detailId,
+      ...payload,
+      row,
+      resendMarked,
+      changedFields,
+    };
   }
 }

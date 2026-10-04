@@ -22,9 +22,14 @@ import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
+import { OrderRepository } from "@/repositories/order.repository";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import { newDeliveryId, isTempClientId } from "@/lib/sheets/counter";
 import {ymdDate, formatDateTimeVN, currentYearVN} from "@/lib/sheets/date";
+import {
+  markOrderResendIfSent,
+  numClose,
+} from "@/lib/order-resend";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -392,9 +397,15 @@ export class DeliveryService {
     let tyleChiahet = 0;
     let tenHH = detailId;
     let orderIdForAudit = "";
+    let oldSoLuong = 0;
+    let oldStatus: string = "";
+    let thucNhan = 0;
     try {
       const ct = await DetailRepository.findById(detailId, y);
       orderIdForAudit = ct?.orderId || "";
+      oldSoLuong = Number(ct?.quantity) || 0;
+      oldStatus = String(ct?.status || "");
+      thucNhan = Number(ct?.actualReceived) || 0;
       if (ct?.productId) {
         const hhRows = await readSheetAsObjects(SHEETS.HH, {});
         const hh = hhRows.find(
@@ -536,6 +547,37 @@ export class DeliveryService {
       y
     );
 
+    // V21: planMode + ThucNhan<=0 + status NEW|ORDERED + đổi SoLuong → GuiLaimail
+    let resendMarked = false;
+    let changedFields: string[] = [];
+    const st = oldStatus.toUpperCase();
+    const canMarkPlanResend =
+      thucNhan <= 0 &&
+      (st === "NEW" ||
+        st === "ORDERED" ||
+        st === "MỚI TẠO" ||
+        st === "ĐẶT HÀNG" ||
+        oldStatus === STATUS_CT.NEW ||
+        oldStatus === STATUS_CT.ORDERED) &&
+      !numClose(oldSoLuong, sumKh);
+
+    if (canMarkPlanResend && orderIdForAudit) {
+      const order = await OrderRepository.findById(orderIdForAudit, y);
+      const mark = await markOrderResendIfSent({
+        orderId: orderIdForAudit,
+        order,
+        email: user.email,
+        role: user.role,
+        action: "PLAN_QTY_CHANGED_REQUIRE_RESEND",
+        changedFields: ["Số lượng kế hoạch"],
+        oldValue: { SoLuong: oldSoLuong },
+        newValue: { SoLuong: sumKh },
+        year: y,
+      });
+      resendMarked = mark.marked;
+      changedFields = mark.changedFields;
+    }
+
     await writeAudit({
       email: user.email,
       role: user.role,
@@ -544,7 +586,9 @@ export class DeliveryService {
       idCt: detailId,
       targetId: detailId,
       newValue: { soLuong: sumKh, created, updated, deleted },
-      lyDo: "Lưu kế hoạch giao (KHgiao)",
+      lyDo: resendMarked
+        ? "Lưu kế hoạch giao, thay đổi số lượng kế hoạch nên bật GuiLaimail"
+        : "Lưu kế hoạch giao (KHgiao)",
       year: y,
     });
 
@@ -555,6 +599,8 @@ export class DeliveryService {
       updated,
       deleted,
       rows: after.length,
+      resendMarked,
+      changedFields,
     };
   }
 
