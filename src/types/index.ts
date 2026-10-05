@@ -118,6 +118,8 @@ export interface Delivery {
   /** MaDon từ CT */
   orderId?: string;
   orderFile?: string;
+  /** MaNCC từ CT — scope MANAGEMENT/UNION */
+  supplierId?: string;
   customerId: string;
   customerName?: string;
   customerDetail?: string;
