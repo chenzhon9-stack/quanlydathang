@@ -8,7 +8,7 @@ import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
   filterByCustomerIds,
-  resolveAllowedCustomerIds,,
+  resolveAllowedCustomerIds,
   resolveOwnerOrderIdSet,
   filterByOwnerOrderIds,
 } from "@/lib/scope";
