@@ -104,7 +104,7 @@ export class ReportService {
     );
 
     if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, filter.year);
       details = filterByOwnerOrderIds(details, ownerOrders);
     }
     if (scope.scopeType === "MANAGEMENT") {
@@ -161,7 +161,7 @@ export class ReportService {
     }
 
     if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, filter.year);
       deliveries = filterByOwnerOrderIds(deliveries, ownerOrders);
     }
     if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
