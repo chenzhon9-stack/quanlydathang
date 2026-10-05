@@ -2,6 +2,8 @@ import { writeAudit } from "@/lib/sheets/audit";
 import type { AccessScope, Delivery, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import {
+  resolveOwnerOrderIdSet,
+  filterByOwnerOrderIds,
   filterByCustomerIds,
   resolveAllowedCustomerIds,
 } from "@/lib/scope";
@@ -58,15 +60,8 @@ export class DeliveryService {
 
     let rows = await DeliveryRepository.findMany(filter);
 
-    // MANAGEMENT / SALES: lọc theo KH.Quanly ∩ User.Quanly (V21)
-    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
-      const allowed = await resolveAllowedCustomerIds(scope);
-      rows = filterByCustomerIds(rows, allowed);
-    }
-
-    // Enrich tên KH + orderDate/xe/hàng từ CT (gom theo ngày đặt lệnh)
+    // Enrich trước để có orderId từ CT (GH không có MaDon)
     const year = filter.year ?? currentYearVN();
-    // Enrich từ DonHang_Chitiet (DetailRepository — parity status/ngày nhận)
     const [khMap, xeMap, hhMap, details] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.xeNames(),
@@ -76,6 +71,27 @@ export class DeliveryService {
     const ctById = new Map(
       details.map((ct) => [String(ct.detailId || "").trim(), ct])
     );
+
+    // Gắn orderId từ CT trước khi lọc OWNER
+    rows = rows.map((d: Delivery) => {
+      const ct = ctById.get(String(d.detailId || "").trim());
+      return {
+        ...d,
+        orderId: d.orderId || ct?.orderId,
+      };
+    });
+
+    // V21 dispatcher: chỉ giao của đơn mình tạo
+    if (scope.scopeType === "OWNER") {
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, year);
+      rows = filterByOwnerOrderIds(rows, ownerOrders);
+    }
+
+    // MANAGEMENT / SALES: lọc theo KH.Quanly ∩ User.Quanly (V21)
+    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
+      const allowed = await resolveAllowedCustomerIds(scope);
+      rows = filterByCustomerIds(rows, allowed);
+    }
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
       const status = ct?.status || d.detailStatus;

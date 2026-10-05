@@ -154,6 +154,10 @@ export class PlanningService {
       });
     }
 
+    // Dispatcher (OWNER): không xem kế hoạch toàn công ty — parity chặt V21
+    if (scope.scopeType === "OWNER") {
+      plans = [];
+    }
     if (scope.scopeType === "MANAGEMENT") {
       const allowed = await resolveAllowedSupplierIds(scope);
       plans = filterBySupplierIds(plans, allowed);

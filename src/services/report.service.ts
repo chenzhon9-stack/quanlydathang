@@ -9,7 +9,10 @@ import type {
   ProductionPlan,
 } from "@/types";
 import { hasPermission } from "@/lib/auth";
-import { filterBySupplierIds, resolveAllowedSupplierIds, filterByCustomerIds, resolveAllowedCustomerIds } from "@/lib/scope";
+import { filterBySupplierIds, resolveAllowedSupplierIds, filterByCustomerIds, resolveAllowedCustomerIds,
+  resolveOwnerOrderIdSet,
+  filterByOwnerOrderIds,
+} from "@/lib/scope";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { isSheetsConfigured } from "@/lib/sheets/client";
@@ -100,6 +103,10 @@ export class ReportService {
         !isExcludedDetailStatus(d.status) && (d.actualReceived || 0) > 0
     );
 
+    if (scope.scopeType === "OWNER") {
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
+      details = filterByOwnerOrderIds(details, ownerOrders);
+    }
     if (scope.scopeType === "MANAGEMENT") {
       const allowed = await resolveAllowedSupplierIds(scope);
       details = filterBySupplierIds(details, allowed);
@@ -153,6 +160,10 @@ export class ReportService {
       deliveries = deliveries.filter((d) => d.customerId === filter.customerId);
     }
 
+    if (scope.scopeType === "OWNER") {
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
+      deliveries = filterByOwnerOrderIds(deliveries, ownerOrders);
+    }
     if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
       const allowed = await resolveAllowedCustomerIds(scope);
       deliveries = filterByCustomerIds(deliveries, allowed);
@@ -256,6 +267,13 @@ export class ReportService {
       payables = payables.filter((p) => p.supplierId === sid);
     }
 
+    if (scope.scopeType === "OWNER") {
+      const ownerOrders = await resolveOwnerOrderIdSet(scope, filter.year);
+      detailsScoped = filterByOwnerOrderIds(detailsScoped, ownerOrders);
+      // CN / dư đầu theo NCC — dispatcher không xem tổng công ty
+      openingsScoped = [];
+      payables = [];
+    }
     if (scope.scopeType === "MANAGEMENT") {
       const allowed = await resolveAllowedSupplierIds(scope);
       openingsScoped = filterBySupplierIds(openingsScoped, allowed);

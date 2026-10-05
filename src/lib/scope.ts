@@ -149,3 +149,38 @@ export function filterByCustomerIds<T extends { customerId?: string }>(
   if (!allowed) return items;
   return items.filter((x) => x.customerId && allowed.has(x.customerId));
 }
+
+/**
+ * V21 dispatcher: chỉ đơn DonHang.User === email.
+ * @returns Set MaDon uppercase, hoặc null nếu không phải OWNER.
+ */
+export async function resolveOwnerOrderIdSet(
+  scope: AccessScope,
+  year?: number
+): Promise<Set<string> | null> {
+  if (scope.scopeType !== "OWNER" || !scope.ownerEmail) return null;
+  const { OrderRepository } = await import("@/repositories/order.repository");
+  const orders = await OrderRepository.findMany(
+    year != null ? { year } : {}
+  );
+  const em = String(scope.ownerEmail).toLowerCase().trim();
+  const set = new Set<string>();
+  for (const o of orders) {
+    if (String(o.createdBy || "").toLowerCase().trim() === em) {
+      const id = String(o.orderId || "").trim().toUpperCase();
+      if (id) set.add(id);
+    }
+  }
+  return set;
+}
+
+/** Lọc dòng có orderId thuộc đơn do OWNER tạo. */
+export function filterByOwnerOrderIds<T extends { orderId?: string }>(
+  rows: T[],
+  ownerOrderIds: Set<string> | null
+): T[] {
+  if (!ownerOrderIds) return rows;
+  return rows.filter((r) =>
+    ownerOrderIds.has(String(r.orderId || "").trim().toUpperCase())
+  );
+}
