@@ -1231,7 +1231,6 @@ export class OrderService {
       };
       if (secret) payload.secret = secret;
       const bodyStr = JSON.stringify(payload);
-      const bodyStr = JSON.stringify(payload);
       // PDF + MailApp 20–45s; Hobby ~60s → 55s
 
       // GAS Web App 302 → googleusercontent. Thử follow trước; fallback manual POST.
