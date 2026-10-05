@@ -176,10 +176,31 @@ async function loadRolePermissionMap(): Promise<Record<string, string[]>> {
  * Permissions từ RolePermissions sheet else ROLE_PERMISSIONS (D85).
  * Đồng bộ RBAC_Setup_V21.gs seed matrix.
  */
+
+/** V21.07 multi-role: thứ tự role mạnh nhất (User.Role cache). */
+export const ROLE_PRIORITY: Role[] = [
+  "ADMIN",
+  "MANAGER",
+  "PURCHASE",
+  "DISPATCHER",
+  "ACCOUNTANT",
+  "CUSTOMER_ACCOUNTANT",
+  "SALES",
+  "VIEWER",
+  "ACCOUNT",
+];
+
+export function primaryRoleFromList(roles: Role[]): Role {
+  for (const r of ROLE_PRIORITY) {
+    if (roles.includes(r)) return r;
+  }
+  return roles[0] || ("VIEWER" as Role);
+}
+
 export async function resolvePermissionsFromSheets(
   email: string,
   legacyRole: Role
-): Promise<{ role: Role; permissions: string[]; source: string }> {
+): Promise<{ role: Role; roles: Role[]; permissions: string[]; source: string }> {
   let roles: Role[] = [];
   if (isSheetsConfigured()) {
     try {
@@ -198,9 +219,7 @@ export async function resolvePermissionsFromSheets(
   }
   if (!roles.length) roles = [legacyRole];
 
-  const primary: Role = roles.includes("ADMIN" as Role)
-    ? ("ADMIN" as Role)
-    : roles[0] || legacyRole;
+  const primary: Role = primaryRoleFromList(roles);
 
   const sheetMap = await loadRolePermissionMap();
   const perms = new Set<string>();
@@ -218,6 +237,7 @@ export async function resolvePermissionsFromSheets(
 
   return {
     role: primary,
+    roles,
     permissions: Array.from(perms),
     source: fromSheet ? "RolePermissions+UserRoles" : "code-matrix",
   };

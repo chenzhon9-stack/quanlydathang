@@ -27,6 +27,8 @@ export interface UserContext {
   email: string;
   hoTen: string;
   role: Role;
+  /** V21.07 multi-role — toàn bộ RoleCode active từ UserRoles */
+  roles?: Role[];
   quanly: string;
   permissions: string[];
 }

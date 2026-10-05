@@ -250,6 +250,7 @@ async function loginFromSheet(
     if (user) {
       const rbac = await resolvePermissionsFromSheets(user.email, user.role);
       user.role = rbac.role;
+      user.roles = rbac.roles;
       user.permissions = rbac.permissions;
       console.info(
         "[Auth] Sheet login OK",
