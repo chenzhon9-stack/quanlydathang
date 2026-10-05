@@ -71,20 +71,12 @@ export class DeliveryService {
       details.map((ct) => [String(ct.detailId || "").trim(), ct])
     );
 
-    // Gắn orderId từ CT trước khi lọc OWNER
+    // Gắn orderId + supplierId từ CT trước khi lọc scope UNION
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
       return {
         ...d,
         orderId: d.orderId || ct?.orderId,
-      };
-    });
-
-    // Gắn supplierId từ CT (phục vụ MANAGEMENT / UNION)
-    rows = rows.map((d: Delivery) => {
-      const ct = ctById.get(String(d.detailId || "").trim());
-      return {
-        ...d,
         supplierId: d.supplierId || ct?.supplierId,
       };
     });
