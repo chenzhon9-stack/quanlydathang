@@ -9,7 +9,7 @@ export type Role =
   | "CUSTOMER_ACCOUNTANT"
   | "ACCOUNT";
 
-export type ScopeType = "OWNER" | "MANAGEMENT" | "OWN_CUSTOMER" | "ALL";
+export type ScopeType = "ALL" | "OWNER" | "MANAGEMENT" | "OWN_CUSTOMER" | "UNION";
 
 export type OrderStatus = "NEW" | "PROCESSING" | "DONE" | "CANCEL";
 export type DetailStatus =
@@ -35,11 +35,17 @@ export interface UserContext {
 
 export interface AccessScope {
   role: Role;
+  /** V21.07 multi-role */
+  roles?: Role[];
   scopeType: ScopeType;
   ownerEmail?: string;
   quanly?: string;
   customerIds?: string[];
   supplierIds?: string[];
+  /** UNION flags — khi user có nhiều role khác nhánh scope */
+  allowOwner?: boolean;
+  allowManagement?: boolean;
+  allowOwnCustomer?: boolean;
 }
 
 export interface Order {

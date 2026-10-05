@@ -158,7 +158,11 @@ export async function resolveOwnerOrderIdSet(
   scope: AccessScope,
   year?: number
 ): Promise<Set<string> | null> {
-  if (scope.scopeType !== "OWNER" || !scope.ownerEmail) return null;
+  const wantOwner =
+    scope.scopeType === "OWNER" ||
+    scope.scopeType === "UNION" ||
+    !!scope.allowOwner;
+  if (!wantOwner || !scope.ownerEmail) return null;
   const { OrderRepository } = await import("@/repositories/order.repository");
   const orders = await OrderRepository.findMany(
     year != null ? { year } : {}
@@ -183,4 +187,136 @@ export function filterByOwnerOrderIds<T extends { orderId?: string }>(
   return rows.filter((r) =>
     ownerOrderIds.has(String(r.orderId || "").trim().toUpperCase())
   );
+}
+
+/**
+ * V21.07 multi-role list filter — hợp các nhánh:
+ * - OWNER: orderId ∈ đơn do mình tạo / createdBy
+ * - MANAGEMENT: supplierId ∈ NCC được Quanly
+ * - OWN_CUSTOMER: customerId ∈ KH được Quanly
+ * Một nhánh match → giữ dòng (union).
+ */
+export async function applyListScopeFilter<
+  T extends {
+    orderId?: string;
+    supplierId?: string;
+    customerId?: string;
+    createdBy?: string;
+  }
+>(rows: T[], scope: AccessScope, year?: number): Promise<T[]> {
+  if (!rows.length) return rows;
+  if (scope.scopeType === "ALL") return rows;
+
+  const allowOwner =
+    scope.scopeType === "OWNER" ||
+    scope.scopeType === "UNION" ||
+    !!scope.allowOwner;
+  const allowMgmt =
+    scope.scopeType === "MANAGEMENT" ||
+    scope.scopeType === "UNION" ||
+    !!scope.allowManagement;
+  const allowCust =
+    scope.scopeType === "OWN_CUSTOMER" ||
+    scope.scopeType === "UNION" ||
+    !!scope.allowOwnCustomer;
+
+  // Single-branch fast paths (giữ hành vi cũ)
+  if (allowOwner && !allowMgmt && !allowCust) {
+    if (rows.some((r) => r.createdBy != null && r.orderId == null)) {
+      // Order list style
+      const em = String(scope.ownerEmail || "").toLowerCase();
+      return rows.filter(
+        (o) => String(o.createdBy || "").toLowerCase() === em
+      );
+    }
+    const set = await resolveOwnerOrderIdSet(
+      { ...scope, scopeType: "OWNER", allowOwner: true },
+      year
+    );
+    return filterByOwnerOrderIds(rows, set);
+  }
+  if (allowMgmt && !allowOwner && !allowCust) {
+    // Prefer supplier filter when rows have supplierId
+    if (rows.some((r) => r.supplierId)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
+      return filterBySupplierIds(rows, allowed);
+    }
+    if (rows.some((r) => r.customerId)) {
+      const allowed = await resolveAllowedCustomerIds({
+        ...scope,
+        scopeType: "OWN_CUSTOMER",
+      });
+      return filterByCustomerIds(rows, allowed);
+    }
+    return rows;
+  }
+  if (allowCust && !allowOwner && !allowMgmt) {
+    const allowed = await resolveAllowedCustomerIds({
+      ...scope,
+      scopeType: "OWN_CUSTOMER",
+    });
+    return filterByCustomerIds(rows, allowed);
+  }
+
+  // UNION — load all needed sets
+  let ownerSet: Set<string> | null = null;
+  let nccAllowed: Set<string> | null = null;
+  let khAllowed: Set<string> | null = null;
+  const em = String(scope.ownerEmail || "").toLowerCase();
+
+  if (allowOwner) {
+    ownerSet = await resolveOwnerOrderIdSet(
+      { ...scope, scopeType: "OWNER", allowOwner: true },
+      year
+    );
+  }
+  if (allowMgmt) {
+    nccAllowed = await resolveAllowedSupplierIds({
+      ...scope,
+      scopeType: "MANAGEMENT",
+    });
+  }
+  if (allowCust) {
+    khAllowed = await resolveAllowedCustomerIds({
+      ...scope,
+      scopeType: "OWN_CUSTOMER",
+    });
+  }
+
+  return rows.filter((r) => {
+    if (
+      allowOwner &&
+      em &&
+      String(r.createdBy || "").toLowerCase() === em
+    ) {
+      return true;
+    }
+    if (
+      ownerSet &&
+      r.orderId &&
+      ownerSet.has(String(r.orderId).trim().toUpperCase())
+    ) {
+      return true;
+    }
+    if (
+      nccAllowed &&
+      r.supplierId &&
+      (nccAllowed.has(String(r.supplierId)) ||
+        nccAllowed.has(String(r.supplierId).toUpperCase()))
+    ) {
+      return true;
+    }
+    if (
+      khAllowed &&
+      r.customerId &&
+      (khAllowed.has(String(r.customerId)) ||
+        khAllowed.has(String(r.customerId).toUpperCase()))
+    ) {
+      return true;
+    }
+    return false;
+  });
 }

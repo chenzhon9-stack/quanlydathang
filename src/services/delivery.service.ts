@@ -5,8 +5,7 @@ import {
   resolveOwnerOrderIdSet,
   filterByOwnerOrderIds,
   filterByCustomerIds,
-  resolveAllowedCustomerIds,
-} from "@/lib/scope";
+  resolveAllowedCustomerIds, applyListScopeFilter } from "@/lib/scope";
 import { DeliveryRepository } from "@/repositories/delivery.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
@@ -81,17 +80,17 @@ export class DeliveryService {
       };
     });
 
-    // V21 dispatcher: chỉ giao của đơn mình tạo
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, year);
-      rows = filterByOwnerOrderIds(rows, ownerOrders);
-    }
+    // Gắn supplierId từ CT (phục vụ MANAGEMENT / UNION)
+    rows = rows.map((d: Delivery) => {
+      const ct = ctById.get(String(d.detailId || "").trim());
+      return {
+        ...d,
+        supplierId: d.supplierId || ct?.supplierId,
+      };
+    });
 
-    // MANAGEMENT / SALES: lọc theo KH.Quanly ∩ User.Quanly (V21)
-    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
-      const allowed = await resolveAllowedCustomerIds(scope);
-      rows = filterByCustomerIds(rows, allowed);
-    }
+    // V21.07 multi-role: OWNER ∪ MANAGEMENT(NCC) ∪ OWN_CUSTOMER(KH)
+    rows = await applyListScopeFilter(rows, scope, year);
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
       const status = ct?.status || d.detailStatus;

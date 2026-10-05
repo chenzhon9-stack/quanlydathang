@@ -155,12 +155,21 @@ export class PlanningService {
     }
 
     // Dispatcher (OWNER): không xem kế hoạch toàn công ty — parity chặt V21
-    if (scope.scopeType === "OWNER") {
+    // KHSL: dispatcher-only → rỗng; purchase/management → NCC; UNION → theo nhánh
+    if (scope.scopeType === "OWNER" && !scope.allowManagement) {
       plans = [];
-    }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    } else if (
+      scope.scopeType === "MANAGEMENT" ||
+      scope.scopeType === "UNION" ||
+      scope.allowManagement
+    ) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       plans = filterBySupplierIds(plans, allowed);
+    } else if (scope.scopeType === "OWN_CUSTOMER") {
+      plans = [];
     }
 
     const nccMap = await MasterRepository.nccNames();

@@ -8,8 +8,7 @@ import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission } from "@/lib/auth";
 import {
   filterBySupplierIds,
-  resolveAllowedSupplierIds,
-} from "@/lib/scope";
+  resolveAllowedSupplierIds, applyListScopeFilter } from "@/lib/scope";
 import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
@@ -64,19 +63,8 @@ export class OrderService {
       supplierId: filter.supplierId,
     });
 
-    // OWNER: DonHang.User
-    if (scope.scopeType === "OWNER" && scope.ownerEmail) {
-      const em = scope.ownerEmail.toLowerCase();
-      orders = orders.filter(
-        (o) => (o.createdBy || "").toLowerCase() === em
-      );
-    }
-
-    // MANAGEMENT: intersection User.Quanly ∩ NCC.Quanly
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      orders = filterBySupplierIds(orders, allowed);
-    }
+    // V21.07 multi-role: OWNER ∪ MANAGEMENT ∪ OWN_CUSTOMER
+    orders = await applyListScopeFilter(orders, scope, filter.year);
 
     const nccMap = await MasterRepository.nccNames();
     const nccSend = await MasterRepository.nccSendMethods();
@@ -186,27 +174,45 @@ export class OrderService {
       throw { code: "ORDER_NOT_FOUND", message: "Không tìm thấy đơn hàng" };
     }
 
-    if (
-      scope.scopeType === "OWNER" &&
-      scope.ownerEmail &&
-      (order.createdBy || "").toLowerCase() !== scope.ownerEmail.toLowerCase()
-    ) {
-      throw {
-        code: "SCOPE_DENIED",
-        message: "Không thuộc phạm vi dữ liệu của bạn",
-      };
-    }
-
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    // V21.07 multi-role: pass nếu BẤT KỲ nhánh scope match (union)
+    if (scope.scopeType !== "ALL") {
+      const allowOwner =
+        scope.scopeType === "OWNER" ||
+        scope.scopeType === "UNION" ||
+        !!scope.allowOwner;
+      const allowMgmt =
+        scope.scopeType === "MANAGEMENT" ||
+        scope.scopeType === "UNION" ||
+        !!scope.allowManagement;
+      let ok = false;
       if (
-        allowed &&
-        order.supplierId &&
-        !allowed.has(order.supplierId)
+        allowOwner &&
+        scope.ownerEmail &&
+        (order.createdBy || "").toLowerCase() ===
+          scope.ownerEmail.toLowerCase()
       ) {
+        ok = true;
+      }
+      if (!ok && allowMgmt) {
+        const allowed = await resolveAllowedSupplierIds({
+          ...scope,
+          scopeType: "MANAGEMENT",
+        });
+        // null = quanly all → mọi NCC
+        if (allowed === null) {
+          ok = true;
+        } else if (
+          order.supplierId &&
+          (allowed.has(order.supplierId) ||
+            allowed.has(String(order.supplierId).toUpperCase()))
+        ) {
+          ok = true;
+        }
+      }
+      if (!ok) {
         throw {
           code: "SCOPE_DENIED",
-          message: "NCC không thuộc nhóm quản lý của bạn",
+          message: "Không thuộc phạm vi dữ liệu của bạn",
         };
       }
     }
@@ -1224,6 +1230,7 @@ export class OrderService {
         idempotencyKey,
       };
       if (secret) payload.secret = secret;
+      const bodyStr = JSON.stringify(payload);
       const bodyStr = JSON.stringify(payload);
       // PDF + MailApp 20–45s; Hobby ~60s → 55s
 

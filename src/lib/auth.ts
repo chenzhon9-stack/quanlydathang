@@ -489,38 +489,100 @@ export async function requireAdminVerified(
   return { user };
 }
 
+
+/** V21.07 — user có role X trong roles[] (hoặc primary). */
+export function userHasRole(user: UserContext, role: string): boolean {
+  const want = String(role || "").toUpperCase();
+  if (!want) return false;
+  if (want === "ADMIN" && isAdminRole(user)) return true;
+  const list = (user.roles && user.roles.length
+    ? user.roles
+    : [user.role]
+  ).map((r) => String(r || "").toUpperCase());
+  return list.includes(want);
+}
+
+export function userHasAnyRole(user: UserContext, roles: string[]): boolean {
+  return roles.some((r) => userHasRole(user, r));
+}
+
 export function resolveScope(user: UserContext): AccessScope {
-  const role = String(user.role || "").toUpperCase();
-  if (role === "ADMIN") {
-    return { role: user.role, scopeType: "ALL" };
+  const roles = (user.roles && user.roles.length
+    ? user.roles
+    : [user.role]
+  ).map((r) => r);
+  const base = {
+    role: user.role,
+    roles,
+    quanly: user.quanly,
+    ownerEmail: user.email,
+  };
+
+  // Admin → ALL
+  if (isAdminRole(user) || userHasRole(user, "ADMIN")) {
+    return { ...base, scopeType: "ALL" };
   }
-  if (role === "DISPATCHER") {
+
+  // V21 _canAccessOrder_: manager mở mọi đơn
+  if (userHasRole(user, "MANAGER")) {
+    return { ...base, scopeType: "ALL" };
+  }
+
+  const allowOwner = userHasRole(user, "DISPATCHER");
+  const allowManagement = userHasRole(user, "PURCHASE");
+  const allowOwnCustomer = userHasAnyRole(user, [
+    "SALES",
+    "VIEWER",
+    "ACCOUNTANT",
+    "CUSTOMER_ACCOUNTANT",
+    "ACCOUNT",
+    "KT_KH",
+  ]);
+
+  const n =
+    (allowOwner ? 1 : 0) +
+    (allowManagement ? 1 : 0) +
+    (allowOwnCustomer ? 1 : 0);
+
+  if (n >= 2) {
     return {
-      role: user.role,
+      ...base,
+      scopeType: "UNION",
+      allowOwner,
+      allowManagement,
+      allowOwnCustomer,
+    };
+  }
+  if (allowOwner) {
+    return {
+      ...base,
       scopeType: "OWNER",
       ownerEmail: user.email,
+      allowOwner: true,
     };
   }
-  // Sales / Viewer / Kế toán (NCC hoặc KH) → scope khách hàng (V21 KH.Quanly)
-  if (
-    role === "ACCOUNT" ||
-    role === "ACCOUNTANT" ||
-    role === "CUSTOMER_ACCOUNTANT" ||
-    role === "KT_KH" ||
-    role === "SALES" ||
-    role === "VIEWER"
-  ) {
+  if (allowManagement) {
     return {
-      role: user.role,
+      ...base,
+      scopeType: "MANAGEMENT",
+      quanly: user.quanly,
+      allowManagement: true,
+    };
+  }
+  if (allowOwnCustomer) {
+    return {
+      ...base,
       scopeType: "OWN_CUSTOMER",
       quanly: user.quanly,
+      allowOwnCustomer: true,
     };
   }
-  // Manager / Purchase / còn lại → MANAGEMENT (NCC.Quanly)
+  // fallback an toàn: MANAGEMENT theo quanly
   return {
-    role: user.role,
+    ...base,
     scopeType: "MANAGEMENT",
     quanly: user.quanly,
+    allowManagement: true,
   };
 }
 

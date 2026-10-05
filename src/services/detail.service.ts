@@ -6,8 +6,7 @@ import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
   resolveOwnerOrderIdSet,
-  filterByOwnerOrderIds,
-} from "@/lib/scope";
+  filterByOwnerOrderIds, applyListScopeFilter } from "@/lib/scope";
 import { DetailRepository } from "@/repositories/detail.repository";
 import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
@@ -55,19 +54,8 @@ export class DetailService {
 
     let rows = await DetailRepository.findMany(filter);
 
-    // V21 dispatcher: chỉ CT thuộc đơn mình tạo
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(
-        scope,
-        filter.year
-      );
-      rows = filterByOwnerOrderIds(rows, ownerOrders);
-    }
-
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      rows = filterBySupplierIds(rows, allowed);
-    }
+    // V21.07 multi-role scope union
+    rows = await applyListScopeFilter(rows, scope, filter.year);
 
     const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta] = await Promise.all([
       MasterRepository.nccNames(),

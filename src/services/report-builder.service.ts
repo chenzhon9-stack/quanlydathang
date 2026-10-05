@@ -10,8 +10,7 @@ import {
   filterByCustomerIds,
   resolveAllowedCustomerIds,
   resolveOwnerOrderIdSet,
-  filterByOwnerOrderIds,
-} from "@/lib/scope";
+  filterByOwnerOrderIds, applyListScopeFilter } from "@/lib/scope";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
@@ -224,17 +223,7 @@ export class ReportBuilderService {
       return (d.actualReceived || 0) > 0;
     });
 
-    if (scope.scopeType === "OWNER" && scope.ownerEmail) {
-      // need order user — skip strict for now
-    }
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      details = filterByOwnerOrderIds(details, ownerOrders);
-    }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      details = filterBySupplierIds(details, allowed);
-    }
+    details = await applyListScopeFilter(details, scope, params.year);
 
     const [nccMap, hhMap, xeExtra, plMap] = await Promise.all([
       MasterRepository.nccNames(),
@@ -319,26 +308,22 @@ export class ReportBuilderService {
 
     dels = dels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
 
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      if (ownerOrders) {
-        dels = dels.filter((g) => {
-          const ct = detMap.get(g.detailId);
-          const oid = String(
-            (ct as { orderId?: string } | undefined)?.orderId ||
-              g.orderId ||
-              ""
-          )
-            .trim()
-            .toUpperCase();
-          return ownerOrders.has(oid);
-        });
-      }
-    }
-    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
-      const allowed = await resolveAllowedCustomerIds(scope);
-      dels = filterByCustomerIds(dels, allowed);
-    }
+    
+    dels = dels.map((g) => {
+      const ct = detMap.get(g.detailId);
+      return {
+        ...g,
+        orderId:
+          g.orderId ||
+          (ct as { orderId?: string } | undefined)?.orderId ||
+          "",
+        supplierId:
+          (g as { supplierId?: string }).supplierId ||
+          (ct as { supplierId?: string } | undefined)?.supplierId ||
+          "",
+      };
+    });
+    dels = await applyListScopeFilter(dels, scope, params.year);
 
     const [khMap, hhMap, xeExtra, plMap] = await Promise.all([
       MasterRepository.khNames(),
@@ -407,26 +392,22 @@ export class ReportBuilderService {
     const detMap = new Map(details.map((d) => [d.detailId, d]));
     dels = dels.filter((d) => !d.deleted);
 
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      if (ownerOrders) {
-        dels = dels.filter((g) => {
-          const ct = detMap.get(g.detailId);
-          const oid = String(
-            (ct as { orderId?: string } | undefined)?.orderId ||
-              g.orderId ||
-              ""
-          )
-            .trim()
-            .toUpperCase();
-          return ownerOrders.has(oid);
-        });
-      }
-    }
-    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
-      const allowed = await resolveAllowedCustomerIds(scope);
-      dels = filterByCustomerIds(dels, allowed);
-    }
+    
+    dels = dels.map((g) => {
+      const ct = detMap.get(g.detailId);
+      return {
+        ...g,
+        orderId:
+          g.orderId ||
+          (ct as { orderId?: string } | undefined)?.orderId ||
+          "",
+        supplierId:
+          (g as { supplierId?: string }).supplierId ||
+          (ct as { supplierId?: string } | undefined)?.supplierId ||
+          "",
+      };
+    });
+    dels = await applyListScopeFilter(dels, scope, params.year);
 
     const [khMap, hhMap, xeExtra, nccMap] = await Promise.all([
       MasterRepository.khNames(),
@@ -482,14 +463,7 @@ export class ReportBuilderService {
     const activeCtIds = new Set(details.map((d) => d.detailId));
     dels = dels.filter((g) => !g.deleted && activeCtIds.has(g.detailId));
 
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      details = filterByOwnerOrderIds(details, ownerOrders);
-    }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      details = filterBySupplierIds(details, allowed);
-    }
+    details = await applyListScopeFilter(details, scope, params.year);
 
     const ghByCt: Record<string, number> = {};
     for (const g of dels) {
@@ -545,26 +519,22 @@ export class ReportBuilderService {
     const detMap = new Map(details.map((d) => [d.detailId, d]));
     dels = dels.filter((d) => !d.deleted && (d.actualQty || 0) > 0);
 
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      if (ownerOrders) {
-        dels = dels.filter((g) => {
-          const ct = detMap.get(g.detailId);
-          const oid = String(
-            (ct as { orderId?: string } | undefined)?.orderId ||
-              g.orderId ||
-              ""
-          )
-            .trim()
-            .toUpperCase();
-          return ownerOrders.has(oid);
-        });
-      }
-    }
-    if (scope.scopeType === "MANAGEMENT" || scope.scopeType === "OWN_CUSTOMER") {
-      const allowed = await resolveAllowedCustomerIds(scope);
-      dels = filterByCustomerIds(dels, allowed);
-    }
+    
+    dels = dels.map((g) => {
+      const ct = detMap.get(g.detailId);
+      return {
+        ...g,
+        orderId:
+          g.orderId ||
+          (ct as { orderId?: string } | undefined)?.orderId ||
+          "",
+        supplierId:
+          (g as { supplierId?: string }).supplierId ||
+          (ct as { supplierId?: string } | undefined)?.supplierId ||
+          "",
+      };
+    });
+    dels = await applyListScopeFilter(dels, scope, params.year);
 
     const [khMap, hhMap, xeExtra] = await Promise.all([
       MasterRepository.khNames(),
@@ -627,22 +597,8 @@ export class ReportBuilderService {
       return true;
     });
 
-    if (scope.scopeType === "OWNER") {
-      const ownerOrders = await resolveOwnerOrderIdSet(scope, params.year);
-      orders = filterByOwnerOrderIds(orders, ownerOrders);
-      details = filterByOwnerOrderIds(details, ownerOrders);
-    }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      orders = filterBySupplierIds(orders, allowed);
-      details = filterBySupplierIds(details, allowed);
-    }
-    if (scope.scopeType === "OWNER" && scope.ownerEmail) {
-      const em = scope.ownerEmail.toLowerCase();
-      orders = orders.filter(
-        (o) => String(o.createdBy || "").toLowerCase() === em
-      );
-    }
+    orders = await applyListScopeFilter(orders, scope, params.year);
+    details = await applyListScopeFilter(details, scope, params.year);
 
     const nccMap = await MasterRepository.nccNames();
 
