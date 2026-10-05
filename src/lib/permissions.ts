@@ -53,8 +53,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "DELIVERY_VIEW_ACTUAL_RECEIVE",
     "DELIVERY_VIEW_ACTUAL_DELIVER",
     "REPORT_VIEW",
-    "KHSL_VIEW",
-    "PLAN_VIEW",
+    // không PLAN_VIEW / KHSL_VIEW — ẩn tab Kế hoạch
   ],
   SALES: [
     "DELIVERY_VIEW",
@@ -78,6 +77,12 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     // không PAYABLE_CANCEL
   ],
   ACCOUNT: ["DELIVERY_VIEW", "REPORT_VIEW"],
+  /** Kế toán khách hàng — chỉ GH + BC thực giao theo KH.Quanly */
+  CUSTOMER_ACCOUNTANT: [
+    "DELIVERY_VIEW",
+    "DELIVERY_VIEW_ACTUAL_DELIVER",
+    "REPORT_VIEW",
+  ],
 };
 
 const ROLE_ALIASES: Record<string, Role> = {
@@ -99,6 +104,10 @@ const ROLE_ALIASES: Record<string, Role> = {
   VIEWER: "VIEWER",
   XEM: "VIEWER",
   ACCOUNTANT: "ACCOUNTANT",
+  CUSTOMER_ACCOUNTANT: "CUSTOMER_ACCOUNTANT",
+  "KẾ TOÁN KH": "CUSTOMER_ACCOUNTANT",
+  KETOANKH: "CUSTOMER_ACCOUNTANT",
+  KT_KH: "CUSTOMER_ACCOUNTANT",
   KETOAN: "ACCOUNTANT",
   "KẾ TOÁN": "ACCOUNTANT",
   ACCOUNT: "ACCOUNT",

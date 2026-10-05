@@ -42,9 +42,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Kế hoạch SL",
     icon: "📈",
     anyOf: ["PLAN_VIEW", "KHSL_VIEW", "*"],
+    // Chỉ Admin/Manager/Purchase — ẩn hẳn với Sales/Viewer/Accountant/Dispatcher
+    rolesOnly: ["ADMIN", "MANAGER", "PURCHASE"],
   },
   {
-    href: "/reports/receiving",
+    // Mặc định vào Thực giao (Sales/Viewer/KT chỉ xem thực giao)
+    href: "/reports/thuc-giao",
     label: "Báo cáo",
     icon: "📑",
     anyOf: ["REPORT_VIEW", "*"],
@@ -118,8 +121,23 @@ export function visibleNavItems(user: ClientUser): NavItem[] {
   return NAV_ITEMS.filter((item) => canSeeNavItem(user, item));
 }
 
+/** Role chỉ xem BC thực giao → ưu tiên /reports/thuc-giao */
+const REPORT_DEFAULT_THUC_GIAO = new Set([
+  "SALES",
+  "VIEWER",
+  "ACCOUNTANT",
+  "ACCOUNT",
+  "CUSTOMER_ACCOUNTANT",
+  "KT_KH",
+]);
+
 export function firstAllowedPath(user: ClientUser): string {
+  const role = String(user.role || "").toUpperCase();
   const items = visibleNavItems(user);
+  if (REPORT_DEFAULT_THUC_GIAO.has(role)) {
+    const bc = items.find((i) => i.href.startsWith("/reports"));
+    if (bc) return "/reports/thuc-giao";
+  }
   if (items.length) return items[0].href;
   return "/deliveries";
 }

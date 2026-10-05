@@ -500,13 +500,22 @@ export function resolveScope(user: UserContext): AccessScope {
       ownerEmail: user.email,
     };
   }
-  // ACCOUNT (viết tắt) hoặc ACCOUNTANT (chuẩn permissions.ts) → scope khách hàng
-  if (role === "ACCOUNT" || role === "ACCOUNTANT") {
+  // Sales / Viewer / Kế toán (NCC hoặc KH) → scope khách hàng (V21 KH.Quanly)
+  if (
+    role === "ACCOUNT" ||
+    role === "ACCOUNTANT" ||
+    role === "CUSTOMER_ACCOUNTANT" ||
+    role === "KT_KH" ||
+    role === "SALES" ||
+    role === "VIEWER"
+  ) {
     return {
       role: user.role,
       scopeType: "OWN_CUSTOMER",
+      quanly: user.quanly,
     };
   }
+  // Manager / Purchase / còn lại → MANAGEMENT (NCC.Quanly)
   return {
     role: user.role,
     scopeType: "MANAGEMENT",

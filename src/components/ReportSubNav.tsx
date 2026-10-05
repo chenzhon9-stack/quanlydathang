@@ -27,6 +27,8 @@ const ROLE_TABS: Record<string, string[]> = {
   VIEWER: ["thuc_giao", "van_tai"],
   ACCOUNTANT: ["thuc_giao", "van_tai"],
   ACCOUNT: ["thuc_giao"],
+  CUSTOMER_ACCOUNTANT: ["thuc_giao"],
+  KT_KH: ["thuc_giao"],
 };
 
 export function ReportSubNav() {
