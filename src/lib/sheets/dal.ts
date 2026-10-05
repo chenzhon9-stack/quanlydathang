@@ -206,6 +206,48 @@ export async function updateSheetRowByKey(
   return a1Row;
 }
 
+
+/** Cập nhật dòng theo số dòng A1 (1-based, gồm header = 1). */
+export async function updateSheetRowAt(
+  sheetName: string,
+  a1Row: number,
+  patch: Record<string, string | number | boolean>,
+  year?: number
+): Promise<void> {
+  if (a1Row < 2) throw new Error("Không ghi đè header");
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId(year);
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!${a1Row}:${a1Row}`,
+    valueRenderOption: "UNFORMATTED_VALUE",
+    dateTimeRenderOption: "FORMATTED_STRING",
+  });
+  const headerRes = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!1:1`,
+  });
+  const headers = ((headerRes.data.values || [])[0] || []).map((h: unknown) =>
+    String(h ?? "").trim()
+  );
+  const row = ((res.data.values || [])[0] || []).slice() as unknown[];
+  while (row.length < headers.length) row.push("");
+  Object.entries(patch).forEach(([field, val]) => {
+    const ci = headers.findIndex(
+      (h) => h.toLowerCase() === field.toLowerCase()
+    );
+    if (ci < 0) return;
+    row[ci] = coerceWriteValue(field, val as string | number | boolean);
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetName}!A${a1Row}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values: [row] },
+  });
+  invalidateSheetCache(sheetName, year);
+}
+
 /** Append một dòng object theo header sheet */
 export async function appendSheetRow(
   sheetName: string,

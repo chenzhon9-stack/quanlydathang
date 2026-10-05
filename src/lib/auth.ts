@@ -629,6 +629,7 @@ export async function listUsersFromSheet(): Promise<
     email: string;
     hoTen: string;
     role: string;
+    roles: string[];
     quanly: string;
     active: boolean;
     trangThai: string;
@@ -639,7 +640,23 @@ export async function listUsersFromSheet(): Promise<
 > {
   if (!isSheetsConfigured()) return [];
   try {
-    const rows = await readSheetAsObjects(SHEETS.USER, {});
+    const [rows, urRows] = await Promise.all([
+      readSheetAsObjects(SHEETS.USER, {}),
+      readSheetAsObjects(SHEETS.USER_ROLES, {}).catch(() => []),
+    ]);
+    // email -> active roles
+    const rolesByEmail = new Map<string, string[]>();
+    for (const r of urRows) {
+      const em = String(r.Email || "").trim().toLowerCase();
+      if (!em) continue;
+      const active = String(r.HoatDong ?? "true").toLowerCase();
+      if (active === "false" || active === "0") continue;
+      const rc = normalizeRole(String(r.RoleCode || r.Role || ""));
+      if (!rc) continue;
+      const list = rolesByEmail.get(em) || [];
+      if (!list.includes(rc)) list.push(rc);
+      rolesByEmail.set(em, list);
+    }
     return rows
       .map((row) => {
         const u = userFromSheetRow(row);
@@ -650,13 +667,17 @@ export async function listUsersFromSheet(): Promise<
           }
           return "";
         };
+        const roles = rolesByEmail.get(u.email.toLowerCase()) || [u.role];
         return {
           email: u.email,
           hoTen: u.hoTen,
           role: u.role,
+          roles,
           quanly: u.quanly,
           active: isActiveUser(row),
-          trangThai: pickLocal(["TrangThai", "Status", "trangThai"]) || (isActiveUser(row) ? "Approved" : "Locked"),
+          trangThai:
+            pickLocal(["TrangThai", "Status", "trangThai"]) ||
+            (isActiveUser(row) ? "Approved" : "Locked"),
           phongBan: pickLocal(["PhongBan", "Phong", "Department"]),
           dienThoai: pickLocal(["DienThoai", "Phone", "SDT"]),
           lastLogin: pickLocal(["LastLogin", "lastLogin"]),
@@ -666,6 +687,7 @@ export async function listUsersFromSheet(): Promise<
       email: string;
       hoTen: string;
       role: string;
+      roles: string[];
       quanly: string;
       active: boolean;
       trangThai: string;

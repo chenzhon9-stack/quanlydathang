@@ -7,6 +7,8 @@ type UserRow = {
   email: string;
   hoTen: string;
   role: string;
+  /** V21.07 multi-role từ UserRoles */
+  roles?: string[];
   quanly: string;
   active: boolean;
   trangThai?: string;
@@ -17,14 +19,15 @@ type UserRow = {
 
 type Tab = "users" | "roles" | "permissions" | "matrix" | "userRoles";
 
-const ROLE_OPTIONS = [
-  "ADMIN",
-  "MANAGER",
-  "PURCHASE",
-  "DISPATCHER",
-  "SALES",
-  "VIEWER",
-  "ACCOUNTANT",
+const ROLE_OPTIONS: { code: string; label: string }[] = [
+  { code: "ADMIN", label: "Quản trị" },
+  { code: "MANAGER", label: "Quản lý" },
+  { code: "PURCHASE", label: "Thu mua" },
+  { code: "DISPATCHER", label: "Điều phối" },
+  { code: "ACCOUNTANT", label: "Kế toán" },
+  { code: "CUSTOMER_ACCOUNTANT", label: "KT khách hàng" },
+  { code: "SALES", label: "Kinh doanh" },
+  { code: "VIEWER", label: "Chỉ xem" },
 ];
 
 export default function AdminUsersPage() {
@@ -47,7 +50,7 @@ export default function AdminUsersPage() {
   // edit modal
   const [edit, setEdit] = useState<UserRow | null>(null);
   const [form, setForm] = useState({
-    role: "",
+    roles: [] as string[],
     quanly: "",
     hoTen: "",
     active: true,
@@ -120,8 +123,14 @@ export default function AdminUsersPage() {
 
   function openEdit(u: UserRow) {
     setEdit(u);
+    const roles =
+      u.roles && u.roles.length
+        ? u.roles.map((r) => String(r).toUpperCase())
+        : u.role
+          ? [String(u.role).toUpperCase()]
+          : [];
     setForm({
-      role: u.role,
+      roles,
       quanly: u.quanly || "",
       hoTen: u.hoTen || "",
       active: u.active,
@@ -131,6 +140,19 @@ export default function AdminUsersPage() {
     setMsgOk(false);
   }
 
+  function toggleRole(code: string) {
+    setForm((f) => {
+      const c = code.toUpperCase();
+      const has = f.roles.includes(c);
+      if (has) {
+        // Không cho bỏ hết role
+        if (f.roles.length <= 1) return f;
+        return { ...f, roles: f.roles.filter((r) => r !== c) };
+      }
+      return { ...f, roles: [...f.roles, c] };
+    });
+  }
+
   async function saveEdit() {
     if (!edit) return;
     setSaving(true);
@@ -138,8 +160,13 @@ export default function AdminUsersPage() {
     setMsgOk(false);
 
     try {
+      if (!form.roles.length) {
+        setMsg("Chọn ít nhất 1 role");
+        setSaving(false);
+        return;
+      }
       const body: Record<string, unknown> = {
-        role: form.role,
+        roles: form.roles,
         quanly: form.quanly,
         hoTen: form.hoTen,
         active: form.active,
@@ -266,9 +293,19 @@ export default function AdminUsersPage() {
                       <td className="px-3 py-2 text-blue-700 text-xs">{u.email}</td>
                       <td className="px-3 py-2 font-medium">{u.hoTen}</td>
                       <td className="px-3 py-2">
-                        <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100">
-                          {u.role}
-                        </span>
+                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+                          {(u.roles && u.roles.length ? u.roles : [u.role])
+                            .filter(Boolean)
+                            .map((r) => (
+                              <span
+                                key={r}
+                                className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700"
+                              >
+                                {ROLE_OPTIONS.find((o) => o.code === String(r).toUpperCase())
+                                  ?.label || r}
+                              </span>
+                            ))}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-slate-600 text-xs max-w-[140px] truncate" title={u.quanly}>
                         {u.quanly || "—"}
@@ -419,20 +456,43 @@ export default function AdminUsersPage() {
               />
             </label>
 
-            <label className="block text-xs font-semibold text-slate-600">
-              Role
-              <select
-                className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
-                value={form.role}
-                onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-              >
-                {ROLE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="block text-xs font-semibold text-slate-600">
+              Role (multi — V21.07 UserRoles)
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
+                {ROLE_OPTIONS.map((r) => {
+                  const checked = form.roles.includes(r.code);
+                  return (
+                    <label
+                      key={r.code}
+                      className={`flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs font-normal cursor-pointer ${
+                        checked
+                          ? "border-blue-400 bg-blue-50 text-blue-800"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleRole(r.code)}
+                      />
+                      {r.label}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-[10px] text-slate-400 font-normal">
+                Role mạnh nhất (User.Role cache):{" "}
+                <b>
+                  {form.roles.includes("ADMIN")
+                    ? "ADMIN"
+                    : form.roles.includes("MANAGER")
+                      ? "MANAGER"
+                      : form.roles.includes("PURCHASE")
+                        ? "PURCHASE"
+                        : form.roles[0] || "—"}
+                </b>
+              </p>
+            </div>
 
             <label className="block text-xs font-semibold text-slate-600">
               Quản lý (nhóm, tách ;)

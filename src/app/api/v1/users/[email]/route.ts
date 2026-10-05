@@ -2,9 +2,10 @@ import { NextRequest } from "next/server";
 import { requireAdminVerified, invalidateUserRowCache } from "@/lib/auth";
 import { success, error, jsonResponse } from "@/lib/api";
 import { isSheetsConfigured } from "@/lib/sheets/client";
-import { updateSheetRowByKey, appendSheetRow } from "@/lib/sheets/dal";
+import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
-import { normalizeRole } from "@/lib/permissions";
+import { normalizeRole, replaceUserRoles, primaryRoleFromList } from "@/lib/permissions";
+import type { Role } from "@/types";
 import { writeAudit } from "@/lib/sheets/audit";
 
 type Ctx = { params: Promise<{ email: string }> };
@@ -57,8 +58,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
 
     const patch: Record<string, string | boolean> = {};
-    if (body.role !== undefined) {
-      patch.Role = normalizeRole(String(body.role));
+    // Multi-role: body.roles[] ưu tiên; body.role single vẫn hỗ trợ
+    let rolesPayload: Role[] | null = null;
+    if (Array.isArray(body.roles)) {
+      rolesPayload = (body.roles as unknown[])
+        .map((r) => normalizeRole(String(r || "")))
+        .filter(Boolean) as Role[];
+      if (!rolesPayload.length) {
+        return jsonResponse(
+          error("VALIDATION_ERROR", "Cần chọn ít nhất 1 role"),
+          400
+        );
+      }
+      patch.Role = primaryRoleFromList(rolesPayload);
+    } else if (body.role !== undefined) {
+      const one = normalizeRole(String(body.role));
+      rolesPayload = [one];
+      patch.Role = one;
     }
     if (body.quanly !== undefined) patch.Quanly = String(body.quanly);
     if (body.hoTen !== undefined) patch.HoTen = String(body.hoTen);
@@ -102,28 +118,60 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         : `Admin cập nhật user ${email}`,
     });
 
-    if (patch.Role) {
+    let rolesResult: { primary: Role; roles: Role[]; changed: number } | null =
+      null;
+    if (rolesPayload) {
       try {
-        await appendSheetRow(SHEETS.USER_ROLES, {
-          Email: email,
-          RoleCode: String(patch.Role),
-          HoatDong: true,
-          Source: "ADMIN_UI",
-          UpdatedAt: new Date().toISOString(),
-          UpdatedBy: gate.user!.email,
+        rolesResult = await replaceUserRoles(email, rolesPayload, {
+          updatedBy: gate.user!.email,
+          source: "admin",
         });
+        // Đồng bộ User.Role = primary (đã set trong patch)
+        patch.Role = rolesResult.primary;
+        // Re-write User.Role if replace changed primary after updateSheetRowByKey
+        if (String(patch.Role) !== String(rolesResult.primary)) {
+          await updateSheetRowByKey(SHEETS.USER, "Email", email, {
+            Role: rolesResult.primary,
+          });
+        }
       } catch (e) {
-        console.info("[Admin] UserRoles append skip", e);
+        console.error("[Admin] replaceUserRoles", e);
+        return jsonResponse(
+          error(
+            "USER_ROLES_UPDATE_FAILED",
+            (e as Error).message || "Không cập nhật được UserRoles"
+          ),
+          500
+        );
       }
+    }
+
+    // Đổi role → revoke session (user nhận JWT roles mới khi login lại)
+    const roleChanged = Boolean(rolesPayload);
+    if (roleChanged && !revoked) {
+      // fingerprint password không đổi nhưng vẫn nên buộc login lại — dùng invalidate cache
+      invalidateUserRowCache(email);
     }
 
     return jsonResponse(
       success(
-        { email, patch: { ...patch, Password: patch.Password ? "(set)" : undefined }, row, sessionsRevoked: revoked },
+        {
+          email,
+          patch: {
+            ...patch,
+            Password: patch.Password ? "(set)" : undefined,
+            roles: rolesResult?.roles || rolesPayload || undefined,
+          },
+          row,
+          sessionsRevoked: revoked,
+          rolesChanged: rolesResult?.changed ?? 0,
+        },
         {
           message: revoked
             ? "Đã cập nhật User — phiên đăng nhập cũ của user này đã vô hiệu"
-            : "Đã cập nhật User",
+            : rolesPayload
+              ? `Đã cập nhật User + ${rolesResult?.roles.length || 0} role (UserRoles)`
+              : "Đã cập nhật User",
         }
       )
     );

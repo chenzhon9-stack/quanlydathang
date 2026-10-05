@@ -1,6 +1,6 @@
 import type { Role } from "@/types";
 import { isSheetsConfigured } from "@/lib/sheets/client";
-import { readSheetAsObjects } from "@/lib/sheets/dal";
+import { readSheetAsObjects, appendSheetRow, updateSheetRowAt } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 
 /**
@@ -241,4 +241,119 @@ export async function resolvePermissionsFromSheets(
     permissions: Array.from(perms),
     source: fromSheet ? "RolePermissions+UserRoles" : "code-matrix",
   };
+}
+
+/**
+ * V21.07 _replaceUserRoles_: soft-delete role không còn; bật/append role mới.
+ * RoleCode lưu chữ thường trên sheet (parity GAS); normalize khi đọc.
+ */
+export async function replaceUserRoles(
+  email: string,
+  roleCodes: string[],
+  meta: { updatedBy: string; source?: string }
+): Promise<{ primary: Role; roles: Role[]; changed: number }> {
+  const emailLc = String(email || "").trim().toLowerCase();
+  const want = Array.from(
+    new Set(
+      roleCodes
+        .map((r) => normalizeRole(String(r || "")))
+        .filter(Boolean) as Role[]
+    )
+  );
+  if (!want.length) {
+    throw new Error("Cần chọn ít nhất 1 role");
+  }
+  const primary = primaryRoleFromList(want);
+  const wantSet = new Set(want.map((r) => r.toUpperCase()));
+  const source = meta.source || "admin";
+  const now = new Date().toISOString();
+
+  // Đọc raw sheet để có row index
+  const mod = await import("@/lib/sheets/client");
+  const sheets = mod.getSheetsClient();
+  const spreadsheetId = mod.getSpreadsheetId();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: SHEETS.USER_ROLES,
+    valueRenderOption: "UNFORMATTED_VALUE",
+    dateTimeRenderOption: "FORMATTED_STRING",
+  });
+  const values = res.data.values || [];
+  const headers = ((values[0] || []) as string[]).map((h) =>
+    String(h ?? "").trim()
+  );
+  const cEmail = headers.findIndex((h) => h.toLowerCase() === "email");
+  const cRole = headers.findIndex(
+    (h) => h.toLowerCase() === "rolecode" || h.toLowerCase() === "role"
+  );
+  const cActive = headers.findIndex((h) => h.toLowerCase() === "hoatdong");
+  if (cEmail < 0 || cRole < 0) {
+    // Sheet chưa có → append tất cả
+    for (const r of want) {
+      await appendSheetRow(SHEETS.USER_ROLES, {
+        Email: emailLc,
+        RoleCode: r.toLowerCase(),
+        HoatDong: true,
+        Source: source,
+        UpdatedAt: now,
+        UpdatedBy: meta.updatedBy,
+      });
+    }
+    return { primary, roles: want, changed: want.length };
+  }
+
+  const existingByRole = new Map<string, { a1Row: number; active: boolean }>();
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i] || [];
+    const em = String(row[cEmail] ?? "").trim().toLowerCase();
+    if (em !== emailLc) continue;
+    const rc = normalizeRole(String(row[cRole] ?? ""));
+    if (!rc) continue;
+    const activeRaw = cActive >= 0 ? row[cActive] : true;
+    const active =
+      activeRaw === true ||
+      activeRaw === 1 ||
+      String(activeRaw).toLowerCase() === "true" ||
+      String(activeRaw) === "";
+    existingByRole.set(rc.toUpperCase(), { a1Row: i + 1, active });
+  }
+
+  let changed = 0;
+  // Update existing
+  for (const [rcUpper, info] of existingByRole) {
+    const should = wantSet.has(rcUpper);
+    if (should && !info.active) {
+      await updateSheetRowAt(SHEETS.USER_ROLES, info.a1Row, {
+        HoatDong: true,
+        Source: source,
+        UpdatedAt: now,
+        UpdatedBy: meta.updatedBy,
+      });
+      changed++;
+    } else if (!should && info.active) {
+      await updateSheetRowAt(SHEETS.USER_ROLES, info.a1Row, {
+        HoatDong: false,
+        Source: source,
+        UpdatedAt: now,
+        UpdatedBy: meta.updatedBy,
+      });
+      changed++;
+    }
+  }
+  // Append missing
+  for (const r of want) {
+    if (!existingByRole.has(r.toUpperCase())) {
+      await appendSheetRow(SHEETS.USER_ROLES, {
+        Email: emailLc,
+        RoleCode: r.toLowerCase(),
+        HoatDong: true,
+        Source: source,
+        UpdatedAt: now,
+        UpdatedBy: meta.updatedBy,
+      });
+      changed++;
+    }
+  }
+
+  return { primary, roles: want, changed };
 }
