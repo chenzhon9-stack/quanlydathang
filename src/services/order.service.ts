@@ -1217,7 +1217,9 @@ export class OrderService {
       // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
       const baselineLanGui = Number(lanGui) || 0;
-      const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
+      const WINDOW_MS = 5 * 60 * 1000;
+	const windowId = Math.floor(Date.now() / WINDOW_MS);
+	const idempotencyKey = `send:${orderId}:w${windowId}:${action || "default"}`;
       const payload: Record<string, unknown> = {
         action: "sendOrderEmail",
         maDon: orderId,
