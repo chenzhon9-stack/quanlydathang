@@ -34,35 +34,49 @@ function isProduction(): boolean {
  * - còn lại (local chưa Sheets) → có
  */
 function allowMockLogin(): boolean {
+  // P0: production tuyệt đối không mock, kể cả ALLOW_MOCK_LOGIN=true
+  if (isProduction()) return false;
   const flag = String(process.env.ALLOW_MOCK_LOGIN || "").toLowerCase();
   if (flag === "1" || flag === "true" || flag === "yes") return true;
-  if (isProduction()) return false;
   if (isSheetsConfigured()) return false;
   return true;
 }
 
-/** Secret ký token — bắt buộc có giá trị ổn định trên production. */
+/**
+ * Secret ký token.
+ * Production: BẮT BUỘC AUTH_SECRET | TOKEN_SECRET | JWT_SECRET (đủ dài).
+ * Không suy ra từ SPREADSHEET_ID (public) + SECRET_SALT (có thể rỗng).
+ * Dev: cho phép derived để local chạy không cần env đầy đủ.
+ */
 function getTokenSecret(): string {
-  const s =
+  const s = (
     process.env.AUTH_SECRET ||
     process.env.TOKEN_SECRET ||
     process.env.JWT_SECRET ||
-    "";
-  if (s.trim()) return s.trim();
-  // Fallback: salt + spreadsheet (không lý tưởng nhưng còn hơn không ký)
+    ""
+  ).trim();
+  if (s) {
+    if (isProduction() && s.length < 16) {
+      console.error(
+        "[Auth] AUTH_SECRET quá ngắn (<16). Từ chối ký/verify trên production."
+      );
+      return "";
+    }
+    return s;
+  }
+  // Production: không fallback — buộc cấu hình
+  if (isProduction()) {
+    console.error(
+      "[Auth] AUTH_SECRET bắt buộc trên production. Không dùng SECRET_SALT/SPREADSHEET_ID."
+    );
+    return "";
+  }
+  // Dev only
   const derived =
     (process.env.SECRET_SALT || "") +
     ":" +
-    (process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "");
-  if (derived.replace(/:/g, "").trim()) {
-    if (isProduction()) {
-      console.warn(
-        "[Auth] AUTH_SECRET chưa set — dùng SECRET_SALT+SPREADSHEET_ID. Hãy set AUTH_SECRET trên Vercel."
-      );
-    }
-    return derived;
-  }
-  return "";
+    (process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "local-dev");
+  return derived;
 }
 
 function b64urlFromBuf(buf: Buffer): string {
@@ -506,7 +520,8 @@ export function logout(_token: string) {
 
 /**
  * Parse token đồng bộ (có kiểm tra HMAC vh2).
- * Dùng cho đọc nhẹ; write nhạy cảm nên dùng getCurrentUserVerified.
+ * Lưu ý: KHÔNG đọc Sheet — user bị khóa / đổi MK vẫn pass đến hết TTL
+ * nếu route chỉ gọi hàm này. Write/admin phải dùng getCurrentUserVerified.
  */
 export function getCurrentUser(token: string | null): UserContext | null {
   const payload = parseTokenPayload(token);

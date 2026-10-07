@@ -56,10 +56,12 @@ async function withProcessLock<T>(key: string, fn: () => Promise<T>): Promise<T>
 
 const LOCK_PREFIX = "__LOCK__";
 const LOCK_TTL_MS = 12_000;
-const HOLDER =
-  process.env.VERCEL_REGION ||
-  process.env.VERCEL_ID ||
-  `pid-${process.pid}-${randomBytes(3).toString("hex")}`;
+/** Unique per process — KHÔNG dùng mỗi VERCEL_REGION (mọi instance cùng region trùng nhau). */
+const HOLDER = [
+  process.env.VERCEL_REGION || "local",
+  process.pid,
+  randomBytes(6).toString("hex"),
+].join("-");
 
 function lockKeyFor(counterKey: string): string {
   return `${LOCK_PREFIX}${counterKey}`;
@@ -82,26 +84,25 @@ async function tryAcquireSheetLock(
   const found = rows.find(
     (r) => String(r.Key || "").trim().toUpperCase() === lk.toUpperCase()
   );
-  const updatedAt = found
-    ? Date.parse(String(found.UpdatedAt || found.Updatedat || ""))
-    : 0;
+  // CurrentNo trên dòng LOCK = epoch ms hết hạn (số, không parse ngày Sheet)
+  const expiresAt = found ? Number(found.CurrentNo) || 0 : 0;
   const holder = found ? String(found.UpdatedBy || "").trim() : "";
-  const expired =
-    !found || !updatedAt || !Number.isFinite(updatedAt) || now - updatedAt > LOCK_TTL_MS;
+  const expired = !found || !expiresAt || now > expiresAt;
 
   // Đang bị instance khác giữ
   if (!expired && holder && holder !== HOLDER) {
     return false;
   }
 
-  const stamp = new Date(now).toISOString();
+  const expires = now + LOCK_TTL_MS;
+  const stamp = String(now); // epoch ms dạng chuỗi — không phụ thuộc format ngày Sheet
   if (found) {
     const row = await updateSheetRowByKey(
       SHEETS.COUNTER,
       "Key",
       String(found.Key || lk),
       {
-        CurrentNo: 0,
+        CurrentNo: expires, // deadline epoch ms
         UpdatedAt: stamp,
         UpdatedBy: HOLDER,
       },
@@ -113,7 +114,7 @@ async function tryAcquireSheetLock(
       SHEETS.COUNTER,
       {
         Key: lk,
-        CurrentNo: 0,
+        CurrentNo: expires,
         UpdatedAt: stamp,
         UpdatedBy: HOLDER,
       },
@@ -121,7 +122,7 @@ async function tryAcquireSheetLock(
     );
   }
 
-  // Verify holder
+  // Verify holder + deadline còn do mình giữ
   const check = await readSheetAsObjects(SHEETS.COUNTER, {
     year,
     noCache: true,
@@ -129,7 +130,10 @@ async function tryAcquireSheetLock(
   const row = check.find(
     (r) => String(r.Key || "").trim().toUpperCase() === lk.toUpperCase()
   );
-  return !!(row && String(row.UpdatedBy || "").trim() === HOLDER);
+  if (!row) return false;
+  if (String(row.UpdatedBy || "").trim() !== HOLDER) return false;
+  const exp2 = Number(row.CurrentNo) || 0;
+  return exp2 > now;
 }
 
 async function releaseSheetLock(
@@ -143,7 +147,8 @@ async function releaseSheetLock(
       "Key",
       lk,
       {
-        UpdatedAt: new Date(0).toISOString(),
+        CurrentNo: 0, // hết hạn ngay
+        UpdatedAt: "0",
         UpdatedBy: "",
       },
       year
