@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { MOCK_USERS } from "@/mocks/data";
 import type { UserContext, AccessScope, Role } from "@/types";
 import { normalizeRole, permissionsForRole, resolvePermissionsFromSheets } from "@/lib/permissions";
@@ -8,14 +8,152 @@ import { SHEETS } from "@/lib/sheets/constants";
 
 /**
  * Stateless session token — bắt buộc trên Vercel serverless.
- * Token = vh1.<base64url JSON { user, exp }>
  *
- * Login: ưu tiên sheet User → fallback mock.
- * Password: plain text (V21 legacy) hoặc SHA-256 / MD5 hex.
+ * Token (P0):
+ *   vh2.<base64url JSON { user, exp, sv }>.<base64url HMAC-SHA256>
+ * HMAC secret: AUTH_SECRET | TOKEN_SECRET | (SECRET_SALT+SPREADSHEET_ID)
+ *
+ * Login: ưu tiên sheet User.
+ * Mock chỉ khi ALLOW_MOCK_LOGIN=true hoặc (dev + chưa cấu hình Sheets).
+ * Password: V21 SHA-256(email:plain:salt) hoặc legacy.
  */
 
 /** TTL JWT — export để login/route và chỗ khác dùng chung (tránh hardcode lệch). */
 export const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
+
+/** true khi NODE_ENV=production */
+function isProduction(): boolean {
+  return process.env.NODE_ENV === "production";
+}
+
+/**
+ * Cho phép mock login?
+ * - ALLOW_MOCK_LOGIN=true → luôn (dev tường minh)
+ * - production → không
+ * - đã cấu hình Sheets → không
+ * - còn lại (local chưa Sheets) → có
+ */
+function allowMockLogin(): boolean {
+  const flag = String(process.env.ALLOW_MOCK_LOGIN || "").toLowerCase();
+  if (flag === "1" || flag === "true" || flag === "yes") return true;
+  if (isProduction()) return false;
+  if (isSheetsConfigured()) return false;
+  return true;
+}
+
+/** Secret ký token — bắt buộc có giá trị ổn định trên production. */
+function getTokenSecret(): string {
+  const s =
+    process.env.AUTH_SECRET ||
+    process.env.TOKEN_SECRET ||
+    process.env.JWT_SECRET ||
+    "";
+  if (s.trim()) return s.trim();
+  // Fallback: salt + spreadsheet (không lý tưởng nhưng còn hơn không ký)
+  const derived =
+    (process.env.SECRET_SALT || "") +
+    ":" +
+    (process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "");
+  if (derived.replace(/:/g, "").trim()) {
+    if (isProduction()) {
+      console.warn(
+        "[Auth] AUTH_SECRET chưa set — dùng SECRET_SALT+SPREADSHEET_ID. Hãy set AUTH_SECRET trên Vercel."
+      );
+    }
+    return derived;
+  }
+  return "";
+}
+
+function b64urlFromBuf(buf: Buffer): string {
+  return buf
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function b64urlToBuf(s: string): Buffer {
+  const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  return Buffer.from(b64, "base64");
+}
+
+function signPayloadB64(payloadB64: string, secret: string): string {
+  const mac = createHmac("sha256", secret).update(payloadB64).digest();
+  return b64urlFromBuf(mac);
+}
+
+function safeEqualB64(a: string, b: string): boolean {
+  try {
+    const ba = b64urlToBuf(a);
+    const bb = b64urlToBuf(b);
+    if (ba.length !== bb.length) return false;
+    return timingSafeEqual(ba, bb);
+  } catch {
+    return false;
+  }
+}
+
+/** Tạo token đã ký vh2.payload.sig */
+function issueToken(payload: TokenPayload): string {
+  const secret = getTokenSecret();
+  if (!secret) {
+    throw new Error(
+      "AUTH_SECRET chưa cấu hình — không thể phát hành token an toàn. Set AUTH_SECRET trên Vercel."
+    );
+  }
+  const payloadB64 = b64urlEncode(payload);
+  const sig = signPayloadB64(payloadB64, secret);
+  return `vh2.${payloadB64}.${sig}`;
+}
+
+/**
+ * Giải mã + kiểm tra chữ ký.
+ * - vh2: bắt buộc HMAC đúng
+ * - vh1: chỉ khi ALLOW_LEGACY_UNSIGNED_TOKEN=true và không production (chuyển tiếp)
+ */
+function parseTokenPayload(token: string | null): TokenPayload | null {
+  if (!token) return null;
+  const secret = getTokenSecret();
+
+  if (token.startsWith("vh2.")) {
+    const rest = token.slice(4);
+    const dot = rest.lastIndexOf(".");
+    if (dot <= 0) return null;
+    const payloadB64 = rest.slice(0, dot);
+    const sig = rest.slice(dot + 1);
+    if (!secret) return null;
+    const expect = signPayloadB64(payloadB64, secret);
+    if (!safeEqualB64(sig, expect)) {
+      console.info("[Auth] token signature invalid");
+      return null;
+    }
+    const payload = b64urlDecode<TokenPayload>(payloadB64);
+    if (!payload?.user?.email || !payload.exp) return null;
+    if (payload.exp < Date.now()) return null;
+    return payload;
+  }
+
+  // Legacy unsigned vh1 — tắt trên production
+  if (token.startsWith("vh1.")) {
+    const allowLegacy =
+      String(process.env.ALLOW_LEGACY_UNSIGNED_TOKEN || "").toLowerCase() ===
+        "true" ||
+      String(process.env.ALLOW_LEGACY_UNSIGNED_TOKEN || "") === "1";
+    if (isProduction() || !allowLegacy) {
+      console.info("[Auth] rejected unsigned vh1 token");
+      return null;
+    }
+    const payload = b64urlDecode<TokenPayload>(token.slice(4));
+    if (!payload?.user?.email || !payload.exp) return null;
+    if (payload.exp < Date.now()) return null;
+    return payload;
+  }
+
+  return null;
+}
+
 
 /** Cache dòng User theo email — giảm spam Sheets khi /me / admin verify. */
 const USER_ROW_TTL_MS = 30_000;
@@ -303,15 +441,26 @@ export async function login(
   // 1) Sheet User
   const sheetResult = await loginFromSheet(emailLc, pass);
   let user = sheetResult.user;
-  let sv = "mock";
+  let sv = "0";
 
-  // 2) Fallback mock (dev accounts)
+  // 2) Fallback mock — chỉ dev / ALLOW_MOCK_LOGIN (P0: chặn production + khi đã có Sheets)
   if (!user) {
-    user = loginFromMock(emailLc, pass);
-    if (user) {
-      console.info("[Auth] Mock login OK", user.email);
-      sv = "mock";
-    } else {
+    if (allowMockLogin()) {
+      user = loginFromMock(emailLc, pass);
+      if (user) {
+        console.info("[Auth] Mock login OK (dev)", user.email);
+        sv = "mock";
+      }
+    } else if (sheetResult.reason) {
+      console.info(
+        "[Auth] Login failed",
+        emailLc,
+        "sheetReason=",
+        sheetResult.reason,
+        "mockDisabled=1"
+      );
+    }
+    if (!user) {
       console.info(
         "[Auth] Login failed",
         emailLc,
@@ -342,8 +491,13 @@ export async function login(
 
   const exp = Date.now() + TOKEN_TTL_MS;
   const payload: TokenPayload = { user, exp, sv };
-  const token = `vh1.${b64urlEncode(payload)}`;
-  return { user, token };
+  try {
+    const token = issueToken(payload);
+    return { user, token };
+  } catch (e) {
+    console.error("[Auth] issueToken failed", e);
+    return null;
+  }
 }
 
 export function logout(_token: string) {
@@ -351,19 +505,19 @@ export function logout(_token: string) {
 }
 
 /**
- * Parse token đồng bộ (không đọc Sheet).
+ * Parse token đồng bộ (có kiểm tra HMAC vh2).
  * Dùng cho đọc nhẹ; write nhạy cảm nên dùng getCurrentUserVerified.
  */
 export function getCurrentUser(token: string | null): UserContext | null {
-  if (!token) return null;
-  if (!token.startsWith("vh1.")) return null;
+  const payload = parseTokenPayload(token);
+  if (!payload) return null;
 
-  const raw = token.slice(4);
-  const payload = b64urlDecode<TokenPayload>(raw);
-  if (!payload?.user?.email || !payload.exp) return null;
-  if (payload.exp < Date.now()) return null;
+  // Production / Sheets: từ chối token mock còn sót
+  if (payload.sv === "mock" && !allowMockLogin()) {
+    console.info("[Auth] mock token rejected");
+    return null;
+  }
 
-  // Không mutate payload decode — clone user
   const user: UserContext = { ...payload.user };
   const role = user.role;
   if (String(role).toUpperCase() === "ADMIN") {
@@ -383,17 +537,18 @@ export function getCurrentUser(token: string | null): UserContext | null {
 export async function getCurrentUserVerified(
   token: string | null
 ): Promise<UserContext | null> {
-  if (!token || !token.startsWith("vh1.")) return null;
-  const raw = token.slice(4);
-  const payload = b64urlDecode<TokenPayload>(raw);
-  if (!payload?.user?.email || !payload.exp) return null;
-  if (payload.exp < Date.now()) return null;
+  const payload = parseTokenPayload(token);
+  if (!payload) return null;
 
   const base = getCurrentUser(token);
   if (!base) return null;
 
-  // Mock / dev
-  if (payload.sv === "mock" || !isSheetsConfigured()) return base;
+  // Mock chỉ khi allowMockLogin
+  if (payload.sv === "mock") {
+    if (!allowMockLogin()) return null;
+    return base;
+  }
+  if (!isSheetsConfigured()) return base;
 
   try {
     const found = await findUserRow(base.email.toLowerCase());
