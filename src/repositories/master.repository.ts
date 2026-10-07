@@ -260,4 +260,10 @@ export class MasterRepository {
       return [];
     }
   }
+
+  /** Xóa cache tên/meta sau khi CRUD danh mục */
+  static invalidateCache(): void {
+    for (const k of Object.keys(cache)) delete cache[k];
+    hhMetaCache.entry = undefined;
+  }
 }
