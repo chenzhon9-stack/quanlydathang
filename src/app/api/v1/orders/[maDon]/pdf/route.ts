@@ -45,7 +45,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     const pdf = await gasCreateOrderPdf(maDon, { year });
     if (!pdf.ok) {
       return jsonResponse(
-        error("GAS_PDF_FAILED", pdf.error),
+        error(
+          "GAS_PDF_FAILED",
+          pdf.error || "createPdf thất bại (GAS không trả lỗi chi tiết)"
+        ),
         502
       );
     }

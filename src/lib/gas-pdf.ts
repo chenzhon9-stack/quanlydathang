@@ -4,15 +4,19 @@
  */
 import { postGasWebhook, gasWebhookUrl } from "@/lib/gas-webhook";
 
-export type CreatePdfResult = {
-  ok: boolean;
-  pdfUrl?: string;
-  pdfFileId?: string;
-  fileName?: string;
-  error?: string;
-  httpStatus?: number;
-  raw?: string;
-};
+export type CreatePdfResult =
+  | {
+      ok: true;
+      pdfUrl?: string;
+      pdfFileId?: string;
+      fileName?: string;
+    }
+  | {
+      ok: false;
+      error: string;
+      httpStatus?: number;
+      raw?: string;
+    };
 
 /**
  * POST { action: "createPdf", maDon, secret? }
