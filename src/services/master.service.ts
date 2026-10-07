@@ -1,7 +1,7 @@
 /**
  * Master CRUD — parity V21 getMasterRows / saveMasterRow / deleteMasterRow / toggleMasterRow
  */
-import type { UserContext } from "@/lib/auth";
+import type { UserContext } from "@/types";
 import { isAdminRole, hasPermission } from "@/lib/auth";
 import {
   getMasterConfig,
