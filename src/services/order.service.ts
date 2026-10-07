@@ -1,3 +1,4 @@
+import { postGasWebhook, rememberGasIdempotency } from "@/lib/gas-webhook";
 import {
   todayYmdVN,
   currentYearVN,
@@ -1211,14 +1212,9 @@ export class OrderService {
 
     // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
     if (gasUrl) {
-      const secret = (
-        process.env.WEBHOOK_SECRET ||
-        process.env.GAS_WEBHOOK_SECRET ||
-        ""
-      ).trim();
       // V21 sendOrderEmail(maDon, email, action|null)
       // action: null | send | reset | cancel | markSent
-      // Payload tối giản + idempotencyKey (chống gửi trùng khi HTML/timeout).
+      // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
       const baselineLanGui = Number(lanGui) || 0;
       const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
@@ -1229,59 +1225,14 @@ export class OrderService {
         sendAction: action || null,
         idempotencyKey,
       };
-      if (secret) payload.secret = secret;
-      const bodyStr = JSON.stringify(payload);
-      // PDF + MailApp 20–45s; Hobby ~60s → 55s
 
-      // GAS Web App 302 → googleusercontent. Thử follow trước; fallback manual POST.
-      async function postGas(url: string, mode: "follow" | "manual" = "follow"): Promise<{
+      let gasRes: {
         status: number;
         body: Record<string, unknown>;
         raw: string;
-      }> {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), GAS_TIMEOUT_MS);
-        let res: Response;
-        try {
-          res = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-            },
-            body: bodyStr,
-            redirect: mode,
-            signal: controller.signal,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-        if (mode === "manual" && res.status >= 300 && res.status < 400) {
-          const loc = res.headers.get("location");
-          if (loc) return postGas(loc, "follow");
-        }
-        const raw = await res.text();
-        let body: Record<string, unknown> = {};
-        const trimmed = (raw || "").trim();
-        const looksHtml =
-          /^<!DOCTYPE/i.test(trimmed) ||
-          /^<html[\s>]/i.test(trimmed) ||
-          /<head[\s>]/i.test(trimmed.slice(0, 200));
-        try {
-          if (looksHtml) throw new Error("html");
-          body = JSON.parse(raw) as Record<string, unknown>;
-        } catch {
-          body = {
-            success: false,
-            _gasHtml: true,
-            error:
-              `GAS trả về HTML (HTTP ${res.status}) thay vì JSON — thường do doPost lỗi hoặc Web App chưa deploy đúng. ` +
-              `Nếu cột LanGui trên Sheet KHÔNG tăng thì GAS chưa ghi đơn (chưa gửi được). ` +
-              `Kiểm tra: Deploy → Execute as Me, Anyone; PDF_FOLDER_ID; doPost → ContentService JSON; Logs (Executions).`,
-          };
-        }
-        return { status: res.status, body, raw };
-      }
+        aborted?: boolean;
+        fromIdempotencyCache?: boolean;
+      };
 
       /** Sau timeout/abort: reload Sheet — nếu LanGui đã tăng thì coi GAS đã gửi (tránh double-send). */
       async function resolveAfterGasAbort(): Promise<{
@@ -1328,16 +1279,21 @@ export class OrderService {
         return null;
       }
 
-      let gasRes: { status: number; body: Record<string, unknown>; raw: string };
-      try {
-        gasRes = await postGas(gasUrl, "follow");
-      } catch (e) {
-        const aborted =
-          e instanceof Error &&
-          (e.name === "AbortError" || /aborted/i.test(e.message));
-        if (aborted) {
+      gasRes = await postGasWebhook(payload, {
+        timeoutMs: GAS_TIMEOUT_MS,
+        idempotencyKey,
+      });
+
+      // Timeout/abort → poll LanGui (GAS có thể đã gửi sau khi Vercel cắt)
+      if (gasRes.aborted || gasRes.body?._idempotencyInFlight) {
+        if (gasRes.aborted) {
           const recovered = await resolveAfterGasAbort();
           if (recovered) {
+            rememberGasIdempotency(idempotencyKey, {
+              status: 200,
+              raw: "",
+              body: { success: true, recoveredFromSheet: true },
+            });
             await writeAudit({
               email: user.email,
               role: user.role,
@@ -1352,20 +1308,27 @@ export class OrderService {
             });
             return recovered;
           }
+          throw {
+            code: "GAS_SEND_FAILED",
+            message:
+              `GAS không phản hồi trong ${GAS_TIMEOUT_MS / 1000}s và Sheet chưa tăng LanGui. ` +
+              `Đợi ~30s rồi kiểm tra cột LanGui trước khi gửi lại (tránh trùng email).`,
+          };
         }
         throw {
-          code: "GAS_SEND_FAILED",
-          message: aborted
-            ? `GAS không phản hồi trong ${GAS_TIMEOUT_MS / 1000}s và Sheet chưa tăng LanGui. ` +
-              `Đợi ~30s rồi kiểm tra cột LanGui trước khi gửi lại (tránh trùng email).`
-            : `Không gọi được GAS: ${e instanceof Error ? e.message : String(e)}`,
+          code: "GAS_SEND_IN_FLIGHT",
+          message: String(
+            gasRes.body?.error ||
+              "Đang xử lý gửi trùng — đợi rồi kiểm tra LanGui trên Sheet."
+          ),
         };
       }
 
       const gasBody = gasRes.body;
-      console.error("[sendOrder] GAS response", {
+      console.info("[sendOrder] GAS response", {
         maDon: orderId,
         status: gasRes.status,
+        fromCache: gasRes.fromIdempotencyCache || false,
         bodyPreview: JSON.stringify(gasBody).slice(0, 500),
         hint: gasBody._gasHtml ? "GAS trả HTML" : undefined,
       });
