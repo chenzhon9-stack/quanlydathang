@@ -56,3 +56,6 @@ export async function createOrderPdfViaGas(
     raw: result.raw?.slice(0, 300),
   };
 }
+
+/** Alias tương thích route /api/v1/orders/[maDon]/pdf */
+export const gasCreateOrderPdf = createOrderPdfViaGas;
