@@ -332,20 +332,32 @@ export default function MastersPage() {
       {loading ? (
         <div className="text-center text-slate-400 py-10 text-sm">Đang tải…</div>
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto shadow-sm">
-          <table className="min-w-full text-sm">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          {/* Scroll ngang; cột mã (đầu) + thao tác (cuối) sticky không bị khuất */}
+          <div className="overflow-x-auto max-w-full">
+          <table className="text-sm border-collapse" style={{ minWidth: canWrite ? 720 : 560 }}>
             <thead>
               <tr className="bg-slate-100 text-slate-600 text-xs uppercase">
-                {displayCols.map((h) => (
-                  <th
-                    key={h}
-                    className="px-3 py-2 text-left font-semibold whitespace-nowrap"
-                  >
-                    {labelOf(h)}
-                  </th>
-                ))}
+                {displayCols.map((h, colIdx) => {
+                  const isKey = schema?.key === h || colIdx === 0;
+                  return (
+                    <th
+                      key={h}
+                      className={
+                        "px-3 py-2.5 text-left font-semibold whitespace-nowrap " +
+                        (isKey
+                          ? "sticky left-0 z-20 bg-slate-100 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] min-w-[7.5rem]"
+                          : "min-w-[6rem]")
+                      }
+                    >
+                      {labelOf(h)}
+                    </th>
+                  );
+                })}
                 {canWrite && (
-                  <th className="px-3 py-2 text-right font-semibold">Thao tác</th>
+                  <th className="px-3 py-2.5 text-right font-semibold whitespace-nowrap sticky right-0 z-20 bg-slate-100 shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.12)] min-w-[9.5rem]">
+                    Thao tác
+                  </th>
                 )}
               </tr>
             </thead>
@@ -355,56 +367,72 @@ export default function MastersPage() {
                 const active = activeCol
                   ? isActiveVal(row[activeCol])
                   : true;
+                const rowBg = !active ? "bg-slate-50" : "bg-white";
                 return (
                   <tr
                     key={i}
                     className={`border-t border-slate-100 hover:bg-slate-50 ${
-                      !active ? "opacity-50" : ""
+                      !active ? "opacity-60" : ""
                     }`}
                   >
-                    {displayCols.map((h) => (
-                      <td
-                        key={h}
-                        className="px-3 py-2 whitespace-nowrap text-slate-700 max-w-[14rem] truncate"
-                        title={String(row[h] ?? "")}
-                      >
-                        {schema?.fieldTypes?.[h]?.type === "checkbox"
+                    {displayCols.map((h, colIdx) => {
+                      const isKey = schema?.key === h || colIdx === 0;
+                      const raw = String(row[h] ?? "");
+                      const display =
+                        schema?.fieldTypes?.[h]?.type === "checkbox"
                           ? isActiveVal(row[h])
                             ? "✓"
                             : "—"
-                          : String(row[h] ?? "")}
-                      </td>
-                    ))}
-                    {canWrite && (
-                      <td className="px-3 py-2 text-right whitespace-nowrap space-x-1">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => openEdit(row)}
-                          className="px-2 py-1 text-[11px] rounded border border-slate-300 bg-white"
+                          : raw;
+                      return (
+                        <td
+                          key={h}
+                          className={
+                            "px-3 py-2 text-slate-700 " +
+                            (isKey
+                              ? `sticky left-0 z-10 ${rowBg} shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)] font-medium whitespace-nowrap min-w-[7.5rem]`
+                              : "whitespace-nowrap max-w-[12rem] truncate")
+                          }
+                          title={raw}
                         >
-                          Sửa
-                        </button>
-                        {schema?.active && (
+                          {display}
+                        </td>
+                      );
+                    })}
+                    {canWrite && (
+                      <td
+                        className={`px-2 py-2 text-right whitespace-nowrap sticky right-0 z-10 ${rowBg} shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.08)]`}
+                      >
+                        <div className="inline-flex flex-wrap justify-end gap-1">
                           <button
                             type="button"
                             disabled={busy}
-                            onClick={() => toggleRow(row)}
-                            className="px-2 py-1 text-[11px] rounded border border-amber-300 bg-amber-50 text-amber-800"
+                            onClick={() => openEdit(row)}
+                            className="px-2 py-1 text-[11px] rounded border border-slate-300 bg-white"
                           >
-                            {active ? "Tắt" : "Bật"}
+                            Sửa
                           </button>
-                        )}
-                        {schema?.canSoftDelete && active && (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => softDelete(row)}
-                            className="px-2 py-1 text-[11px] rounded border border-red-200 bg-red-50 text-red-700"
-                          >
-                            Xóa
-                          </button>
-                        )}
+                          {schema?.active && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => toggleRow(row)}
+                              className="px-2 py-1 text-[11px] rounded border border-amber-300 bg-amber-50 text-amber-800"
+                            >
+                              {active ? "Tắt" : "Bật"}
+                            </button>
+                          )}
+                          {schema?.canSoftDelete && active && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => softDelete(row)}
+                              className="px-2 py-1 text-[11px] rounded border border-red-200 bg-red-50 text-red-700"
+                            >
+                              Xóa
+                            </button>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -412,6 +440,7 @@ export default function MastersPage() {
               })}
             </tbody>
           </table>
+          </div>
           {filtered.length > 300 && (
             <div className="text-xs text-slate-400 px-3 py-2 border-t">
               Hiển thị 300 / {filtered.length} — thu hẹp bằng ô tìm kiếm
