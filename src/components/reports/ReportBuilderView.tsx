@@ -17,6 +17,7 @@ import {
   loadColumnState,
   resolveColumns,
 } from "@/lib/column-prefs";
+import { matchSearchVn } from "@/lib/vn-search";
 
 function defaultRange(): { from: string; to: string } {
   const now = new Date();
@@ -58,6 +59,7 @@ export function ReportBuilderView({
   const [valFilters, setValFilters] = useState<Record<string, string[]>>({});
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(
     async (p = 1) => {
@@ -164,8 +166,10 @@ export function ReportBuilderView({
   })();
 
   const hasClientFilter = useMemo(
-    () => Object.values(valFilters).some((v) => v && v.length > 0),
-    [valFilters]
+    () =>
+      Object.values(valFilters).some((v) => v && v.length > 0) ||
+      Boolean(search.trim()),
+    [valFilters, search]
   );
 
   const filteredItems = useMemo(() => {
@@ -175,6 +179,13 @@ export function ReportBuilderView({
         const cell = String(row[k] ?? "");
         if (!vals.includes(cell)) return false;
       }
+      if (search.trim()) {
+        // Tìm trên toàn bộ cột đang hiển thị (tiêu chí + số liệu dạng text)
+        const hay = displayCols
+          .map((c) => String(row[c.key] ?? ""))
+          .join(" ");
+        if (!matchSearchVn(hay, search)) return false;
+      }
       return true;
     });
     if (sortKey && sortDir) {
@@ -183,11 +194,11 @@ export function ReportBuilderView({
       );
     }
     return rows;
-  }, [items, valFilters, sortKey, sortDir]);
+  }, [items, valFilters, sortKey, sortDir, search, displayCols]);
 
   /**
    * Tổng footer:
-   * - Có lọc cột (client): tính lại từ filteredItems (parity UX GAS — tổng khớp dòng đang xem).
+   * - Có lọc cột / tìm kiếm (client): tính lại từ filteredItems (parity UX GAS — tổng khớp dòng đang xem).
    * - Không lọc: dùng totals API (toàn bộ nhóm sau groupBy, không chỉ trang hiện tại).
    * Lưu ý: lọc header chỉ áp trên items của trang hiện tại (pageSize) — khác GAS lọc full dataset.
    */
@@ -266,6 +277,19 @@ export function ReportBuilderView({
           >
             Tùy chỉnh cột
           </button>
+          {search.trim() && (
+            <span className="text-[11px] text-slate-500 self-center pb-1">
+              Đang lọc: {filteredItems.length}/{items.length} dòng
+            </span>
+          )}
+        </div>
+        <div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Tìm (Và: + · Hoặc: ;) — NCC, khách, hàng, xe, khu vực…"
+            className="w-full min-w-0 px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-sky-400 focus:outline-none"
+          />
         </div>
         <div>
           <div className="text-[11px] font-semibold text-slate-500 mb-1.5">
