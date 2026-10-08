@@ -542,7 +542,7 @@ export default function OrdersPage() {
       <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã đơn, NCC, trạng thái, user…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ; · Loại: <>) — mã đơn, NCC, trạng thái, user…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
           { key: "NEW", label: "Khởi tạo" },

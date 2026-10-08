@@ -401,7 +401,7 @@ export default function DeliveriesPage() {
 <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã GH, CT, khách, biển số, hàng…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ; · Loại: <>) — mã GH, CT, khách, biển số, hàng…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
           { key: "NEW", label: "Mới tạo" },

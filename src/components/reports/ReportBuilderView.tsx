@@ -287,7 +287,7 @@ export function ReportBuilderView({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Tìm (Và: + · Hoặc: ;) — NCC, khách, hàng, xe, khu vực…"
+            placeholder="Tìm (Và: + · Hoặc: ; · Loại: <>) — NCC, khách, hàng, xe, khu vực…"
             className="w-full min-w-0 px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-sky-400 focus:outline-none"
           />
         </div>

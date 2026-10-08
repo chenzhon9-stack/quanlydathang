@@ -30,7 +30,7 @@ type Props = {
 export function ListToolbar({
   search,
   onSearch,
-  searchPlaceholder = "Tìm (Và: khoảng trắng/+ · Hoặc: ;) — mã, tên…",
+  searchPlaceholder = "Tìm (Và: + · Hoặc: ; · Loại: <>) — mã, tên…",
   statuses,
   selectedStatuses,
   onToggleStatus,

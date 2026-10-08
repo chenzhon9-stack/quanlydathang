@@ -986,7 +986,7 @@ export default function DetailsPage() {
       <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã CT, đơn, xe, hàng, NCC, ghi chú…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ; · Loại: <>) — mã CT, đơn, xe, hàng, NCC, ghi chú…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
           { key: "NEW", label: "Mới tạo" },
