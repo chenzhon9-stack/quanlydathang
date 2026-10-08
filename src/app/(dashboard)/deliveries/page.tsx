@@ -120,6 +120,8 @@ export default function DeliveriesPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [modalTarget, setModalTarget] = useState<{
     delivery: Delivery;
     mode: DeliveryModalMode;
@@ -135,7 +137,7 @@ export default function DeliveriesPage() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>(null);
 
-  const pageSize = 100;
+  const [pageSize, setPageSize] = useState(100);
 
   const load = useCallback(async (p: number) => {
     const token = localStorage.getItem("token");
@@ -148,6 +150,8 @@ export default function DeliveriesPage() {
         page: String(p),
         pageSize: String(pageSize),
       });
+      if (fromDate) qs.set("fromDate", fromDate);
+      if (toDate) qs.set("toDate", toDate);
       const res = await fetch(`/api/v1/deliveries?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -168,7 +172,7 @@ export default function DeliveriesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageSize, fromDate, toDate]);
 
   useEffect(() => {
     load(1);
@@ -181,16 +185,20 @@ export default function DeliveriesPage() {
       const hay = [
         d.deliveryId,
         d.detailId,
+        d.orderId || "",
         d.customerId,
         d.customerName || "",
         d.customerDetail || "",
         d.deliveryDate || "",
         d.orderDate || "",
         d.vehiclePlate || "",
+        d.vehicleId || "",
         d.productName || "",
+        d.productId || "",
         String(d.detailStatus || ""),
         String(d.plannedQty),
         String(d.actualQty ?? ""),
+        d.note || "",
       ].join(" ");
       return matchSearch(hay, search);
     });
@@ -393,22 +401,32 @@ export default function DeliveriesPage() {
 <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm mã GH, CT, khách, biển số…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã GH, CT, khách, biển số, hàng…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
-          { key: "Mới tạo", label: "Mới tạo" },
-          { key: "Đặt hàng", label: "Đặt hàng" },
-          { key: "Đã nhận", label: "Đã nhận" },
-          { key: "Đang giao", label: "Đang giao" },
-          { key: "Hoàn thành", label: "Hoàn thành" },
-          { key: "Hủy xe", label: "Hủy xe" },
-          { key: "Xóa xe", label: "Xóa xe" },
+          { key: "NEW", label: "Mới tạo" },
+          { key: "ORDERED", label: "Đặt hàng" },
+          { key: "RECEIVED", label: "Đã nhận" },
+          { key: "DELIVERING", label: "Đang giao" },
+          { key: "DONE", label: "Hoàn thành" },
+          { key: "CANCEL", label: "Hủy xe" },
         ]}
         selectedStatuses={statuses}
         onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
         groupByDate={groupByDate}
         onGroupByDate={setGroupByDate}
-        countLabel={`${sortedFiltered?.length ?? filteredCols.length}/${items.length}`}
+        countLabel={`${filteredCols.length}/${items.length} · trang ${page}/${Math.max(1, Math.ceil(total / pageSize))} · tổng ${total}`}
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromDate={setFromDate}
+        onToDate={setToDate}
+        dateLabel="Ngày giao/đặt"
+        pageSize={pageSize}
+        onPageSize={(n) => {
+          setPageSize(n);
+          setPage(1);
+        }}
+        pageSizeOptions={[50, 100, 200]}
       />
 
       {err && (

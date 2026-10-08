@@ -384,7 +384,9 @@ export default function DetailsPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
-  const pageSize = 100;
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [pageSize, setPageSize] = useState(100);
 
   const [receiveTarget, setReceiveTarget] = useState<OrderDetail | null>(null);
   const [editTarget, setEditTarget] = useState<OrderDetail | null>(null);
@@ -422,6 +424,8 @@ export default function DetailsPage() {
         page: String(p),
         pageSize: String(pageSize),
       });
+      if (fromDate) qs.set("fromDate", fromDate);
+      if (toDate) qs.set("toDate", toDate);
       const res = await fetch(`/api/v1/order-details?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -441,7 +445,7 @@ export default function DetailsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageSize, fromDate, toDate]);
 
   useEffect(() => {
     load(1);
@@ -599,7 +603,12 @@ export default function DetailsPage() {
         d.orderDate,
         d.receivedDate || "",
         d.regionName || "",
+        d.regionId || "",
         d.note || "",
+        d.warehouse || "",
+        d.transportTypeName || "",
+        String(d.plannedQty ?? ""),
+        String(d.actualReceived ?? ""),
       ].join(" ");
       return matchSearch(hay, search);
     });
@@ -977,7 +986,7 @@ export default function DetailsPage() {
       <ListToolbar
         search={search}
         onSearch={setSearch}
-        searchPlaceholder="Tìm mã CT, đơn, xe, hàng…"
+        searchPlaceholder="Tìm (Và: + · Hoặc: ;) — mã CT, đơn, xe, hàng, NCC, ghi chú…"
         statuses={[
           { key: "ALL", label: "Tất cả" },
           { key: "NEW", label: "Mới tạo" },
@@ -991,7 +1000,18 @@ export default function DetailsPage() {
         onToggleStatus={(k) => setStatuses((s) => toggleStatus(s, k))}
         groupByDate={groupByDate}
         onGroupByDate={setGroupByDate}
-        countLabel={`${sortedFiltered.length}/${items.length}`}
+        countLabel={`${sortedFiltered.length}/${items.length} · trang ${page}/${Math.max(1, Math.ceil(total / pageSize))} · tổng ${total}`}
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromDate={setFromDate}
+        onToDate={setToDate}
+        dateLabel="Ngày đặt"
+        pageSize={pageSize}
+        onPageSize={(n) => {
+          setPageSize(n);
+          setPage(1);
+        }}
+        pageSizeOptions={[50, 100, 200]}
       />
 
       {err && (

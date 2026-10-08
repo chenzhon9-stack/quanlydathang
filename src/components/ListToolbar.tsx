@@ -15,21 +15,41 @@ type Props = {
   groupByDate: boolean;
   onGroupByDate: (v: boolean) => void;
   countLabel?: string;
+  /** Lọc khoảng ngày (yyyy-MM-dd) — tab Chi tiết / Giao hàng */
+  fromDate?: string;
+  toDate?: string;
+  onFromDate?: (v: string) => void;
+  onToDate?: (v: string) => void;
+  dateLabel?: string;
+  /** Phân trang client/server */
+  pageSize?: number;
+  onPageSize?: (n: number) => void;
+  pageSizeOptions?: number[];
 };
 
 export function ListToolbar({
   search,
   onSearch,
-  searchPlaceholder = "Tìm mã, tên, NCC, KH…",
+  searchPlaceholder = "Tìm (Và: khoảng trắng/+ · Hoặc: ;) — mã, tên…",
   statuses,
   selectedStatuses,
   onToggleStatus,
   groupByDate,
   onGroupByDate,
   countLabel,
+  fromDate,
+  toDate,
+  onFromDate,
+  onToDate,
+  dateLabel = "Theo ngày",
+  pageSize,
+  onPageSize,
+  pageSizeOptions = [50, 100, 200],
 }: Props) {
   const allOn =
     selectedStatuses.length === 0 || selectedStatuses.includes("ALL");
+  const showDate = typeof onFromDate === "function";
+  const showPageSize = typeof onPageSize === "function" && pageSize != null;
 
   return (
     <div className="space-y-2.5">
@@ -40,7 +60,7 @@ export function ListToolbar({
           placeholder={searchPlaceholder}
           className="flex-1 min-w-0 px-3.5 py-2.5 text-sm border border-slate-300 rounded-xl bg-white shadow-sm focus:ring-2 focus:ring-sky-400 focus:outline-none"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2.5 border border-slate-300 rounded-xl bg-white cursor-pointer select-none shadow-sm flex-1 sm:flex-none">
             <input
               type="checkbox"
@@ -57,6 +77,68 @@ export function ListToolbar({
           )}
         </div>
       </div>
+
+      {(showDate || showPageSize) && (
+        <div className="flex flex-wrap items-end gap-2">
+          {showDate && (
+            <>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                  {dateLabel} từ
+                </label>
+                <input
+                  type="date"
+                  value={fromDate || ""}
+                  onChange={(e) => onFromDate?.(e.target.value)}
+                  className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                  đến
+                </label>
+                <input
+                  type="date"
+                  value={toDate || ""}
+                  onChange={(e) => onToDate?.(e.target.value)}
+                  className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+                />
+              </div>
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onFromDate?.("");
+                    onToDate?.("");
+                  }}
+                  className="px-2.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-600"
+                >
+                  Xóa ngày
+                </button>
+              )}
+            </>
+          )}
+          {showPageSize && (
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                Dòng/trang
+              </label>
+              <select
+                value={pageSize}
+                onChange={(e) => onPageSize?.(Number(e.target.value))}
+                className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+              >
+                {pageSizeOptions.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="-mx-1 px-1 flex gap-1.5 overflow-x-auto pb-1">
         <button
           type="button"

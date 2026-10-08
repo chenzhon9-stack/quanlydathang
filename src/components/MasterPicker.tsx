@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { foldVn } from "@/lib/vn-search";
+import { foldVn, matchSearchVn } from "@/lib/vn-search";
 
 export type MasterType = "KH" | "HH" | "KV" | "XE" | "NCC" | "HTVT" | "DVT";
 
@@ -150,6 +150,8 @@ export function MasterPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [label, setLabel] = useState(displayName || value || "");
@@ -294,37 +296,76 @@ export function MasterPicker({
   }
 
   const filtered = useMemo(() => {
-    const s = foldVn(q);
-    if (!s) return items.slice(0, 150);
-    const parts = s.split(/\s+/).filter(Boolean);
+    if (!q.trim()) return items.slice(0, 150);
     return items
       .filter((it) => {
         const r = it.raw || {};
-        // Tìm trên mã + nhãn + toàn bộ field xe
-        const hay = foldVn(
-          [
-            it.id,
-            it.name,
-            r.BienSoXe,
-            r.BienSo,
-            r.SoMooc,
-            r.Tenlaixe,
-            r.Banglai,
-            r.Dienthoai,
-            r.DienThoai,
-            r.MaHTVT,
-            r.TenHTVT,
-            r.MaDVT,
-            r.TenDVT,
-            r.Ghichu,
-          ]
-            .filter(Boolean)
-            .join(" ")
-        );
-        return parts.every((p) => hay.includes(p));
+        const hay = [
+          it.id,
+          it.name,
+          r.BienSoXe,
+          r.BienSo,
+          r.SoMooc,
+          r.Tenlaixe,
+          r.Banglai,
+          r.Dienthoai,
+          r.DienThoai,
+          r.MaHTVT,
+          r.TenHTVT,
+          r.MaDVT,
+          r.TenDVT,
+          r.Ghichu,
+          r.TenKhachhang,
+          r.TenHangHoa,
+          r.TenNCC,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return matchSearchVn(hay, q);
       })
       .slice(0, 150);
   }, [items, q]);
+
+  // Reset highlight khi đổi query / danh sách
+  useEffect(() => {
+    setHighlightIdx(0);
+  }, [q, items]);
+
+  // Scroll item đang highlight vào vùng nhìn thấy
+  useEffect(() => {
+    if (!open) return;
+    const root = listRef.current;
+    if (!root) return;
+    const el = root.querySelector(`[data-picker-idx="${highlightIdx}"]`);
+    if (el && "scrollIntoView" in el) {
+      (el as HTMLElement).scrollIntoView({ block: "nearest" });
+    }
+  }, [highlightIdx, open, filtered]);
+
+  function pickItem(it: Item) {
+    const closed = closedNameFor(type, it.id, it.name, it.raw);
+    onChange(it.id, closed, it.raw);
+    setLabel(closed);
+    close();
+  }
+
+  function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!filtered.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIdx((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const it = filtered[highlightIdx] || filtered[0];
+      if (it) pickItem(it);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  }
 
   function close() {
     setOpen(false);
@@ -696,7 +737,8 @@ export function MasterPicker({
                   autoFocus
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Tìm kiếm…"
+                  onKeyDown={onSearchKeyDown}
+                  placeholder="Tìm kiếm… (↑↓ chọn · Enter)"
                   className="w-full px-3 py-2.5 text-base sm:text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-400"
                 />
                 {canQuick && (
@@ -721,7 +763,7 @@ export function MasterPicker({
               </div>
 
               {/* List */}
-              <div className="overflow-y-auto flex-1 overscroll-contain">
+              <div ref={listRef} className="overflow-y-auto flex-1 overscroll-contain">
                 {loading ? (
                   <div className="text-center text-slate-400 text-sm py-10">
                     Đang tải danh mục…
@@ -735,14 +777,10 @@ export function MasterPicker({
                         : "Không có dữ liệu"}
                   </div>
                 ) : (
-                  filtered.map((it) => {
+                  filtered.map((it, idx) => {
                     const r = it.raw || {};
-                    const pick = () => {
-                      const closed = closedNameFor(type, it.id, it.name, it.raw);
-                      onChange(it.id, closed, it.raw);
-                      setLabel(closed);
-                      close();
-                    };
+                    const isHi = idx === highlightIdx;
+                    const pick = () => pickItem(it);
                     if (type === "XE") {
                       const plate = xeDisplayPlate(r, it.id);
                       const laiXe = String(r.Tenlaixe || "").trim();
@@ -755,9 +793,9 @@ export function MasterPicker({
                       const mooc = String(r.SoMooc || "").trim();
                       return (
                         <button
-                          key={it.id}
+                          key={it.id} data-picker-idx={idx} data-hi={isHi ? 1 : 0}
                           type="button"
-                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 hover:bg-sky-50 ${
+                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 ${isHi ? "bg-sky-100 ring-1 ring-inset ring-sky-300" : "hover:bg-sky-50"} ${
                             it.id === value ? "bg-sky-50" : ""
                           }`}
                           onClick={pick}
@@ -806,9 +844,9 @@ export function MasterPicker({
                             : String(r.TenNCC || r.TenNcc || it.id).trim();
                       return (
                         <button
-                          key={it.id}
+                          key={it.id} data-picker-idx={idx} data-hi={isHi ? 1 : 0}
                           type="button"
-                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 hover:bg-sky-50 ${
+                          className={`w-full text-left px-4 py-3 border-b border-slate-100 active:bg-sky-50 ${isHi ? "bg-sky-100 ring-1 ring-inset ring-sky-300" : "hover:bg-sky-50"} ${
                             it.id === value ? "bg-sky-50" : ""
                           }`}
                           onClick={pick}
@@ -830,9 +868,9 @@ export function MasterPicker({
                     }
                     return (
                       <button
-                        key={it.id}
+                        key={it.id} data-picker-idx={idx} data-hi={isHi ? 1 : 0}
                         type="button"
-                        className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 hover:bg-sky-50 ${
+                        className={`w-full text-left px-4 py-3 border-b border-slate-50 active:bg-sky-50 ${isHi ? "bg-sky-100 ring-1 ring-inset ring-sky-300" : "hover:bg-sky-50"} ${
                           it.id === value ? "bg-sky-50" : ""
                         }`}
                         onClick={pick}

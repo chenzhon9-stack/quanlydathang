@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { matchSearchVn } from "@/lib/vn-search";
 
 const TYPES = [
   { key: "NCC", label: "Nhà cung cấp" },
@@ -256,13 +257,12 @@ export default function MastersPage() {
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
     if (!qq) return items;
-    return items.filter((row) =>
-      Object.values(row).some((v) =>
-        String(v ?? "")
-          .toLowerCase()
-          .includes(qq)
-      )
-    );
+    return items.filter((row) => {
+      const hay = Object.values(row)
+        .map((v) => String(v ?? ""))
+        .join(" ");
+      return matchSearchVn(hay, q);
+    });
   }, [items, q]);
 
   const displayCols = schema?.displayFields?.length
@@ -313,7 +313,7 @@ export default function MastersPage() {
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Tìm trong danh mục…"
+          placeholder="Tìm (Và/Hoặc ;)  trong danh mục…"
           className="flex-1 min-w-[12rem] max-w-sm px-3 py-2 text-sm border border-slate-200 rounded-lg"
         />
         <button
