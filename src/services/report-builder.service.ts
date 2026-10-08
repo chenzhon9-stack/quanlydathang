@@ -17,6 +17,7 @@ import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { isExcludedDetailStatus } from "@/lib/reports/exclude-detail";
+import { ymdDate } from "@/lib/sheets/date";
 import {
   dynamicGroupBy,
   applyDynamicSort,
@@ -159,7 +160,7 @@ export class ReportBuilderService {
     result = applyDynamicSort(result, sortBy, sortOrder);
 
     const page = Math.max(1, params.page ?? 1);
-    const pageSize = Math.min(200, Math.max(1, params.pageSize ?? 100));
+    const pageSize = Math.min(500, Math.max(1, params.pageSize ?? 100));
     const total = result.length;
     const start = (page - 1) * pageSize;
     const items = result.slice(start, start + pageSize);
@@ -193,14 +194,29 @@ export class ReportBuilderService {
   }
 
   private static async yearsFor(params: ReportBuilderParams): Promise<number[]> {
-    if (params.fromDate && params.toDate) {
-      const y1 = Number(params.fromDate.slice(0, 4));
-      const y2 = Number(params.toDate.slice(0, 4));
+    const from = ymdDate(params.fromDate || "");
+    const to = ymdDate(params.toDate || "");
+    if (from && to) {
+      const y1 = Number(from.slice(0, 4));
+      const y2 = Number(to.slice(0, 4));
       const ys: number[] = [];
-      for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) ys.push(y);
+      if (Number.isFinite(y1) && Number.isFinite(y2)) {
+        for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) ys.push(y);
+      }
       return ys.length ? ys : [new Date().getFullYear()];
     }
     return [params.year ?? new Date().getFullYear()];
+  }
+
+  /** Chuẩn hóa khoảng ngày lọc — parity V21 _paramDateStartMs_/_paramDateEndMs_ (so sánh yyyy-MM-dd). */
+  private static dateRange(params: ReportBuilderParams): {
+    from: string;
+    to: string;
+  } {
+    return {
+      from: ymdDate(params.fromDate || "") || "",
+      to: ymdDate(params.toDate || "") || "",
+    };
   }
 
   private static async buildThucNhan(
@@ -232,13 +248,14 @@ export class ReportBuilderService {
       loadHhPhanLoai(),
     ]);
 
+    const { from, to } = this.dateRange(params);
     const rows: Record<string, unknown>[] = [];
     for (const d of details) {
-      const dt = (d.receivedDate || "").slice(0, 10);
-      // Bắt buộc có ngày nhận khi lọc kỳ — parity dashboard volume
+      const dt = ymdDate(d.receivedDate || "") || "";
+      // V21 + volume: bắt buộc có ngày nhận
       if (!dt) continue;
-      if (params.fromDate && dt < params.fromDate) continue;
-      if (params.toDate && dt > params.toDate) continue;
+      if (from && dt < from) continue;
+      if (to && dt > to) continue;
       if (params.filters?.ncc?.length && !params.filters.ncc.includes(d.supplierId))
         continue;
       if (
@@ -332,32 +349,61 @@ export class ReportBuilderService {
       loadHhPhanLoai(),
     ]);
 
+    const { from, to } = this.dateRange(params);
     const rows: Record<string, unknown>[] = [];
     for (const g of dels) {
-      const dt = g.deliveryDate || "";
-      if (params.fromDate && dt && dt < params.fromDate) continue;
-      if (params.toDate && dt && dt > params.toDate) continue;
+      // V21: bắt buộc có Ngaygiao hợp lệ — thiếu ngày thì BỎ (không lọt vào tổng)
+      const dt = ymdDate(g.deliveryDate || "") || "";
+      if (!dt) continue;
+      if (from && dt < from) continue;
+      if (to && dt > to) continue;
 
+      // V21: phải có CT; bỏ CT Xóa xe / Hủy xe
       const ct = detMap.get(g.detailId);
-      const productId = ct?.productId || "";
-      const vehicleId = ct?.vehicleId || "";
+      if (!ct || !ct.detailId) continue;
+      if (isExcludedDetailStatus(ct.status)) continue;
+
+      const productId = ct.productId || "";
+      const vehicleId = ct.vehicleId || "";
       const xe = xeExtra[vehicleId] || {
         plate: vehicleId,
-        maHTVT: ct?.transportTypeId || "",
-        tenHTVT: ct?.transportTypeName || "",
+        maHTVT: ct.transportTypeId || "",
+        tenHTVT: ct.transportTypeName || "",
         maDVT: "",
         tenDVT: "",
       };
-      const pl = classifyPhanLoai(ct?.phanLoai || plMap[productId] || "");
+      const pl = classifyPhanLoai(ct.phanLoai || plMap[productId] || "");
 
       if (
         params.filters?.hangHoa?.length &&
         !params.filters.hangHoa.includes(productId)
       )
         continue;
+      if (
+        params.filters?.phanLoai?.length &&
+        !params.filters.phanLoai.includes(pl)
+      )
+        continue;
+      if (
+        params.filters?.htvt?.length &&
+        !params.filters.htvt.includes(xe.maHTVT)
+      )
+        continue;
+      if (
+        params.filters?.ncc?.length &&
+        !params.filters.ncc.includes(ct.supplierId || "")
+      )
+        continue;
+
+      // Tên KH: TenKhachhang + ChitietKh (parity V21 _fullCustomerName)
+      const tenKh = khMap[g.customerId] || g.customerId || "";
+      const chiTiet = String(g.customerDetail || "").trim();
+      const khachHang = chiTiet
+        ? `${tenKh} - ${chiTiet}`
+        : g.customerName || tenKh || g.customerId;
 
       rows.push({
-        khachHang: g.customerName || khMap[g.customerId] || g.customerId,
+        khachHang,
         MaKh: g.customerId,
         hangHoa: hhMap[productId] || productId || "—",
         MaHH: productId,
@@ -369,7 +415,7 @@ export class ReportBuilderService {
         xe: xe.plate || vehicleId || "—",
         MaXe: vehicleId,
         ngayGiao: dt,
-        thucGiao: g.actualQty || 0,
+        thucGiao: Number(g.actualQty) || 0,
         soChuyenGiao: 1,
       });
     }
@@ -416,11 +462,16 @@ export class ReportBuilderService {
       MasterRepository.nccNames(),
     ]);
 
+    const { from, to } = this.dateRange(params);
     const rows: Record<string, unknown>[] = [];
     for (const g of dels) {
-      const dt = g.deliveryDate || "";
-      if (params.fromDate && dt && dt < params.fromDate) continue;
-      if (params.toDate && dt && dt > params.toDate) continue;
+      const dt = ymdDate(g.deliveryDate || "") || "";
+      // Giao-nhận: vẫn hiện kế hoạch (có thể chưa có ngày) — nhưng khi lọc kỳ thì bắt buộc ngày
+      if (from || to) {
+        if (!dt) continue;
+        if (from && dt < from) continue;
+        if (to && dt > to) continue;
+      }
       const ct = detMap.get(g.detailId);
       if (ct && isExcludedDetailStatus(ct.status)) continue;
       const vehicleId = ct?.vehicleId || "";
@@ -542,11 +593,16 @@ export class ReportBuilderService {
       loadXeExtra(),
     ]);
 
+    const { from, to } = this.dateRange(params);
     const rows: Record<string, unknown>[] = [];
     for (const g of dels) {
-      const dt = g.deliveryDate || "";
-      if (params.fromDate && dt && dt < params.fromDate) continue;
-      if (params.toDate && dt && dt > params.toDate) continue;
+      const dt = ymdDate(g.deliveryDate || "") || "";
+      // Giao-nhận: vẫn hiện kế hoạch (có thể chưa có ngày) — nhưng khi lọc kỳ thì bắt buộc ngày
+      if (from || to) {
+        if (!dt) continue;
+        if (from && dt < from) continue;
+        if (to && dt > to) continue;
+      }
       const ct = detMap.get(g.detailId);
       if (ct && isExcludedDetailStatus(ct.status)) continue;
       const vehicleId = ct?.vehicleId || "";

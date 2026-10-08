@@ -72,7 +72,7 @@ export function ReportBuilderView({
           toDate,
           groupBy: groupBy.join(","),
           page: String(p),
-          pageSize: "100",
+          pageSize: "500",
         });
         const res = await fetch(`/api/v1/reports/builder?${qs}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -139,23 +139,34 @@ export function ReportBuilderView({
     colState || loadColumnState(tabKey, allCols);
   const visibleColDefs = resolveColumns(allCols, effectiveColState);
 
+  // Cột tiêu chí (dimension) đứng trước — cột tính toán (measure) đứng sau (parity V21)
   const displayCols: {
     key: string;
     header: string;
     isMeasure: boolean;
     format?: "int" | "num" | string;
-  }[] = visibleColDefs.map((c) => {
-    const m = schema.measures.find((x) => x.key === c.key);
-    if (m) {
-      return {
-        key: c.key,
-        header: c.label,
-        isMeasure: true as const,
-        format: m.format as "int" | "num" | string | undefined,
-      };
-    }
-    return { key: c.key, header: c.label, isMeasure: false as const };
-  });
+  }[] = (() => {
+    const mapped = visibleColDefs.map((c) => {
+      const m = schema.measures.find((x) => x.key === c.key);
+      if (m) {
+        return {
+          key: c.key,
+          header: c.label,
+          isMeasure: true as const,
+          format: m.format as "int" | "num" | string | undefined,
+        };
+      }
+      return { key: c.key, header: c.label, isMeasure: false as const };
+    });
+    const dims = mapped.filter((c) => !c.isMeasure);
+    const measures = mapped.filter((c) => c.isMeasure);
+    return [...dims, ...measures];
+  })();
+
+  const hasClientFilter = useMemo(
+    () => Object.values(valFilters).some((v) => v && v.length > 0),
+    [valFilters]
+  );
 
   const filteredItems = useMemo(() => {
     let rows = items.filter((row) => {
@@ -173,6 +184,24 @@ export function ReportBuilderView({
     }
     return rows;
   }, [items, valFilters, sortKey, sortDir]);
+
+  /**
+   * Tổng footer:
+   * - Có lọc cột (client): tính lại từ filteredItems (parity UX GAS — tổng khớp dòng đang xem).
+   * - Không lọc: dùng totals API (toàn bộ nhóm sau groupBy, không chỉ trang hiện tại).
+   * Lưu ý: lọc header chỉ áp trên items của trang hiện tại (pageSize) — khác GAS lọc full dataset.
+   */
+  const displayTotals = useMemo(() => {
+    if (!hasClientFilter) return totals;
+    const out: Record<string, number> = {};
+    for (const m of schema.measures) {
+      out[m.key] = filteredItems.reduce(
+        (s, r) => s + (Number(r[m.key]) || 0),
+        0
+      );
+    }
+    return out;
+  }, [hasClientFilter, totals, filteredItems, schema.measures]);
 
   const colUnique = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -344,9 +373,9 @@ export function ReportBuilderView({
                         }`}
                       >
                         {i === 0
-                          ? "Tổng"
+                          ? (hasClientFilter ? "Tổng (đang lọc)" : "Tổng")
                           : c.isMeasure
-                            ? fmtNum(totals[c.key], c.format === "int" ? 0 : 2)
+                            ? fmtNum(displayTotals[c.key], c.format === "int" ? 0 : 2)
                             : ""}
                       </td>
                     ))}
