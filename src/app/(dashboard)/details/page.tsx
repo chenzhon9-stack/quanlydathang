@@ -607,7 +607,7 @@ export default function DetailsPage() {
         d.note || "",
         d.warehouse || "",
         d.transportTypeName || "",
-        String(d.plannedQty ?? ""),
+        String(d.quantity ?? ""),
         String(d.actualReceived ?? ""),
       ].join(" ");
       return matchSearch(hay, search);
