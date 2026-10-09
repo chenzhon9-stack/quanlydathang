@@ -15,6 +15,10 @@ export function DecimalInput({
   disabled,
   className,
   min,
+  onKeyDown,
+  id,
+  "data-row": dataRow,
+  "data-field": dataField,
 }: {
   /** Chuỗi hiển thị (khuyến nghị parent giữ string có dấu phẩy) */
   value: string;
@@ -23,6 +27,10 @@ export function DecimalInput({
   disabled?: boolean;
   className?: string;
   min?: number;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  id?: string;
+  "data-row"?: number | string;
+  "data-field"?: string;
 }) {
   const [focused, setFocused] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -94,9 +102,12 @@ export function DecimalInput({
 
   return (
     <input
+      id={id}
+      data-row={dataRow}
+      data-field={dataField}
       type="text"
       inputMode="decimal"
-      enterKeyHint="done"
+      enterKeyHint="next"
       autoComplete="off"
       disabled={disabled}
       placeholder={placeholder ?? "0"}
@@ -109,6 +120,7 @@ export function DecimalInput({
       }}
       onBlur={handleBlur}
       onChange={(e) => handleChange(e.target.value)}
+      onKeyDown={onKeyDown}
       className={
         className ||
         "w-full px-2 py-2 text-sm border border-slate-300 rounded-lg tabular-nums text-center"

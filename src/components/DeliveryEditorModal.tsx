@@ -51,11 +51,18 @@ function ModalShell({
         onClose();
         return;
       }
-      if (e.key !== "Enter") return;
       if (submitDisabled || !onSubmit) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Lưu: Shift+S hoặc Ctrl/Cmd+Enter — KHÔNG Enter thường (tránh lưu khi đang nhập)
+      const isShiftS =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "S" || e.key === "s");
+      const isCtrlEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+      if (isShiftS || isCtrlEnter) {
         e.preventDefault();
         onSubmit();
       }
@@ -387,11 +394,11 @@ export function DeliveryEditorModal({
             disabled={busy || loading}
             onClick={mode === "real" ? submitReal : submitPlan}
             className="w-full py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-sm disabled:opacity-50"
-            title="Enter hoặc Ctrl+Enter"
+            title="Shift+S hoặc Ctrl+Enter"
           >
             {busy ? "Đang lưu…" : "LƯU"}
             {!busy && !loading && (
-              <span className="ml-2 text-[11px] font-semibold opacity-80">↵</span>
+              <span className="ml-2 text-[11px] font-semibold opacity-80">⇧S</span>
             )}
           </button>
         )
@@ -567,6 +574,8 @@ export function DeliveryEditorModal({
                     return (
                       <>
                         <DecimalInput
+                          data-row={idx}
+                          data-field="actualQty"
                           value={
                             qtyDisp[`a-${idx}`] ??
                             formatDecimalVN(r.actualQty)
@@ -576,6 +585,21 @@ export function DeliveryEditorModal({
                               ? "border-red-400 bg-red-50 focus:ring-red-300"
                               : undefined
                           }
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
+                            const next = document.querySelector<HTMLInputElement>(
+                              `input[data-delivery-date="${idx}"]`
+                            );
+                            if (next) {
+                              next.focus();
+                              try {
+                                next.showPicker?.();
+                              } catch {
+                                /* ignore */
+                              }
+                            }
+                          }}
                           onValueChange={(display, num) => {
                             setQtyDisp((d) => ({
                               ...d,
@@ -620,6 +644,7 @@ export function DeliveryEditorModal({
                       <>
                         <input
                           type="date"
+                          data-delivery-date={idx}
                           value={r.deliveryDate || ""}
                           min={bounds.min || undefined}
                           max={bounds.max}
