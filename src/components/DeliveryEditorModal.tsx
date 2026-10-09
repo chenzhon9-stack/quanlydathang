@@ -479,6 +479,7 @@ export function DeliveryEditorModal({
                       displayName={
                         r.customerName || r.customerId
                       }
+                      autoFocus={mode === "real" && idx === 0}
                       onChange={(id, name) => {
                         setRows((prev) =>
                           prev.map((x, i) =>

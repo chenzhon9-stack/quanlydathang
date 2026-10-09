@@ -134,6 +134,8 @@ export function MasterPicker({
   /** Tên HTVT/ĐVT để hiển thị khóa trên form thêm xe (V21) */
   htvtName,
   dvtName,
+  /** Focus nút chọn khi mount (vd. modal giao hàng → ô KH) */
+  autoFocus,
 }: {
   type: MasterType;
   value: string;
@@ -147,6 +149,7 @@ export function MasterPicker({
   dvtId?: string;
   htvtName?: string;
   dvtName?: string;
+  autoFocus?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -154,6 +157,15 @@ export function MasterPicker({
   const panelRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Focus ô picker khi modal cha mở (giao hàng thực tế → KH)
+  useEffect(() => {
+    if (!autoFocus || disabled) return;
+    const id = requestAnimationFrame(() => {
+      triggerRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus, disabled]);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [label, setLabel] = useState(displayName || value || "");
