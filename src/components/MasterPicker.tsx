@@ -208,7 +208,6 @@ export function MasterPicker({
   // ESC đóng + focus trap (Tab không nhảy ra tab đơn hàng phía dưới)
   useEffect(() => {
     if (!open) return;
-    const panel = panelRef.current;
 
     function focusables(): HTMLElement[] {
       if (!panelRef.current) return [];
