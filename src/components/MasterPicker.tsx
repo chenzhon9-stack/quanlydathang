@@ -152,6 +152,7 @@ export function MasterPicker({
   const [q, setQ] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
@@ -231,8 +232,7 @@ export function MasterPicker({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        setOpen(false);
-        setQ("");
+        close({ focus: "trigger" });
         return;
       }
       if (e.key !== "Tab") return;
@@ -394,7 +394,7 @@ export function MasterPicker({
     const closed = closedNameFor(type, it.id, it.name, it.raw);
     onChange(it.id, closed, it.raw);
     setLabel(closed);
-    close();
+    close({ focus: "next" });
   }
 
   function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -415,11 +415,40 @@ export function MasterPicker({
     }
   }
 
-  function close() {
+  /** Đóng picker; focus: trigger | next field trong modal cha | none */
+  function close(opts?: { focus?: "trigger" | "next" | "none" }) {
+    const mode = opts?.focus ?? "trigger";
     setOpen(false);
     setQ("");
     setQuickOpen(false);
     setQuickErr(null);
+    // Portal unmount → browser hay nhảy focus sang sidebar; khôi phục trong modal cha
+    requestAnimationFrame(() => {
+      const btn = triggerRef.current;
+      if (!btn || mode === "none") return;
+      if (mode === "trigger") {
+        btn.focus();
+        return;
+      }
+      // mode === "next": ô/field kế tiếp trong dialog cha (CreateOrder / OrderManage…)
+      const root =
+        (btn.closest('[role="dialog"]') as HTMLElement | null) ||
+        (btn.closest(".fixed.inset-0") as HTMLElement | null) ||
+        document.body;
+      const sel =
+        'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+      const list = Array.from(root.querySelectorAll<HTMLElement>(sel)).filter(
+        (el) =>
+          el.offsetParent !== null &&
+          !el.closest("[data-master-picker-portal]")
+      );
+      const idx = list.indexOf(btn);
+      if (idx >= 0 && idx < list.length - 1) {
+        list[idx + 1].focus();
+      } else {
+        btn.focus();
+      }
+    });
   }
 
   async function openPicker() {
@@ -539,7 +568,7 @@ export function MasterPicker({
       onChange(data.id, closed, data.raw);
       setLabel(closed);
       resetQuickForm();
-      close();
+      close({ focus: "next" });
     } catch (e: unknown) {
       setQuickErr((e as Error).message || "Lỗi mạng");
     } finally {
@@ -553,9 +582,10 @@ export function MasterPicker({
     mounted &&
     createPortal(
       <div
+        data-master-picker-portal
         className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4"
         onClick={(e) => {
-          if (e.target === e.currentTarget) close();
+          if (e.target === e.currentTarget) close({ focus: "trigger" });
         }}
         role="dialog"
         aria-modal="true"
@@ -961,6 +991,7 @@ export function MasterPicker({
   return (
     <div className="relative w-full">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={openPicker}
