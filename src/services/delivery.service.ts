@@ -57,9 +57,11 @@ export class DeliveryService {
       };
     }
 
-    let rows = await DeliveryRepository.findMany(filter);
+    // Không lọc from/to ở repo theo Ngaygiao — UI lọc theo Ngày đặt lệnh (CT.NgayDatHang).
+    const { fromDate, toDate, ...repoFilter } = filter;
+    let rows = await DeliveryRepository.findMany(repoFilter);
 
-    // Enrich trước để có orderId từ CT (GH không có MaDon)
+    // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
     const year = filter.year ?? currentYearVN();
     const [khMap, xeMap, hhMap, details] = await Promise.all([
       MasterRepository.khNames(),
@@ -90,7 +92,7 @@ export class DeliveryService {
         ...d,
         customerName:
           d.customerName || khMap[d.customerId] || d.customerId,
-        orderDate: d.orderDate || ct?.orderDate || d.deliveryDate,
+        orderDate: d.orderDate || ct?.orderDate || "",
         vehicleId: d.vehicleId || ct?.vehicleId,
         vehiclePlate:
           d.vehiclePlate ||
@@ -108,6 +110,29 @@ export class DeliveryService {
         orderId: d.orderId || ct?.orderId || undefined,
       };
     });
+
+    // Loại xe đã xóa (CT.TrangThaiXe = Xóa xe / DELETE) — vẫn giữ Hủy xe
+    rows = rows.filter((d) => {
+      const st = String(d.detailStatus || "").trim().toUpperCase();
+      if (!st) return true;
+      if (st === "DELETE" || st === "XÓA XE" || st === "XOA XE") return false;
+      if (st.includes("XÓA") || st.includes("XOA XE")) return false;
+      return true;
+    });
+
+    // Lọc khoảng ngày đặt lệnh (yyyy-MM-dd), inclusive
+    const from = (fromDate || "").slice(0, 10);
+    const to = (toDate || "").slice(0, 10);
+    if (from || to) {
+      rows = rows.filter((d) => {
+        const od = String(d.orderDate || "").slice(0, 10);
+        // Không có ngày đặt → không vào khoảng (tránh lẫn dữ liệu lệch mục tiêu)
+        if (!od || od.length < 10) return false;
+        if (from && od < from) return false;
+        if (to && od > to) return false;
+        return true;
+      });
+    }
 
     // PDF FileDonhang theo MaDon
     try {
@@ -142,7 +167,7 @@ export class DeliveryService {
     });
 
     const page = Math.max(1, filter.page ?? 1);
-    const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
+    const pageSize = Math.min(500, Math.max(1, filter.pageSize ?? 100));
     const total = rows.length;
     const start = (page - 1) * pageSize;
     const items = rows.slice(start, start + pageSize);

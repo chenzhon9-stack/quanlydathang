@@ -422,7 +422,7 @@ export default function DeliveriesPage() {
         toDate={toDate}
         onFromDate={setFromDate}
         onToDate={setToDate}
-        dateLabel="Ngày giao/đặt"
+        dateLabel="Ngày đặt"
         pageSize={pageSize}
         onPageSize={(n) => {
           setPageSize(n);
