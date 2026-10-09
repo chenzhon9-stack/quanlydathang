@@ -29,6 +29,21 @@ export function todayYmdVN(d = new Date()): string {
   return ymdInTz(d);
 }
 
+/** yyyy-MM-dd cách đây N ngày (theo lịch HCM) */
+export function daysAgoYmdVN(days: number, d = new Date()): string {
+  const t = new Date(d.getTime());
+  t.setDate(t.getDate() - Math.max(0, days | 0));
+  return ymdInTz(t);
+}
+
+/**
+ * Khoảng ngày mặc định list tab Đơn hàng / Chi tiết / Giao hàng:
+ * từ = hôm nay − 90 ngày, đến = hôm nay.
+ */
+export function defaultListDateRange(daysBack = 90): { from: string; to: string } {
+  return { from: daysAgoYmdVN(daysBack), to: todayYmdVN() };
+}
+
 /** Năm lịch hiện tại theo HCM */
 export function currentYearVN(d = new Date()): number {
   return Number(ymdInTz(d).slice(0, 4));

@@ -18,6 +18,7 @@ import { CreateOrderModal } from "@/components/CreateOrderModal";
 import { AddDetailModal } from "@/components/AddDetailModal";
 import { OrderManageModal } from "@/components/OrderManageModal";
 import {
+import { defaultListDateRange } from "@/lib/sheets/date";
   SendActionModal,
   type SendAction,
 } from "@/components/SendActionModal";
@@ -305,6 +306,9 @@ export default function OrdersPage() {
     if (q) setSearch(q);
   }, []);
   const [groupByDate, setGroupByDate] = useState(true);
+  const dateRange0 = defaultListDateRange(90);
+  const [fromDate, setFromDate] = useState(dateRange0.from);
+  const [toDate, setToDate] = useState(dateRange0.to);
   const [orders, setOrders] = useState<Order[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -330,10 +334,12 @@ export default function OrdersPage() {
     setErr(null);
     try {
       const qs = new URLSearchParams({
-        year: "2026",
+        year: String(new Date().getFullYear()),
         page: "1",
-        pageSize: "100",
+        pageSize: "200",
       });
+      if (fromDate) qs.set("fromDate", fromDate);
+      if (toDate) qs.set("toDate", toDate);
 
       const res = await fetch(`/api/v1/orders?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -354,7 +360,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fromDate, toDate]);
 
   const handleNeedSendAction = useCallback(
     (payload: {
@@ -555,6 +561,11 @@ export default function OrdersPage() {
         groupByDate={groupByDate}
         onGroupByDate={setGroupByDate}
         countLabel={`${filtered.length}/${orders.length} đơn`}
+        fromDate={fromDate}
+        toDate={toDate}
+        onFromDate={setFromDate}
+        onToDate={setToDate}
+        dateLabel="Ngày đặt"
       />
 
       {err && (

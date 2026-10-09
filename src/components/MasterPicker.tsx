@@ -151,6 +151,7 @@ export function MasterPicker({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(0);
+  const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
@@ -204,18 +205,66 @@ export function MasterPicker({
     };
   }, [open]);
 
-  // ESC đóng
+  // ESC đóng + focus trap (Tab không nhảy ra tab đơn hàng phía dưới)
   useEffect(() => {
     if (!open) return;
+    const panel = panelRef.current;
+
+    function focusables(): HTMLElement[] {
+      if (!panelRef.current) return [];
+      const sel =
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+      return Array.from(panelRef.current.querySelectorAll<HTMLElement>(sel)).filter(
+        (el) => !el.hasAttribute("disabled") && el.tabIndex !== -1 && el.offsetParent !== null
+      );
+    }
+
+    // Focus ô tìm / phần tử đầu khi mở
+    const t = window.setTimeout(() => {
+      const list = focusables();
+      const prefer =
+        panelRef.current?.querySelector<HTMLElement>("input[autofocus], input") ||
+        list[0];
+      prefer?.focus();
+    }, 0);
+
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
         setOpen(false);
         setQ("");
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const list = focusables();
+      if (!list.length) {
+        e.preventDefault();
+        return;
+      }
+      const first = list[0];
+      const last = list[list.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey) {
+        if (!active || active === first || !panelRef.current?.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (!active || active === last || !panelRef.current?.contains(active)) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+
+    // capture phase để chặn Tab trước khi bubble ra document/tab phía dưới
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, quickOpen]);
 
   async function load() {
     const cacheKey = `${type}|${supplierId || ""}|${htvtId || ""}|${dvtId || ""}`;
@@ -515,6 +564,7 @@ export function MasterPicker({
       >
         {/* Panel: mobile gần full-height từ dưới; desktop card giữa */}
         <div
+          ref={panelRef}
           className="
             w-full sm:max-w-md
             bg-white shadow-2xl

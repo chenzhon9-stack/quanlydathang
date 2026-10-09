@@ -41,6 +41,7 @@ import {
 } from "@/lib/column-prefs";
 import { DETAILS_COLUMN_DEFS } from "@/lib/column-definitions";
 import type { Delivery, OrderDetail } from "@/types";
+import { defaultListDateRange } from "@/lib/sheets/date";
 
 
 const DETAIL_COLUMNS = DETAILS_COLUMN_DEFS;
@@ -384,8 +385,9 @@ export default function DetailsPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const dateRange0 = defaultListDateRange(90);
+  const [fromDate, setFromDate] = useState(dateRange0.from);
+  const [toDate, setToDate] = useState(dateRange0.to);
   const [pageSize, setPageSize] = useState(100);
 
   const [receiveTarget, setReceiveTarget] = useState<OrderDetail | null>(null);

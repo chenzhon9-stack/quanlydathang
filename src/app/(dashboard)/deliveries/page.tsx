@@ -28,6 +28,7 @@ import {
 import { DELIVERY_COLUMN_DEFS } from "@/lib/column-definitions";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import {
+import { defaultListDateRange } from "@/lib/sheets/date";
   DeliveryEditorModal,
   summaryFromDelivery,
   type DeliveryModalMode,
@@ -120,8 +121,9 @@ export default function DeliveriesPage() {
   const [statuses, setStatuses] = useState<string[]>(["ALL"]);
   const [search, setSearch] = useState("");
   const [groupByDate, setGroupByDate] = useState(true);
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const dateRange0 = defaultListDateRange(90);
+  const [fromDate, setFromDate] = useState(dateRange0.from);
+  const [toDate, setToDate] = useState(dateRange0.to);
   const [modalTarget, setModalTarget] = useState<{
     delivery: Delivery;
     mode: DeliveryModalMode;
