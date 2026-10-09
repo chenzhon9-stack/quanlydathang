@@ -91,13 +91,39 @@ function ModalShell({
   children,
   footer,
   wide,
+  onSubmit,
+  submitDisabled,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
   wide?: boolean;
+  /** Enter / Ctrl+Enter → xác nhận (không áp khi đang gõ textarea) */
+  onSubmit?: () => void;
+  submitDisabled?: boolean;
 }) {
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Enter") return;
+      if (submitDisabled || !onSubmit) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Enter hoặc Ctrl/Cmd+Enter
+      if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+        e.preventDefault();
+        onSubmit();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, onSubmit, submitDisabled]);
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-3"
@@ -1437,14 +1463,24 @@ export default function DetailsPage() {
         <ModalShell
           title="Nhận hàng"
           onClose={() => !busy && setReceiveTarget(null)}
+          onSubmit={() => {
+            if (!busy) void submitReceive();
+          }}
+          submitDisabled={busy}
           footer={
             <button
               type="button"
               disabled={busy}
               onClick={submitReceive}
               className={primaryBtn}
+              title="Enter hoặc Ctrl+Enter"
             >
               {busy ? "Đang lưu…" : "XÁC NHẬN"}
+              {!busy && (
+                <span className="ml-2 text-[11px] font-semibold opacity-80">
+                  ↵
+                </span>
+              )}
             </button>
           }
         >

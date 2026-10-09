@@ -619,7 +619,7 @@ export function MasterPicker({
                 if (quickOpen) {
                   setQuickOpen(false);
                   resetQuickForm();
-                } else close();
+                } else close({ focus: "trigger" });
               }}
               className="text-white/90 hover:text-white text-xl leading-none px-1"
               aria-label="Đóng"
@@ -975,7 +975,7 @@ export function MasterPicker({
               <div className="p-3 border-t border-slate-100 shrink-0">
                 <button
                   type="button"
-                  onClick={close}
+                  onClick={() => close({ focus: "trigger" })}
                   className="w-full py-2.5 text-sm font-medium rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50"
                 >
                   Đóng

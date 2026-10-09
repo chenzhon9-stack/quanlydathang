@@ -54,11 +54,23 @@ export function ActionPrompt({
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape" && !busy) onCancel();
+      if (e.key === "Escape" && !busy) {
+        e.preventDefault();
+        onCancel();
+        return;
+      }
+      if (e.key === "Enter" && !busy) {
+        const t = e.target as HTMLElement | null;
+        if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+        if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+          e.preventDefault();
+          void submit();
+        }
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy, onCancel]);
+  }, [open, busy, onCancel, vals]);
 
   if (!open) return null;
 

@@ -34,12 +34,36 @@ function ModalShell({
   onClose,
   children,
   footer,
+  onSubmit,
+  submitDisabled,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
+  onSubmit?: () => void;
+  submitDisabled?: boolean;
 }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== "Enter") return;
+      if (submitDisabled || !onSubmit) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+        e.preventDefault();
+        onSubmit();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, onSubmit, submitDisabled]);
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-3"
@@ -339,6 +363,15 @@ export function DeliveryEditorModal({
     <ModalShell
       title={title}
       onClose={() => !busy && onClose()}
+      onSubmit={
+        mode === "view" || busy || loading
+          ? undefined
+          : () => {
+              if (mode === "real") void submitReal();
+              else void submitPlan();
+            }
+      }
+      submitDisabled={mode === "view" || busy || loading}
       footer={
         mode === "view" ? (
           <button
@@ -354,8 +387,12 @@ export function DeliveryEditorModal({
             disabled={busy || loading}
             onClick={mode === "real" ? submitReal : submitPlan}
             className="w-full py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-sm disabled:opacity-50"
+            title="Enter hoặc Ctrl+Enter"
           >
             {busy ? "Đang lưu…" : "LƯU"}
+            {!busy && !loading && (
+              <span className="ml-2 text-[11px] font-semibold opacity-80">↵</span>
+            )}
           </button>
         )
       }
