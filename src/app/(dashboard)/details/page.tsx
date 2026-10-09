@@ -179,6 +179,7 @@ function InputField({
   min,
   max,
   hint,
+  autoFocus,
 }: {
   label: string;
   value: string;
@@ -188,12 +189,29 @@ function InputField({
   min?: string;
   max?: string;
   hint?: string;
+  autoFocus?: boolean;
 }) {
   const cls = `w-full px-3 py-2.5 rounded-lg text-sm border ${
     readOnly
       ? "bg-slate-100 border-slate-200 text-slate-700"
       : "bg-white border-slate-300 text-slate-900 focus:ring-2 focus:ring-sky-400 focus:outline-none"
   }`;
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (!autoFocus || readOnly) return;
+    const el = inputRef.current;
+    if (!el) return;
+    // rAF: đợi modal mount xong rồi focus ô ngày nhận
+    const id = requestAnimationFrame(() => {
+      el.focus();
+      try {
+        el.showPicker?.();
+      } catch {
+        /* ignore — browser không hỗ trợ */
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [autoFocus, readOnly]);
   return (
     <div>
       <div className="text-[12px] font-bold text-slate-600 mb-1">{label}</div>
@@ -205,11 +223,13 @@ function InputField({
         />
       ) : (
         <input
+          ref={inputRef}
           type={type === "number" ? "text" : type}
           value={value}
           readOnly={readOnly}
           min={min}
           max={max}
+          autoFocus={!!autoFocus}
           onChange={(e) => {
             let v = e.target.value;
             if (type === "date") v = clampYmd(v, min, max);
@@ -1504,6 +1524,7 @@ export default function DetailsPage() {
                 value={recvDate}
                 min={bounds.min}
                 max={bounds.max}
+                autoFocus
                 onChange={setRecvDate}
                 hint={
                   `Chọn từ ${bounds.min ? bounds.min.split("-").reverse().join("/") : "—"} đến ${bounds.max.split("-").reverse().join("/")}` +
