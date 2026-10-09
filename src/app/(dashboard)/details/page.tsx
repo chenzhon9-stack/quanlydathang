@@ -110,12 +110,19 @@ function ModalShell({
         onClose();
         return;
       }
-      if (e.key !== "Enter") return;
       if (submitDisabled || !onSubmit) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      // Enter hoặc Ctrl/Cmd+Enter
-      if (e.ctrlKey || e.metaKey || !e.shiftKey) {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      // Chỉ Shift+S hoặc Ctrl/Cmd+Enter — KHÔNG Enter thường
+      // (tránh lưu nhận hàng khi mới chọn ngày, chưa sửa thực nhận)
+      const isShiftS =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "S" || e.key === "s");
+      const isCtrlEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+      if (isShiftS || isCtrlEnter) {
         e.preventDefault();
         onSubmit();
       }
@@ -180,6 +187,8 @@ function InputField({
   max,
   hint,
   autoFocus,
+  onKeyDown,
+  inputId,
 }: {
   label: string;
   value: string;
@@ -190,6 +199,8 @@ function InputField({
   max?: string;
   hint?: string;
   autoFocus?: boolean;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
+  inputId?: string;
 }) {
   const cls = `w-full px-3 py-2.5 rounded-lg text-sm border ${
     readOnly
@@ -223,6 +234,7 @@ function InputField({
         />
       ) : (
         <input
+          id={inputId}
           ref={inputRef}
           type={type === "number" ? "text" : type}
           value={value}
@@ -230,6 +242,7 @@ function InputField({
           min={min}
           max={max}
           autoFocus={!!autoFocus}
+          onKeyDown={onKeyDown}
           onChange={(e) => {
             let v = e.target.value;
             if (type === "date") v = clampYmd(v, min, max);
@@ -1493,12 +1506,12 @@ export default function DetailsPage() {
               disabled={busy}
               onClick={submitReceive}
               className={primaryBtn}
-              title="Enter hoặc Ctrl+Enter"
+              title="Shift+S hoặc Ctrl+Enter"
             >
               {busy ? "Đang lưu…" : "XÁC NHẬN"}
               {!busy && (
                 <span className="ml-2 text-[11px] font-semibold opacity-80">
-                  ↵
+                  ⇧S
                 </span>
               )}
             </button>
@@ -1525,10 +1538,29 @@ export default function DetailsPage() {
                 min={bounds.min}
                 max={bounds.max}
                 autoFocus
+                inputId="recv-date-input"
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  // Bao khóa SL → không có ô thực nhận, chỉ báo dùng Shift+S
+                  if (recvLockedBao) return;
+                  const qty = document.querySelector<HTMLInputElement>(
+                    'input[data-field="recvQty"]'
+                  );
+                  if (qty) {
+                    qty.focus();
+                    try {
+                      qty.select();
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                }}
                 onChange={setRecvDate}
                 hint={
                   `Chọn từ ${bounds.min ? bounds.min.split("-").reverse().join("/") : "—"} đến ${bounds.max.split("-").reverse().join("/")}` +
-                  (receiveTarget.isDuyenHa ? " (Duyên Hà: sau 14h tính ngày mai)" : "")
+                  (receiveTarget.isDuyenHa ? " (Duyên Hà: sau 14h tính ngày mai)" : "") +
+                  " · Enter → Thực nhận · Shift+S lưu"
                 }
               />
             );
@@ -1555,6 +1587,7 @@ export default function DetailsPage() {
             ) : (
               <>
                 <DecimalInput
+                  data-field="recvQty"
                   value={recvQty}
                   placeholder="Thực nhận"
                   className={
@@ -1562,6 +1595,12 @@ export default function DetailsPage() {
                       ? "border-red-400 bg-red-50 focus:ring-red-300"
                       : undefined
                   }
+                  onKeyDown={(e) => {
+                    // Enter trên SL không lưu — dùng Shift+S / Ctrl+Enter
+                    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                    }
+                  }}
                   onValueChange={(display) => {
                     setRecvQty(display);
                     const q = parseDecimalVN(display);
