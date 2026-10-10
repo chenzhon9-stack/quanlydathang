@@ -89,16 +89,16 @@ export class ReportRepository {
       console.info(
         `[ReportRepository] KHSANLUONG raw=${rows.length} mapped=${plans.length} sample=${plans[0]?.id || "-"}`
       );
+      // Khớp OrderRepository: không return all khi match=0; bỏ y1===null khỏi mọi năm
       const byYear = plans.filter((p) => {
         const y1 = yearOfDate(p.fromDate);
         const y2 = yearOfDate(p.toDate);
-        return y1 === year || y2 === year || y1 === null;
+        return y1 === year || y2 === year;
       });
       if (byYear.length === 0 && plans.length > 0) {
         console.warn(
-          `[ReportRepository] plans year=${year} match=0 total=${plans.length} → all`
+          `[ReportRepository] plans year=${year} match=0 total=${plans.length} — trả [] (không return all)`
         );
-        return plans;
       }
       return byYear;
     } catch (e) {

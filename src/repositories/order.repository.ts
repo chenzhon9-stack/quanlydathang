@@ -60,17 +60,17 @@ export class OrderRepository {
         } date0=${orders[0]?.orderDate || "-"}`
       );
 
-      // Lọc năm linh hoạt: nếu lọc hết → giữ toàn bộ (tránh tab trống)
+      // Chỉ giữ đơn đúng năm. y === null (parse lỗi) → loại, không nhét mọi năm.
+      // Production: KHÔNG fallback "return all" khi match=0 (tránh lộ kỳ + che bug ngày).
       const byYear = orders.filter((o) => {
         const y = yearOfDate(o.orderDate);
-        return y === null || y === year;
+        return y === year;
       });
 
       if (byYear.length === 0 && orders.length > 0) {
         console.warn(
-          `[OrderRepository] year=${year} match=0 but total=${orders.length} → return all (date format?)`
+          `[OrderRepository] year=${year} match=0 but total=${orders.length} — trả [] (không return all; kiểm tra format NgayDatHang)`
         );
-        return applyFilters(orders, filter);
       }
 
       console.info(
@@ -78,7 +78,11 @@ export class OrderRepository {
       );
       return applyFilters(byYear, filter);
     } catch (e) {
-      console.error("[OrderRepository] DonHang failed → mock", e);
+      console.error("[OrderRepository] DonHang failed", e);
+      // Đã cấu hình Sheets / production: không đổ mock
+      if (process.env.NODE_ENV === "production" || isSheetsConfigured()) {
+        return [];
+      }
       return applyFilters(getOrdersByYear(year), filter);
     }
   }

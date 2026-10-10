@@ -52,13 +52,24 @@ function isActiveFlag(v: unknown): boolean {
 }
 
 /**
+ * Hợp đồng scope IDs (P0 fail-closed):
+ * - `null`  = ALL — chỉ khi scopeType ALL / quanly "tất cả" / OWNER lọc chỗ khác
+ * - `Set` rỗng = DENIED / không có quyền / lỗi tải danh mục (không được xem)
+ * - `Set` có phần tử = RESTRICTED
+ *
+ * Lỗi Sheets hoặc chưa cấu hình với role bị giới hạn → Set rỗng (DENIED),
+ * KHÔNG trả null (tránh filter coi null = bỏ lọc = xem hết).
+ */
+export type ScopeIdSet = Set<string> | null;
+
+/**
  * Map MaNCC → allowed for this scope (MANAGEMENT).
  * ADMIN/ALL → null means no filter.
  * OWNER → null (filter by createdBy elsewhere).
  */
 export async function resolveAllowedSupplierIds(
   scope: AccessScope
-): Promise<Set<string> | null> {
+): Promise<ScopeIdSet> {
   if (scope.scopeType === "ALL") return null;
   if (scope.scopeType === "OWNER") return null; // owner filters by email
   if (scope.scopeType === "OWN_CUSTOMER") return null; // customer later
@@ -71,7 +82,13 @@ export async function resolveAllowedSupplierIds(
     return new Set();
   }
 
-  if (!isSheetsConfigured()) return null;
+  // Role bị giới hạn mà chưa cấu hình Sheets → DENIED (không fail-open)
+  if (!isSheetsConfigured()) {
+    console.warn(
+      "[Scope] NCC: Sheets chưa cấu hình — DENIED (empty set) cho MANAGEMENT"
+    );
+    return new Set();
+  }
 
   try {
     const rows = await readSheetAsObjects(SHEETS.NCC, {});
@@ -90,16 +107,17 @@ export async function resolveAllowedSupplierIds(
     );
     return allowed;
   } catch (e) {
-    console.error("[Scope] load NCC failed", e);
-    return null; // fail open for read? prefer fail closed:
+    console.error("[Scope] load NCC failed → DENIED (empty set)", e);
+    return new Set(); // fail-closed
   }
 }
 
 export function filterBySupplierIds<T extends { supplierId?: string }>(
   items: T[],
-  allowed: Set<string> | null
+  allowed: ScopeIdSet
 ): T[] {
-  if (!allowed) return items;
+  // null = ALL; Set (kể cả rỗng) = lọc nghiêm
+  if (allowed == null) return items;
   return items.filter((x) => x.supplierId && allowed.has(x.supplierId));
 }
 
@@ -107,7 +125,7 @@ export function filterBySupplierIds<T extends { supplierId?: string }>(
 /** SALES/MANAGEMENT: KH thuộc nhóm Quanly (V21 _allowedCustomers) */
 export async function resolveAllowedCustomerIds(
   scope: AccessScope
-): Promise<Set<string> | null> {
+): Promise<ScopeIdSet> {
   if (scope.scopeType === "ALL") return null;
   if (scope.scopeType === "OWNER") return null;
 
@@ -115,7 +133,12 @@ export async function resolveAllowedCustomerIds(
   if (parsed.isAll) return null;
   if (!parsed.groups.length) return new Set();
 
-  if (!isSheetsConfigured()) return null;
+  if (!isSheetsConfigured()) {
+    console.warn(
+      "[Scope] KH: Sheets chưa cấu hình — DENIED (empty set) cho role hạn chế"
+    );
+    return new Set();
+  }
 
   try {
     const rows = await readSheetAsObjects(SHEETS.KH, {});
@@ -137,16 +160,16 @@ export async function resolveAllowedCustomerIds(
     );
     return allowed;
   } catch (e) {
-    console.error("[Scope] load KH failed", e);
-    return new Set();
+    console.error("[Scope] load KH failed → DENIED (empty set)", e);
+    return new Set(); // fail-closed
   }
 }
 
 export function filterByCustomerIds<T extends { customerId?: string }>(
   items: T[],
-  allowed: Set<string> | null
+  allowed: ScopeIdSet
 ): T[] {
-  if (!allowed) return items;
+  if (allowed == null) return items;
   return items.filter((x) => x.customerId && allowed.has(x.customerId));
 }
 
