@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
@@ -79,6 +79,14 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
   const [details, setDetails] = useState<DetailRow[]>([emptyDetail()]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Đổi đơn / mở lại → form trống (không giữ xe của đơn trước)
+  useEffect(() => {
+    if (!order) return;
+    setDetails([emptyDetail()]);
+    setBusy(false);
+    setErr(null);
+  }, [order?.orderId]);
 
   if (!order) return null;
 

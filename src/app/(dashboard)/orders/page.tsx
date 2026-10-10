@@ -838,6 +838,7 @@ export default function OrdersPage() {
         </>
       )}
       <CreateOrderModal
+        key={showCreate ? "create-open" : "create-closed"}
         open={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={(id) => {
@@ -845,21 +846,28 @@ export default function OrdersPage() {
           load();
         }}
       />
-      <AddDetailModal
-        order={addTarget}
-        onClose={() => setAddTarget(null)}
-        onAdded={() => {
-          alert("Đã thêm xe vào đơn");
-          load();
-        }}
-      />
-      <OrderManageModal
-        orderId={manageOrderId}
-        year={new Date().getFullYear()}
-        onClose={() => setManageOrderId(null)}
-        onSaved={() => load()}
-      />
+      {addTarget && (
+        <AddDetailModal
+          key={`add-${addTarget.orderId}`}
+          order={addTarget}
+          onClose={() => setAddTarget(null)}
+          onAdded={() => {
+            alert("Đã thêm xe vào đơn");
+            load();
+          }}
+        />
+      )}
+      {manageOrderId && (
+        <OrderManageModal
+          key={`manage-${manageOrderId}`}
+          orderId={manageOrderId}
+          year={new Date().getFullYear()}
+          onClose={() => setManageOrderId(null)}
+          onSaved={() => load()}
+        />
+      )}
       <SendActionModal
+        key={sendModal.open ? `send-${sendModal.orderId}` : "send-closed"}
         open={sendModal.open}
         message={sendModal.message}
         isDuyenHa={sendModal.isDuyenHa}

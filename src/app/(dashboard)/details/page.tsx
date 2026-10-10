@@ -588,7 +588,8 @@ export default function DetailsPage() {
           )
         );
       }
-      // Backup: load master HH (type=HH → data.items) nếu list chưa có meta
+      // Backup: load master HH (meta chia hết / hàng Bao)
+      const openedId = d.detailId;
       void (async () => {
         try {
           const token = localStorage.getItem("token");
@@ -608,23 +609,30 @@ export default function DetailsPage() {
                 .toUpperCase()
           );
           if (!row) return;
+          // Stale: user đã mở CT khác (key remount modal nhận hàng)
+          // So sánh bằng cách chỉ set khi receiveTarget.detailId vẫn khớp — dùng functional update gate
           const step = parseTyleChiahet(row);
-          if (step > 0) setRecvStep(step);
           const isBao = isHangBao(row);
-          setRecvLockedBao(isBao);
-          if (isBao && d.quantity != null) {
-            setRecvQty(formatDecimalVN(d.quantity));
-          }
           const qtyCheck = Number(d.quantity) || 0;
-          if (step > 0 && qtyCheck > 0) {
-            setRecvStepErr(
-              stepErrorMsg(
-                d.productName || d.productId || "",
-                qtyCheck,
-                step
-              )
-            );
-          }
+          setReceiveTarget((cur) => {
+            if (!cur || cur.detailId !== openedId) return cur;
+            // Side-effect sets only when still on same CT (acceptable for this UI gate)
+            if (step > 0) setRecvStep(step);
+            setRecvLockedBao(isBao);
+            if (isBao && d.quantity != null) {
+              setRecvQty(formatDecimalVN(d.quantity));
+            }
+            if (step > 0 && qtyCheck > 0) {
+              setRecvStepErr(
+                stepErrorMsg(
+                  d.productName || d.productId || "",
+                  qtyCheck,
+                  step
+                )
+              );
+            }
+            return cur;
+          });
         } catch {
           /* ignore */
         }
@@ -1502,6 +1510,7 @@ export default function DetailsPage() {
       {/* ── Modal Nhận hàng (V21) ── */}
       {receiveTarget && (
         <ModalShell
+          key={`recv-${receiveTarget.detailId}`}
           title="Nhận hàng"
           onClose={() => !busy && setReceiveTarget(null)}
           onSubmit={() => {
@@ -1647,6 +1656,7 @@ export default function DetailsPage() {
       {/* ── Modal Sửa chi tiết (V21) ── */}
       {editTarget && (
         <ModalShell
+          key={`edit-${editTarget.detailId}`}
           title="Sửa chi tiết"
           onClose={() => !busy && setEditTarget(null)}
           footer={

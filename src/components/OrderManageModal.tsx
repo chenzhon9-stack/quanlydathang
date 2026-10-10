@@ -122,8 +122,12 @@ export function OrderManageModal({
 
   const load = useCallback(async () => {
     if (!orderId) return;
+    // Tránh flash dữ liệu đơn trước khi API xong
+    setOrder(null);
+    setBlocks([]);
     setLoading(true);
     setErr(null);
+    setBusy(false);
     try {
       const token = localStorage.getItem("token");
       const headers = { Authorization: `Bearer ${token}` };
@@ -242,8 +246,15 @@ export function OrderManageModal({
   }, [orderId, year]);
 
   useEffect(() => {
+    if (!orderId) {
+      setOrder(null);
+      setBlocks([]);
+      setErr(null);
+      setLoading(false);
+      return;
+    }
     void load();
-  }, [load]);
+  }, [load, orderId]);
 
   const totals = useMemo(() => {
     let plan = 0;

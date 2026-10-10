@@ -99,11 +99,14 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // Mỗi lần mở modal: dòng KH kế hoạch mặc định acghang (+ tên từ master nếu có)
+  // Mỗi lần mở modal: reset form + dòng KH mặc định acghang
   useEffect(() => {
     if (!open) return;
+    setSupplierId("");
+    setSupplierName("");
     setOrderDateTime(toDatetimeLocalValue());
     setDetails([emptyDetail()]);
+    setBusy(false);
     setErr(null);
     let cancelled = false;
     (async () => {
