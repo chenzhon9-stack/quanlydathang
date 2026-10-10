@@ -41,7 +41,14 @@ export class OrderRepository {
     const year = filter.year ?? new Date().getFullYear();
 
     if (!isSheetsConfigured()) {
-      console.info("[OrderRepository] Sheets not configured → mock");
+      // Production thiếu cấu hình → [] (không mock như dữ liệu thật)
+      if (process.env.NODE_ENV === "production") {
+        console.error(
+          "[OrderRepository] Production thiếu cấu hình Sheets — trả []"
+        );
+        return [];
+      }
+      console.info("[OrderRepository] Sheets not configured → mock (dev)");
       return applyFilters(getOrdersByYear(year), filter);
     }
 

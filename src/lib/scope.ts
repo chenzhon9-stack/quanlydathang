@@ -274,7 +274,11 @@ export async function applyListScopeFilter<
       });
       return filterByCustomerIds(rows, allowed);
     }
-    return rows;
+    // P0: thiếu trường scope → DENIED (không trả nguyên list)
+    console.warn(
+      "[Scope] MANAGEMENT list thiếu supplierId/customerId — trả [] (không bỏ lọc)"
+    );
+    return [];
   }
   if (allowCust && !allowOwner && !allowMgmt) {
     const allowed = await resolveAllowedCustomerIds({

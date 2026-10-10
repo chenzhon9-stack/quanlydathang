@@ -35,15 +35,45 @@ const SHEETS = {
   opening: SheetName.DD,
 };
 
-export class ReportRepository {
+/** Mock chỉ khi không production và Sheets chưa cấu hình / lỗi dev */
+function allowMockData(): boolean {
+  return process.env.NODE_ENV !== "production";
+}
 
+/**
+ * KHSANLUONG giao năm báo cáo: startY ≤ year ≤ endY
+ * (sau khi parse được ít nhất một đầu; không parse → loại).
+ */
+function planOverlapsYear(
+  fromDate?: string,
+  toDate?: string,
+  year?: number
+): boolean {
+  if (year == null) return true;
+  const y1 = yearOfDate(fromDate);
+  const y2 = yearOfDate(toDate);
+  if (y1 == null && y2 == null) return false;
+  const startY = y1 ?? (y2 as number);
+  const endY = y2 ?? (y1 as number);
+  return startY <= year && endY >= year;
+}
+
+export class ReportRepository {
   static async getOrders(year: number): Promise<Order[]> {
     if (!isSheetsConfigured()) {
+      if (!allowMockData()) {
+        console.error(
+          "[ReportRepository] Production thiếu Sheets — getOrders []"
+        );
+        return [];
+      }
       return [];
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.orders, { year });
-      return rows.map(mapOrderRow).filter((o) => o.orderId);
+      const orders = rows.map(mapOrderRow).filter((o) => o.orderId);
+      // Hợp đồng năm: khớp OrderRepository — chỉ dòng yearOfDate === year
+      return orders.filter((o) => yearOfDate(o.orderDate) === year);
     } catch (e) {
       console.error("[ReportRepository] getOrders failed", e);
       return [];
@@ -52,34 +82,59 @@ export class ReportRepository {
 
   static async getDetails(year: number): Promise<OrderDetail[]> {
     if (!isSheetsConfigured()) {
+      if (!allowMockData()) {
+        console.error(
+          "[ReportRepository] Production thiếu Sheets — getDetails []"
+        );
+        return [];
+      }
       console.info("[ReportRepository] Sheets not configured → mock details");
       return getDetailsByYear(year);
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.details, { year });
-      return rows.map(mapDetailRow).filter((d) => d.detailId);
+      const details = rows.map(mapDetailRow).filter((d) => d.detailId);
+      return details.filter((d) => {
+        const y = yearOfDate(d.orderDate || d.receivedDate);
+        return y == null || y === year;
+      });
     } catch (e) {
-      console.error("[ReportRepository] getDetails failed, fallback mock", e);
-      return getDetailsByYear(year);
+      console.error("[ReportRepository] getDetails failed", e);
+      // Sheets đã cấu hình: không mock
+      return [];
     }
   }
 
   static async getDeliveries(year: number): Promise<Delivery[]> {
     if (!isSheetsConfigured()) {
-      console.info("[ReportRepository] Sheets not configured → mock deliveries");
+      if (!allowMockData()) {
+        console.error(
+          "[ReportRepository] Production thiếu Sheets — getDeliveries []"
+        );
+        return [];
+      }
+      console.info(
+        "[ReportRepository] Sheets not configured → mock deliveries"
+      );
       return getDeliveriesByYear(year);
     }
     try {
       const rows = await readSheetAsObjects(SHEETS.deliveries, { year });
       return rows.map(mapDeliveryRow).filter((d) => d.deliveryId);
     } catch (e) {
-      console.error("[ReportRepository] getDeliveries failed, fallback mock", e);
-      return getDeliveriesByYear(year);
+      console.error("[ReportRepository] getDeliveries failed", e);
+      return [];
     }
   }
 
   static async getPlans(year: number): Promise<ProductionPlan[]> {
     if (!isSheetsConfigured()) {
+      if (!allowMockData()) {
+        console.error(
+          "[ReportRepository] Production thiếu Sheets — getPlans []"
+        );
+        return [];
+      }
       console.info("[ReportRepository] Sheets not configured → mock plans");
       return getPlansByYear(year);
     }
@@ -89,26 +144,33 @@ export class ReportRepository {
       console.info(
         `[ReportRepository] KHSANLUONG raw=${rows.length} mapped=${plans.length} sample=${plans[0]?.id || "-"}`
       );
-      // Khớp OrderRepository: không return all khi match=0; bỏ y1===null khỏi mọi năm
-      const byYear = plans.filter((p) => {
-        const y1 = yearOfDate(p.fromDate);
-        const y2 = yearOfDate(p.toDate);
-        return y1 === year || y2 === year;
-      });
+      // Giao khoảng: kế hoạch 2025–2027 vẫn hiện khi xem 2026
+      const byYear = plans.filter((p) =>
+        planOverlapsYear(p.fromDate, p.toDate, year)
+      );
       if (byYear.length === 0 && plans.length > 0) {
         console.warn(
-          `[ReportRepository] plans year=${year} match=0 total=${plans.length} — trả [] (không return all)`
+          `[ReportRepository] plans year=${year} overlap=0 total=${plans.length} — trả []`
         );
       }
       return byYear;
     } catch (e) {
-      console.error("[ReportRepository] getPlans failed (no mock when Sheets on)", e);
+      console.error(
+        "[ReportRepository] getPlans failed (no mock when Sheets on)",
+        e
+      );
       return [];
     }
   }
 
   static async getPayables(year: number): Promise<Payable[]> {
     if (!isSheetsConfigured()) {
+      if (!allowMockData()) {
+        console.error(
+          "[ReportRepository] Production thiếu Sheets — getPayables []"
+        );
+        return [];
+      }
       console.info("[ReportRepository] Sheets not configured → mock payables");
       return getPayablesByYear(year);
     }
@@ -118,17 +180,20 @@ export class ReportRepository {
       console.info(
         `[ReportRepository] NCC_CongNo raw=${rows.length} mapped=${payables.length} sample=${payables[0]?.id || "-"}`
       );
-      // Giữ toàn bộ dòng CN; service lọc theo yearStart..toDate
-      // (tránh mất dòng khi parse ngày lỗi)
+      // Service lọc theo yearStart..toDate
       return payables;
     } catch (e) {
-      console.error("[ReportRepository] getPayables failed (no mock when Sheets on)", e);
+      console.error(
+        "[ReportRepository] getPayables failed (no mock when Sheets on)",
+        e
+      );
       return [];
     }
   }
 
   static async getOpening(year: number): Promise<OpeningBalance[]> {
     if (!isSheetsConfigured()) {
+      if (!allowMockData()) return [];
       return getOpeningByYear(year);
     }
     try {
@@ -138,10 +203,17 @@ export class ReportRepository {
         `[ReportRepository] NCC_DuDauNam raw=${rows.length} mapped=${opening.length}`
       );
       const byYear = opening.filter((o) => !o.year || o.year === year);
-      if (byYear.length === 0 && opening.length > 0) return opening;
+      if (byYear.length === 0 && opening.length > 0) {
+        console.warn(
+          `[ReportRepository] opening year=${year} match=0 total=${opening.length} — trả [] (không return all)`
+        );
+      }
       return byYear;
     } catch (e) {
-      console.error("[ReportRepository] getOpening failed (no mock when Sheets on)", e);
+      console.error(
+        "[ReportRepository] getOpening failed (no mock when Sheets on)",
+        e
+      );
       return [];
     }
   }
