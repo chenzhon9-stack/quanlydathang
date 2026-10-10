@@ -154,8 +154,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
     };
   }, [open]);
 
-  if (!open) return null;
-
+  // submit + keyboard effect phải đứng TRƯỚC early return (tránh React #310)
   async function submit() {
     setErr(null);
     if (!supplierId) {
@@ -323,6 +322,8 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, busy, onClose, details, supplierId, orderDateTime]);
+
+  if (!open) return null;
 
   return (
     <div
