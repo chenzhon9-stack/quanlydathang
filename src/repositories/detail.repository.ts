@@ -73,10 +73,41 @@ export class DetailRepository {
     }
   }
 
+  /** Parse năm từ CT-YYMMDD-#### (VD CT-261009-0020 → 2026) */
+  static yearFromDetailId(detailId: string): number | null {
+    const m = String(detailId || "").trim().match(/^CT-(\d{2})\d{4}-/i);
+    if (!m) return null;
+    const yy = Number(m[1]);
+    if (!Number.isFinite(yy)) return null;
+    return yy >= 70 ? 1900 + yy : 2000 + yy;
+  }
+
   static async findById(detailId: string, year?: number) {
-    const y = year ?? new Date().getFullYear();
-    const rows = await this.findMany({ year: y });
-    return rows.find((d) => d.detailId === detailId) || null;
+    const id = String(detailId || "").trim();
+    if (!id) return null;
+    const parsed = this.yearFromDetailId(id);
+    const years: number[] = [];
+    const push = (y: number | null | undefined) => {
+      if (y == null || !Number.isFinite(y)) return;
+      if (!years.includes(y)) years.push(y);
+    };
+    push(year);
+    push(parsed);
+    push(new Date().getFullYear());
+
+    const match = (rows: OrderDetail[]) =>
+      rows.find(
+        (d) =>
+          d.detailId === id ||
+          String(d.detailId || "").toUpperCase() === id.toUpperCase()
+      ) || null;
+
+    for (const y of years) {
+      const rows = await this.findMany({ year: y });
+      const found = match(rows);
+      if (found) return found;
+    }
+    return null;
   }
 
 }

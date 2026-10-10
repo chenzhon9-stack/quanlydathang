@@ -53,9 +53,13 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
         400
       );
     }
-    if (err?.code)
+    if (err?.code) {
+      console.warn("[order-details/real]", err.code, err.message, {
+        id: decodeURIComponent(id),
+      });
       return jsonResponse(error(err.code, err.message || ""), 400);
-    console.error(e);
+    }
+    console.error("[order-details/real] unexpected", e);
     return jsonResponse(error("SYSTEM_UNEXPECTED_ERROR", "Lỗi hệ thống"), 500);
   }
 }

@@ -29,6 +29,24 @@ function fmtDateVN(ymd?: string) {
   return ymd;
 }
 
+/** CT-YYMMDD-#### → năm (CT-261009-0020 → 2026) */
+function yearFromDetailId(detailId?: string): number {
+  const m = String(detailId || "").trim().match(/^CT-(\d{2})\d{4}-/i);
+  if (m) {
+    const yy = Number(m[1]);
+    if (Number.isFinite(yy)) return yy >= 70 ? 1900 + yy : 2000 + yy;
+  }
+  return new Date().getFullYear();
+}
+
+function resolvePayloadYear(summary: { detailId?: string; orderDate?: string; year?: number }): number {
+  if (summary.year && Number.isFinite(summary.year)) return Number(summary.year);
+  if (summary.orderDate && /^\d{4}/.test(summary.orderDate)) {
+    return Number(summary.orderDate.slice(0, 4));
+  }
+  return yearFromDetailId(summary.detailId);
+}
+
 function ModalShell({
   title,
   onClose,
@@ -119,6 +137,8 @@ type Summary = {
   isDuyenHa?: boolean;
   /** TyleChiahet — nếu thiếu sẽ tự load từ masters */
   tyleChiahet?: number;
+  orderDate?: string;
+  year?: number;
 };
 
 type Props = {
@@ -199,7 +219,7 @@ export function DeliveryEditorModal({
         const token = localStorage.getItem("token");
         const qs = new URLSearchParams({
           detailId: summary.detailId,
-          year: String(new Date().getFullYear()),
+          year: String(resolvePayloadYear(summary)),
           pageSize: "100",
         });
         const res = await fetch(`/api/v1/deliveries?${qs}`, {
@@ -267,7 +287,7 @@ export function DeliveryEditorModal({
     try {
       const token = localStorage.getItem("token");
       const body = {
-        year: new Date().getFullYear(),
+        year: resolvePayloadYear(summary),
         rows: rows.map((r) => ({
           deliveryId: r.deliveryId?.startsWith("NEW-")
             ? undefined
@@ -320,7 +340,7 @@ export function DeliveryEditorModal({
     try {
       const token = localStorage.getItem("token");
       const body: Record<string, unknown> = {
-        year: new Date().getFullYear(),
+        year: resolvePayloadYear(summary),
         rows: rows.map((r) => ({
           deliveryId: r.deliveryId?.startsWith("NEW-")
             ? undefined
@@ -329,7 +349,7 @@ export function DeliveryEditorModal({
           customerDetail: r.customerDetail || "",
           plannedQty: Number(r.plannedQty) || 0,
           actualQty: Number(r.actualQty) || 0,
-          deliveryDate: r.deliveryDate,
+          deliveryDate: r.deliveryDate || new Date().toISOString().slice(0, 10),
           note: r.note,
         })),
       };
@@ -810,6 +830,10 @@ export function DeliveryEditorModal({
 
 /** Helper: summary từ OrderDetail */
 export function summaryFromDetail(d: OrderDetail): Summary {
+  const orderDate = d.orderDate || "";
+  const year = orderDate && /^\d{4}/.test(orderDate)
+    ? Number(orderDate.slice(0, 4))
+    : yearFromDetailId(d.detailId);
   return {
     detailId: d.detailId,
     vehiclePlate: d.vehiclePlate,
@@ -822,20 +846,35 @@ export function summaryFromDetail(d: OrderDetail): Summary {
     receivedDate: d.receivedDate,
     isDuyenHa: !!d.isDuyenHa,
     tyleChiahet: Number(d.tyleChiahet) || 0,
+    orderDate,
+    year,
   };
 }
 
 /** Helper: summary từ Delivery (tab giao) */
 export function summaryFromDelivery(d: Delivery): Summary {
-  const any = d as Delivery & { receivedDate?: string; isDuyenHa?: boolean };
+  const any = d as Delivery & {
+    receivedDate?: string;
+    isDuyenHa?: boolean;
+    orderDate?: string;
+    actualReceived?: number;
+    quantity?: number;
+  };
+  const orderDate = any.orderDate || d.orderDate || "";
+  const year = orderDate && /^\d{4}/.test(orderDate)
+    ? Number(orderDate.slice(0, 4))
+    : yearFromDetailId(d.detailId);
   return {
     detailId: d.detailId,
     vehiclePlate: d.vehiclePlate,
     vehicleId: d.vehicleId,
     productName: d.productName,
     productId: d.productId,
+    quantity: any.quantity,
+    actualReceived: any.actualReceived,
     receivedDate: any.receivedDate,
     isDuyenHa: !!any.isDuyenHa,
-    // quantity/received không có trên GH — modal sẽ hiện sum từ rows
+    orderDate,
+    year,
   };
 }

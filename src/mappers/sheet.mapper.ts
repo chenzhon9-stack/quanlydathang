@@ -135,7 +135,9 @@ export function mapDetailRow(row: Record<string, string>): OrderDetail {
       normalizeSheetDate(pick(row, ["NgayNhanHang", "NgayNhan", "receivedDate"])) || undefined,
     actualReceived: (() => {
       const v = pick(row, ["ThucNhan", "SLNhan", "actualReceived"]);
-      return v ? num(v) : undefined;
+      if (v === "" || v == null) return undefined;
+      const n = num(v);
+      return Number.isFinite(n) ? n : undefined;
     })(),
     transportTypeId: pick(row, ["MaHTVT", "HTVT"]) || undefined,
     transportTypeName: pick(row, ["TenHTVT"]) || undefined,

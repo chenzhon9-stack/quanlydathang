@@ -232,9 +232,21 @@ export class DeliveryService {
     const detailId = current.detailId;
 
     // Load CT
-    const ct = await DetailRepository.findById(detailId, y);
+    let ct = await DetailRepository.findById(detailId, y);
     if (!ct) {
-      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+      // Retry: parse năm từ mã CT
+      const parsed = DetailRepository.yearFromDetailId(detailId);
+      if (parsed && parsed !== y) {
+        ct = await DetailRepository.findById(detailId, parsed);
+      }
+    }
+    if (!ct) {
+      throw {
+        code: "NOT_FOUND",
+        message:
+          `Không tìm thấy chi tiết ${detailId} (year=${y}). ` +
+          `Kiểm tra ID_Chitiet trên sheet và năm đơn.`,
+      };
     }
     const st = String(ct.status || "");
     if (["Xóa xe", "DELETE"].includes(st) || st.toUpperCase() === "DELETE") {
@@ -738,9 +750,21 @@ export class DeliveryService {
     const isAdmin =
       hasPermission(user, "*") || String(user.role).toUpperCase() === "ADMIN";
 
-    const ct = await DetailRepository.findById(detailId, y);
+    let ct = await DetailRepository.findById(detailId, y);
     if (!ct) {
-      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+      // Retry: parse năm từ mã CT
+      const parsed = DetailRepository.yearFromDetailId(detailId);
+      if (parsed && parsed !== y) {
+        ct = await DetailRepository.findById(detailId, parsed);
+      }
+    }
+    if (!ct) {
+      throw {
+        code: "NOT_FOUND",
+        message:
+          `Không tìm thấy chi tiết ${detailId} (year=${y}). ` +
+          `Kiểm tra ID_Chitiet trên sheet và năm đơn.`,
+      };
     }
     const st = String(ct.status || "");
     const stUp = st.toUpperCase();
@@ -758,7 +782,9 @@ export class DeliveryService {
     if (!(thucNhan > 0)) {
       throw {
         code: "VALIDATION_ERROR",
-        message: "Chưa có số lượng thực nhận, không thể giao hàng.",
+        message:
+          `Chi tiết ${detailId} chưa có số lượng thực nhận (ThucNhan=${ct.actualReceived ?? "trống"}). ` +
+          `Hãy nhận hàng trước khi giao.`,
       };
     }
 
