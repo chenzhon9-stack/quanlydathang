@@ -55,7 +55,7 @@ export function ListToolbar({
     <div className="space-y-2.5">
       {/* Hàng 1: Nhóm theo ngày + lọc ngày + dòng/trang + đếm */}
       <div className="flex flex-wrap items-end gap-2">
-        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-3 py-2 border border-slate-300 rounded-xl bg-white cursor-pointer select-none shadow-sm">
+        <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 px-2.5 py-1.5 border border-slate-300 rounded-md bg-white cursor-pointer select-none">
           <input
             type="checkbox"
             checked={groupByDate}
@@ -75,7 +75,7 @@ export function ListToolbar({
                 type="date"
                 value={fromDate || ""}
                 onChange={(e) => onFromDate?.(e.target.value)}
-                className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+                className="px-2.5 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
               />
             </div>
             <div>
@@ -86,7 +86,7 @@ export function ListToolbar({
                 type="date"
                 value={toDate || ""}
                 onChange={(e) => onToDate?.(e.target.value)}
-                className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+                className="px-2.5 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
               />
             </div>
             {(fromDate || toDate) && (
@@ -96,7 +96,7 @@ export function ListToolbar({
                   onFromDate?.("");
                   onToDate?.("");
                 }}
-                className="px-2.5 py-2 text-xs font-semibold rounded-xl border border-slate-300 bg-white text-slate-600"
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 bg-white text-slate-600"
               >
                 Xóa ngày
               </button>
@@ -112,7 +112,7 @@ export function ListToolbar({
             <select
               value={pageSize}
               onChange={(e) => onPageSize?.(Number(e.target.value))}
-              className="px-2.5 py-2 text-sm border border-slate-300 rounded-xl bg-white shadow-sm"
+              className="px-2.5 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
             >
               {pageSizeOptions.map((n) => (
                 <option key={n} value={n}>
@@ -145,9 +145,9 @@ export function ListToolbar({
         <button
           type="button"
           onClick={() => onToggleStatus("ALL")}
-          className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${
+          className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition active:opacity-80 ${
             allOn
-              ? "bg-sky-600 text-white border-sky-700 shadow-md ring-2 ring-offset-1 ring-sky-300"
+              ? "bg-sky-600 text-white border-sky-700 ring-1 ring-sky-300"
               : "bg-white text-slate-600 border-slate-300 hover:border-sky-400"
           }`}
         >
@@ -163,9 +163,9 @@ export function ListToolbar({
                 key={s.key}
                 type="button"
                 onClick={() => onToggleStatus(s.key)}
-                className={`shrink-0 px-3.5 py-2 rounded-full text-xs font-bold border-2 transition active:scale-95 ${chip} ${
+                className={`shrink-0 px-3 py-1 rounded-full text-xs font-semibold border transition active:opacity-80 ${chip} ${
                   on
-                    ? "shadow-md ring-2 ring-offset-1 ring-slate-400 scale-[1.03] opacity-100"
+                    ? "ring-1 ring-slate-400 opacity-100"
                     : "opacity-70 hover:opacity-100"
                 }`}
               >

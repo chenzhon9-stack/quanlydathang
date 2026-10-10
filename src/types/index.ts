@@ -130,6 +130,9 @@ export interface Delivery {
   orderDate?: string;
   vehicleId?: string;
   vehiclePlate?: string;
+  /** Hình thức vận tải từ CT (enrich) — chỉ hiển thị, không ghi Sheet */
+  transportTypeId?: string;
+  transportTypeName?: string;
   productId?: string;
   productName?: string;
   note?: string;

@@ -66,11 +66,12 @@ export class DeliveryService {
 
     // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
     const year = filter.year ?? currentYearVN();
-    const [khMap, xeMap, hhMap, details] = await Promise.all([
+    const [khMap, xeMap, hhMap, details, htvtMap] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.xeNames(),
       MasterRepository.hhNames(),
       DetailRepository.findMany({ year }).catch(() => []),
+      MasterRepository.htvtNames().catch(() => ({} as Record<string, string>)),
     ]);
     const ctById = new Map(
       details.map((ct) => [String(ct.detailId || "").trim(), ct])
@@ -106,6 +107,12 @@ export class DeliveryService {
           d.productName ||
           (ct?.productId ? hhMap[String(ct.productId)] : undefined) ||
           ct?.productId,
+        transportTypeId: d.transportTypeId || ct?.transportTypeId,
+        transportTypeName:
+          d.transportTypeName ||
+          ct?.transportTypeName ||
+          (ct?.transportTypeId ? htvtMap[String(ct.transportTypeId)] : undefined) ||
+          ct?.transportTypeId,
         detailStatus: status,
         actualReceived: ct?.actualReceived ?? d.actualReceived,
         receivedDate: ct?.receivedDate || d.receivedDate,

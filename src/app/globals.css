@@ -9,6 +9,22 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Chữ sắc nét: bỏ làm mịn xám (antialiased) làm chữ mảnh/nhòe trên màn hình thường */
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+}
+
+/* Số thẳng hàng, rõ nét trong bảng */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Không để hiệu ứng scale/transform làm nhòe chữ nút */
+button {
+  -webkit-font-smoothing: inherit;
+  font-weight: 600;
 }
 
 /* Safe area for mobile bottom nav */
