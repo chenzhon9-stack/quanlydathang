@@ -139,6 +139,8 @@ function ModalShell({
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
         className={`bg-white rounded-2xl shadow-2xl w-full ${
           wide ? "max-w-3xl" : "max-w-md"
         } overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col`}
@@ -1540,10 +1542,14 @@ export default function DetailsPage() {
                 autoFocus
                 inputId="recv-date-input"
                 onKeyDown={(e) => {
-                  if (e.key !== "Enter") return;
+                  if (e.key !== "Enter" || e.ctrlKey || e.metaKey) return;
                   e.preventDefault();
-                  // Bao khóa SL → không có ô thực nhận, chỉ báo dùng Shift+S
-                  if (recvLockedBao) return;
+                  // Hàng Bao: không có ô thực nhận → Enter trên ngày = lưu
+                  if (recvLockedBao) {
+                    if (!busy) void submitReceive();
+                    return;
+                  }
+                  // Hàng rời/khác: Enter → ô thực nhận (không lưu)
                   const qty = document.querySelector<HTMLInputElement>(
                     'input[data-field="recvQty"]'
                   );
@@ -1560,7 +1566,9 @@ export default function DetailsPage() {
                 hint={
                   `Chọn từ ${bounds.min ? bounds.min.split("-").reverse().join("/") : "—"} đến ${bounds.max.split("-").reverse().join("/")}` +
                   (receiveTarget.isDuyenHa ? " (Duyên Hà: sau 14h tính ngày mai)" : "") +
-                  " · Enter → Thực nhận · Shift+S lưu"
+                  (recvLockedBao
+                    ? " · Enter lưu (hàng Bao) · Shift+S lưu"
+                    : " · Enter → Thực nhận · Shift+S lưu")
                 }
               />
             );

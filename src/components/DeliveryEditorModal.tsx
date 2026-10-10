@@ -78,7 +78,11 @@ function ModalShell({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden border border-slate-200 max-h-[92vh] flex flex-col"
+      >
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-100">
           <h3 className="font-bold text-slate-800 text-sm sm:text-base leading-snug pr-2">
             {title}
@@ -460,6 +464,7 @@ export function DeliveryEditorModal({
           {rows.map((r, idx) => (
             <div
               key={r.deliveryId || idx}
+              data-delivery-row={idx}
               className="grid grid-cols-1 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-start border border-slate-200 rounded-xl p-2.5 bg-white"
             >
               {/* Khách — rộng gấp đôi, xuống dòng */}
@@ -493,6 +498,23 @@ export function DeliveryEditorModal({
                               : x
                           )
                         );
+                        // P1: sau chọn KH → focus ô số (thực giao / KH giao)
+                        requestAnimationFrame(() => {
+                          const sel =
+                            mode === "real"
+                              ? `input[data-row="${idx}"][data-field="actualQty"]`
+                              : `input[data-row="${idx}"][data-field="plannedQty"]`;
+                          const qty =
+                            document.querySelector<HTMLInputElement>(sel);
+                          if (qty) {
+                            qty.focus();
+                            try {
+                              qty.select();
+                            } catch {
+                              /* ignore */
+                            }
+                          }
+                        });
                       }}
                     />
                   </div>
@@ -518,6 +540,8 @@ export function DeliveryEditorModal({
                     return (
                       <>
                         <DecimalInput
+                          data-row={idx}
+                          data-field="plannedQty"
                           value={
                             qtyDisp[`p-${idx}`] ??
                             formatDecimalVN(r.plannedQty)
@@ -527,6 +551,16 @@ export function DeliveryEditorModal({
                               ? "border-red-400 bg-red-50 focus:ring-red-300"
                               : undefined
                           }
+                          onKeyDown={(e) => {
+                            // Enter → dòng KH tiếp (plan); không lưu
+                            if (e.key !== "Enter" || e.ctrlKey || e.metaKey)
+                              return;
+                            e.preventDefault();
+                            const nextKh = document.querySelector<HTMLElement>(
+                              `[data-delivery-row="${idx + 1}"] [data-master-picker-trigger]`
+                            );
+                            if (nextKh) nextKh.focus();
+                          }}
                           onValueChange={(display, num) => {
                             setQtyDisp((d) => ({
                               ...d,
@@ -587,11 +621,14 @@ export function DeliveryEditorModal({
                               : undefined
                           }
                           onKeyDown={(e) => {
-                            if (e.key !== "Enter") return;
+                            // Enter → ngày giao (không lưu); Shift+S / Ctrl+Enter do ModalShell
+                            if (e.key !== "Enter" || e.ctrlKey || e.metaKey)
+                              return;
                             e.preventDefault();
-                            const next = document.querySelector<HTMLInputElement>(
-                              `input[data-delivery-date="${idx}"]`
-                            );
+                            const next =
+                              document.querySelector<HTMLInputElement>(
+                                `input[data-delivery-date="${idx}"]`
+                              );
                             if (next) {
                               next.focus();
                               try {
@@ -649,6 +686,17 @@ export function DeliveryEditorModal({
                           value={r.deliveryDate || ""}
                           min={bounds.min || undefined}
                           max={bounds.max}
+                          onKeyDown={(e) => {
+                            // Enter trên ngày → KH dòng tiếp (không lưu)
+                            if (e.key !== "Enter" || e.ctrlKey || e.metaKey)
+                              return;
+                            e.preventDefault();
+                            const nextKh =
+                              document.querySelector<HTMLElement>(
+                                `[data-delivery-row="${idx + 1}"] [data-master-picker-trigger]`
+                              );
+                            if (nextKh) nextKh.focus();
+                          }}
                           onChange={(e) => {
                             const v = clampYmd(
                               e.target.value,
@@ -667,6 +715,7 @@ export function DeliveryEditorModal({
                           {bounds.min
                             ? `Từ ${bounds.min} đến ${bounds.max}`
                             : `Đến ${bounds.max} (cần ngày nhận để khóa min)`}
+                          {" · Enter → dòng sau · ⇧S lưu"}
                         </div>
                       </>
                     );
@@ -701,31 +750,60 @@ export function DeliveryEditorModal({
         </div>
       )}
 
-      {mode === "plan" && (
-        <button
-          type="button"
-          onClick={() => {
-            setRows((prev) => {
-              const last = prev[prev.length - 1];
-              return [
-                ...prev,
-                {
-                  deliveryId: `NEW-${Date.now()}`,
-                  detailId: summary.detailId,
-                  // Mặc định MaKh dòng trước
-                  customerId: last?.customerId || "",
-                  customerName: last?.customerName || "",
-                  plannedQty: 0,
-                  actualQty: 0,
-                } as Delivery,
-              ];
-            });
-          }}
-          className="text-sm font-semibold text-sky-600 hover:underline"
-        >
-          + Thêm khách kế hoạch
-        </button>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        {mode === "plan" && (
+          <button
+            type="button"
+            onClick={() => {
+              setRows((prev) => {
+                const last = prev[prev.length - 1];
+                return [
+                  ...prev,
+                  {
+                    deliveryId: `NEW-${Date.now()}`,
+                    detailId: summary.detailId,
+                    // Mặc định MaKh dòng trước
+                    customerId: last?.customerId || "",
+                    customerName: last?.customerName || "",
+                    plannedQty: 0,
+                    actualQty: 0,
+                  } as Delivery,
+                ];
+              });
+            }}
+            className="text-sm font-semibold text-sky-600 hover:underline"
+          >
+            + Thêm khách kế hoạch
+          </button>
+        )}
+        {mode === "real" && rows.length > 0 && (
+          <button
+            type="button"
+            title="Gán Thực giao = KH giao cho mọi dòng (chỉ UI, chưa lưu)"
+            onClick={() => {
+              setRows((prev) => {
+                const updated = prev.map((x) => {
+                  const pq = Number(x.plannedQty) || 0;
+                  return { ...x, actualQty: pq };
+                });
+                setQtyDisp((d) => {
+                  const next = { ...d };
+                  updated.forEach((x, i) => {
+                    next[`a-${i}`] = formatDecimalVN(
+                      Number(x.plannedQty) || 0
+                    );
+                  });
+                  return next;
+                });
+                return updated;
+              });
+            }}
+            className="text-sm font-semibold text-emerald-700 hover:underline"
+          >
+            Gán SL = KH giao
+          </button>
+        )}
+      </div>
     </ModalShell>
   );
 }

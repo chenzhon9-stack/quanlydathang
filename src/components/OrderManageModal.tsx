@@ -460,6 +460,81 @@ export function OrderManageModal({
     })();
   }
 
+  /** P0/P1: Shift+S / Ctrl+Enter = lưu; Ctrl+D = copy khối xe cuối (chỉ khi editable) */
+  useEffect(() => {
+    if (!orderId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (
+        editable &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        (e.key === "d" || e.key === "D")
+      ) {
+        e.preventDefault();
+        setBlocks((rows) => {
+          if (rows.length >= 6 || !rows.length) return rows;
+          const src = rows[rows.length - 1]!;
+          const uid = () =>
+            `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const cloned: Block = {
+            key: `b-${uid()}`,
+            detailId: "",
+            isNew: true,
+            status: "Mới tạo",
+            transportTypeId: src.transportTypeId,
+            transportTypeName: src.transportTypeName,
+            canChonDvt: src.canChonDvt,
+            carrierId: src.carrierId,
+            carrierName: src.carrierName,
+            vehicleId: src.vehicleId,
+            vehicleName: src.vehicleName,
+            productId: src.productId,
+            productName: src.productName,
+            tyleChiahet: src.tyleChiahet,
+            regionId: src.regionId,
+            regionName: src.regionName,
+            note: src.note,
+            actualReceived: 0,
+            deliveries: src.deliveries.map((g) => ({
+              key: `gh-${uid()}`,
+              idGh: "",
+              isNew: true,
+              customerId: g.customerId,
+              customerName: g.customerName,
+              customerDetail: g.customerDetail,
+              requireCustomerDetail: g.requireCustomerDetail,
+              plannedQty: g.plannedQty,
+              actualQty: 0,
+            })),
+          };
+          return [...rows, cloned];
+        });
+        return;
+      }
+      if (!editable || busy) return;
+      const isShiftS =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "S" || e.key === "s");
+      const isCtrlEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+      if (isShiftS || isCtrlEnter) {
+        e.preventDefault();
+        void saveAll();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [orderId, busy, editable, onClose, blocks]);
+
   if (!orderId) return null;
 
   return (
@@ -469,7 +544,11 @@ export function OrderManageModal({
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col border">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col border"
+      >
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="font-bold text-slate-800 text-sm sm:text-base">
             Quản lý Đơn: {orderId}
@@ -995,9 +1074,15 @@ export function OrderManageModal({
               type="button"
               disabled={busy || loading}
               onClick={saveAll}
+              title="Shift+S hoặc Ctrl+Enter — lưu · Ctrl+D — copy khối xe cuối"
               className="px-4 py-2 text-sm font-bold rounded-xl bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-50"
             >
               {busy ? "Đang lưu…" : "💾 LƯU THAY ĐỔI"}
+              {!busy && (
+                <span className="ml-2 text-[11px] font-semibold opacity-80">
+                  ⇧S
+                </span>
+              )}
             </button>
           )}
           <button

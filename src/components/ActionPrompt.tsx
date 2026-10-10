@@ -59,13 +59,21 @@ export function ActionPrompt({
         onCancel();
         return;
       }
-      if (e.key === "Enter" && !busy) {
-        const t = e.target as HTMLElement | null;
-        if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-        if (e.ctrlKey || e.metaKey || !e.shiftKey) {
-          e.preventDefault();
-          void submit();
-        }
+      if (busy) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // P0: chỉ Shift+S hoặc Ctrl/Cmd+Enter — Enter thường không xác nhận
+      // (tránh lưu nhầm khi đang nhập số/ngày)
+      const isShiftS =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "S" || e.key === "s");
+      const isCtrlEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+      if (isShiftS || isCtrlEnter) {
+        e.preventDefault();
+        void submit();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -168,6 +176,7 @@ export function ActionPrompt({
             type="button"
             disabled={busy}
             onClick={submit}
+            title="Shift+S hoặc Ctrl+Enter"
             className={`px-3 py-1.5 text-sm rounded-lg text-white font-medium ${
               danger
                 ? "bg-red-600 hover:bg-red-500"
@@ -175,6 +184,11 @@ export function ActionPrompt({
             } disabled:opacity-60`}
           >
             {busy ? "Đang lưu…" : confirmLabel}
+            {!busy && (
+              <span className="ml-1 text-[11px] font-semibold opacity-80">
+                ⇧S
+              </span>
+            )}
           </button>
         </div>
       </div>

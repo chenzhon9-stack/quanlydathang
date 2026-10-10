@@ -1005,6 +1005,7 @@ export function MasterPicker({
       <button
         ref={triggerRef}
         type="button"
+        data-master-picker-trigger
         disabled={disabled}
         onClick={openPicker}
         className={`w-full text-left px-3 py-2 rounded-lg text-sm border whitespace-normal break-words leading-snug min-h-[40px] ${

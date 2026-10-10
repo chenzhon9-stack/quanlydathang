@@ -255,6 +255,75 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
     }
   }
 
+  /** P0/P1: Shift+S / Ctrl+Enter = lưu; Ctrl+D = copy khối xe cuối */
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // Ctrl+D — copy khối xe cuối (chỉ nhập liệu, không đổi rule)
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        (e.key === "d" || e.key === "D")
+      ) {
+        e.preventDefault();
+        setDetails((rows) => {
+          if (rows.length >= 6 || !rows.length) return rows;
+          const src = rows[rows.length - 1]!;
+          const uid = () =>
+            `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const cloned: DetailRow = {
+            key: `ct-${uid()}`,
+            transportTypeId: src.transportTypeId,
+            transportTypeName: src.transportTypeName,
+            canChonDvt: src.canChonDvt,
+            carrierId: src.carrierId,
+            carrierName: src.carrierName,
+            vehicleId: src.vehicleId,
+            vehicleName: src.vehicleName,
+            productId: src.productId,
+            productName: src.productName,
+            tyleChiahet: src.tyleChiahet,
+            regionId: src.regionId,
+            regionName: src.regionName,
+            note: src.note,
+            deliveries: (src.deliveries.length
+              ? src.deliveries
+              : [emptyDelivery()]
+            ).map((g) => ({
+              key: `d-${uid()}`,
+              customerId: g.customerId,
+              customerName: g.customerName,
+              plannedQty: g.plannedQty,
+            })),
+          };
+          return [...rows, cloned];
+        });
+        return;
+      }
+      if (busy) return;
+      const isShiftS =
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        (e.key === "S" || e.key === "s");
+      const isCtrlEnter = e.key === "Enter" && (e.ctrlKey || e.metaKey);
+      if (isShiftS || isCtrlEnter) {
+        e.preventDefault();
+        void submit();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, busy, onClose, details, supplierId, orderDateTime]);
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/55 p-3"
@@ -262,7 +331,11 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
         if (e.target === e.currentTarget && !busy) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col border border-slate-200">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col border border-slate-200"
+      >
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <h3 className="font-bold text-slate-800">+ Tạo đơn hàng mới</h3>
           <button
@@ -715,15 +788,25 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
           )}
         </div>
 
-        <div className="px-4 py-3 border-t">
+        <div className="px-4 py-3 border-t space-y-1">
           <button
             type="button"
             disabled={busy}
             onClick={submit}
+            title="Shift+S hoặc Ctrl+Enter — lưu · Ctrl+D — copy khối xe cuối"
             className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-bold text-sm disabled:opacity-50"
           >
             {busy ? "Đang tạo…" : "LƯU TẤT CẢ"}
+            {!busy && (
+              <span className="ml-2 text-[11px] font-semibold opacity-80">
+                ⇧S
+              </span>
+            )}
           </button>
+          <p className="text-[10px] text-slate-500 text-center">
+            ⇧S / Ctrl+Enter lưu · Ctrl+D copy khối xe · Enter trong picker =
+            chọn
+          </p>
         </div>
       </div>
     </div>
