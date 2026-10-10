@@ -38,6 +38,57 @@ function statusTone(st: string) {
   return "bg-amber-100 text-amber-800 border-amber-200";
 }
 
+/** Màu nền card mobile theo tiến độ — giống bản GAS (cam → vàng nhạt → xanh). */
+function planCardTone(p: PlanRow, pct: number) {
+  const st = String(p.status || "");
+  if (st.includes("Hủy")) return "bg-red-50 border-red-200";
+  if (st.includes("Hoàn") || pct >= 100) return "bg-green-100 border-green-200";
+  if (pct >= 70) return "bg-[#fff7e0] border-amber-200";
+  return "bg-[#ffe9d2] border-orange-200";
+}
+
+/** Chip trạng thái dạng tô nền (GAS): đang thực hiện = cam. */
+function planStatusChip(st: string) {
+  if (st.includes("Hoàn")) return "bg-green-400";
+  if (st.includes("Hủy")) return "bg-red-300";
+  return "bg-amber-500";
+}
+
+const iconProps = {
+  width: 18,
+  height: 18,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2.2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true,
+};
+function IconEye() {
+  return (
+    <svg {...iconProps}>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+function IconEdit() {
+  return (
+    <svg {...iconProps}>
+      <path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+function IconTrash() {
+  return (
+    <svg {...iconProps}>
+      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 export default function PlansPage() {
   const user = readClientUser();
   const canEdit = clientHasAny(user, [...ACTION.planUpdate, "KHSL_UPDATE", "*"]);
@@ -483,71 +534,90 @@ export default function PlansPage() {
           <div className="md:hidden space-y-3">
             {items.map((p) => {
               const pct = progressPct(p);
+              const cancelled = String(p.status).includes("Hủy");
+              const rows: [string, string][] = [
+                ["Mã KH", p.id],
+                ["Chương trình", p.programName],
+                ["NCC", p.supplierName || p.supplierId],
+                ["Sản phẩm", productLabel(p)],
+                ["Từ ngày", fmtDate(p.fromDate)],
+                ["Đến ngày", fmtDate(p.toDate)],
+                ["Kế hoạch", fmtNum(p.plannedQuantity)],
+                ["Thực tế", fmtNum(p.actualQuantity)],
+              ];
               return (
                 <div
                   key={p.id}
-                  className={`rounded-2xl border p-4 shadow-sm ${statusRowClass(p.status)}`}
+                  className={`rounded-2xl border p-2 shadow-sm ${planCardTone(p, pct)}`}
                 >
-                  <div className="flex justify-between gap-2 mb-2">
-                    <div>
-                      <div className="text-xs text-slate-500">{p.id}</div>
-                      <div className="font-semibold text-slate-800">
-                        {p.programName}
+                  <div className="border border-slate-300/70 rounded-md overflow-hidden text-[15px] leading-snug">
+                    {rows.map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex items-start justify-between gap-3 px-3 py-2 border-b border-slate-300/70 last:border-b-0"
+                      >
+                        <span className="shrink-0 font-semibold text-slate-400">
+                          {label}
+                        </span>
+                        <span className="text-right text-slate-900 break-words min-w-0">
+                          {value || "—"}
+                        </span>
                       </div>
-                      <div className="text-xs text-slate-600">
-                        {p.supplierName || p.supplierId}
-                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-300/70">
+                      <span className="shrink-0 font-semibold text-slate-400">%</span>
+                      <span className="font-bold text-slate-900 tabular-nums">
+                        {pct}%
+                      </span>
                     </div>
-                    <span
-                      className={`shrink-0 self-start text-[11px] px-2 py-0.5 rounded-full border ${statusTone(p.status)}`}
-                    >
-                      {p.status}
-                    </span>
-                  </div>
-                  <div className="text-xs text-slate-600 mb-2 line-clamp-2">
-                    {productLabel(p)}
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center text-xs mb-2">
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <div className="text-slate-500">KH</div>
-                      <div className="font-semibold">
-                        {fmtNum(p.plannedQuantity)}
-                      </div>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-300/70">
+                      <span className="shrink-0 font-semibold text-slate-400">
+                        Trạng thái
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 text-[15px] text-black ${planStatusChip(p.status)}`}
+                      >
+                        {p.status}
+                      </span>
                     </div>
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <div className="text-slate-500">Thực</div>
-                      <div className="font-semibold">
-                        {fmtNum(p.actualQuantity)}
-                      </div>
-                    </div>
-                    <div className="bg-white/70 rounded-lg p-2">
-                      <div className="text-slate-500">%</div>
-                      <div className="font-semibold">{pct}%</div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      onClick={() => setViewPlan(p)}
-                      className="px-2.5 py-1 text-[11px] rounded bg-slate-200"
-                    >
-                      Xem
-                    </button>
-                    {canEdit && !String(p.status).includes("Hủy") && (
-                      <>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-300/70">
+                      <span className="shrink-0 font-semibold text-slate-400">
+                        Hành động
+                      </span>
+                      <div className="flex items-center gap-1.5">
                         <button
-                          onClick={() => openEdit(p)}
-                          className="px-2.5 py-1 text-[11px] rounded bg-blue-600 text-white"
+                          type="button"
+                          title="Xem"
+                          aria-label="Xem"
+                          onClick={() => setViewPlan(p)}
+                          className="h-9 w-12 grid place-items-center rounded-lg bg-white border border-slate-300 text-black active:opacity-80"
                         >
-                          Sửa
+                          <IconEye />
                         </button>
-                        <button
-                          onClick={() => cancelPlan(p)}
-                          className="px-2.5 py-1 text-[11px] rounded bg-red-500 text-white"
-                        >
-                          Hủy
-                        </button>
-                      </>
-                    )}
+                        {canEdit && !cancelled && (
+                          <>
+                            <button
+                              type="button"
+                              title="Sửa"
+                              aria-label="Sửa"
+                              onClick={() => openEdit(p)}
+                              className="h-9 w-12 grid place-items-center rounded-lg bg-white border border-slate-300 text-black active:opacity-80"
+                            >
+                              <IconEdit />
+                            </button>
+                            <button
+                              type="button"
+                              title="Hủy kế hoạch"
+                              aria-label="Hủy kế hoạch"
+                              onClick={() => cancelPlan(p)}
+                              className="h-9 w-12 grid place-items-center rounded-lg bg-red-500 border border-red-600 text-black active:opacity-80"
+                            >
+                              <IconTrash />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
