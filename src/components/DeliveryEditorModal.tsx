@@ -197,6 +197,13 @@ export function DeliveryEditorModal({
     };
   }, [summary.productId, summary.tyleChiahet]);
 
+  // Đổi chi tiết / mode → xóa state cũ ngay (tránh flash dữ liệu lần mở trước)
+  useEffect(() => {
+    setRows([]);
+    setQtyDisp({});
+    setBusy(false);
+  }, [summary.detailId, mode]);
+
   useEffect(() => {
     if (initialRows && initialRows.length) {
       setRows(
@@ -215,6 +222,7 @@ export function DeliveryEditorModal({
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setRows([]); // không giữ rows chi tiết trước trong lúc fetch
       try {
         const token = localStorage.getItem("token");
         const qs = new URLSearchParams({

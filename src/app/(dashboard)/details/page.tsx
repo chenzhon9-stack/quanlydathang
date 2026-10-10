@@ -515,13 +515,19 @@ export default function DetailsPage() {
   }, [load]);
 
   async function openDeliveryModal(d: OrderDetail, mode: "plan" | "real" | "view") {
+    // Xóa rows cũ trước khi mở — tránh modal flash dữ liệu chi tiết trước
+    setDeliveryRows([]);
     setDeliveryTarget({ detail: d, mode });
     setDeliveryLoading(true);
     try {
       const token = localStorage.getItem("token");
+      const y =
+        d.orderDate && /^\d{4}/.test(d.orderDate)
+          ? d.orderDate.slice(0, 4)
+          : String(new Date().getFullYear());
       const qs = new URLSearchParams({
         detailId: d.detailId,
-        year: String(new Date().getFullYear()),
+        year: y,
         pageSize: "50",
       });
       const res = await fetch(`/api/v1/deliveries?${qs}`, {
@@ -1698,6 +1704,7 @@ export default function DetailsPage() {
       {/* ── Modal Giao / Sửa KH / Xem (V21) ── */}
       {deliveryTarget && (
         <DeliveryEditorModal
+          key={`detail-${deliveryTarget?.detail?.detailId || ""}-${deliveryTarget?.mode || ""}`}
           mode={deliveryTarget.mode}
           summary={summaryFromDetail(deliveryTarget.detail)}
           initialRows={deliveryRows}

@@ -893,6 +893,7 @@ export default function DeliveriesPage() {
       )}
       {modalTarget && (
         <DeliveryEditorModal
+          key={`${modalTarget.delivery.detailId}-${modalTarget.mode}-${modalTarget.delivery.deliveryId || ""}`}
           mode={modalTarget.mode}
           summary={summaryFromDelivery(modalTarget.delivery)}
           onClose={() => setModalTarget(null)}
