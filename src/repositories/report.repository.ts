@@ -50,8 +50,8 @@ function planOverlapsYear(
   year?: number
 ): boolean {
   if (year == null) return true;
-  const y1 = yearOfDate(fromDate);
-  const y2 = yearOfDate(toDate);
+  const y1 = fromDate ? yearOfDate(fromDate) : null;
+  const y2 = toDate ? yearOfDate(toDate) : null;
   if (y1 == null && y2 == null) return false;
   const startY = y1 ?? (y2 as number);
   const endY = y2 ?? (y1 as number);
