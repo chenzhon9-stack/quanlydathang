@@ -10,7 +10,8 @@ import {
   matchStatuses,
   matchSearch,
 } from "@/components/ListToolbar";
-import { StatusBadge, PlateBadge } from "@/components/StatusBadge";
+import { StatusBadge, PlateLink } from "@/components/StatusBadge";
+import { transportSub } from "@/lib/transport-sub";
 import { ActionPrompt, apiPost, apiPatch } from "@/components/ActionPrompt";
 import { downloadExcelHtml } from "@/lib/export-excel";
 import { MasterPicker } from "@/components/MasterPicker";
@@ -66,15 +67,6 @@ function fmtDateVN(ymd?: string) {
 function fmtNum(n?: number | null) {
   if (n == null || Number.isNaN(n)) return "—";
   return n.toLocaleString("vi-VN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function transportSub(d: OrderDetail) {
-  const t = (d.transportTypeName || d.transportTypeId || "").toLowerCase();
-  if (t.includes("npp") || t.includes("nhà phân")) return "NPP vận chuyển";
-  if (t.includes("khách") || t.includes("kh ")) return "KH vận chuyển";
-  if (t.includes("ncc")) return "NCC vận chuyển";
-  if (t.includes("thuê")) return "Thuê ngoài";
-  return d.transportTypeName || "";
 }
 
 function tonConLai(d: OrderDetail) {
@@ -291,7 +283,7 @@ function DetailActions({
 }) {
   const st = normCtStatus(String(d.status || ""));
   const btn =
-    "min-h-[40px] px-3 py-2 text-xs font-bold rounded-xl border shadow-sm whitespace-nowrap active:scale-[0.98]";
+    "min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-md border whitespace-nowrap active:opacity-80";
   const guiLai = !!(d as { guiLaimail?: boolean }).guiLaimail;
 
   if (st === "CANCEL" || st === "DELETE" || st === "DONE") {
@@ -997,7 +989,7 @@ export default function DetailsPage() {
   }
 
   const primaryBtn =
-    "w-full py-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-sm disabled:opacity-50";
+    "w-full py-2 rounded-lg bg-sky-500 hover:bg-sky-400 text-white font-semibold text-sm disabled:opacity-50";
 
   return (
     <div className="space-y-4 max-w-full">
@@ -1011,7 +1003,7 @@ export default function DetailsPage() {
         <div className="flex gap-2">
           <button
             onClick={() => load(page)}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
           >
             Tải lại
           </button>
@@ -1053,7 +1045,7 @@ export default function DetailsPage() {
           <button
             type="button"
             onClick={() => setColOpen(true)}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
           >
             Tùy chỉnh cột
           </button>
@@ -1148,18 +1140,15 @@ export default function DetailsPage() {
                       {show("plate") && (
                         <div className="flex items-center justify-between gap-2 py-1">
                           <span className="text-[13px] opacity-80">Biển số</span>
-                          {d.orderId ? (
-                            <Link
-                              href={`/orders?q=${encodeURIComponent(d.orderId)}`}
-                              className={PLATE_CLASS + " hover:opacity-90"}
-                            >
-                              {d.vehiclePlate || d.vehicleId || "—"}
-                            </Link>
-                          ) : (
+                          <PlateLink
+                            orderFile={d.orderFile}
+                            orderId={d.orderId}
+                            className="inline-flex hover:opacity-90"
+                          >
                             <span className={PLATE_CLASS}>
                               {d.vehiclePlate || d.vehicleId || "—"}
                             </span>
-                          )}
+                          </PlateLink>
                         </div>
                       )}
                       {show("id") &&
@@ -1208,7 +1197,7 @@ export default function DetailsPage() {
                         </div>
                       )}
                       <div className="pt-2 mt-1 border-t border-black/10">
-                        <div className="flex flex-wrap gap-2 [&_button]:min-h-[40px] [&_button]:px-3 [&_button]:rounded-xl">
+                        <div className="flex flex-wrap gap-2 [&_button]:min-h-[30px] [&_button]:px-2.5 [&_button]:rounded-md">
                           <DetailActions d={d} h={handlers} canReceive={canReceive} canCancel={canCancelDetail} canDeliver={canReceive || canCancelDetail} />
                         </div>
                       </div>
@@ -1281,30 +1270,13 @@ export default function DetailsPage() {
                             if (c.key === "plate")
                               return (
                                 <td key={c.key} className="px-2 py-2">
-                                  <div className="flex flex-col gap-0.5">
-                                    {d.orderId ? (
-                                      <Link
-                                        href={`/orders?q=${encodeURIComponent(d.orderId)}`}
-                                        className="inline-flex"
-                                      >
-                                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                                      </Link>
-                                    ) : (
-                                      <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                                    )}
-                                    {d.orderFile ? (
-                                      <a
-                                        href={d.orderFile}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-[10px] text-red-600 font-semibold"
-                                      >
-                                        📄 PDF
-                                      </a>
-                                    ) : null}
-                                  </div>
+                                  <PlateLink
+                                    plate={d.vehiclePlate || d.vehicleId}
+                                    orderFile={d.orderFile}
+                                    orderId={d.orderId}
+                                  />
                                   {transportSub(d) && (
-                                    <div className="text-[10px] opacity-70 mt-0.5">
+                                    <div className="text-[11px] opacity-80 mt-0.5">
                                       {transportSub(d)}
                                     </div>
                                   )}
@@ -1488,7 +1460,7 @@ export default function DetailsPage() {
               <button
                 disabled={page <= 1}
                 onClick={() => load(page - 1)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 disabled:opacity-40"
               >
                 ‹ Trước
               </button>
@@ -1498,7 +1470,7 @@ export default function DetailsPage() {
               <button
                 disabled={!hasMore}
                 onClick={() => load(page + 1)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 disabled:opacity-40"
               >
                 Sau ›
               </button>

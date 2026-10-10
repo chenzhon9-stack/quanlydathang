@@ -11,7 +11,8 @@ import {
   matchSearch,
 } from "@/components/ListToolbar";
 import type { Delivery } from "@/types";
-import { PlateBadge, StatusBadge } from "@/components/StatusBadge";
+import { PlateLink, StatusBadge } from "@/components/StatusBadge";
+import { transportSub } from "@/lib/transport-sub";
 import { statusRowClass, statusBadgeClass, PLATE_CLASS, DATE_GROUP_HEADER, matchStatusFilter } from "@/lib/status-styles";
 import { ColumnCustomizer } from "@/components/ColumnCustomizer";
 import {
@@ -363,7 +364,7 @@ export default function DeliveriesPage() {
         <div className="flex gap-2">
           <button
             onClick={() => load(page)}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
           >
             Tải lại
           </button>
@@ -385,14 +386,14 @@ export default function DeliveriesPage() {
                 ])
               );
             }}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-emerald-700 text-white"
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-700 text-white"
           >
             Xuất Excel
           </button>
           <button
             type="button"
             onClick={() => setColOpen(true)}
-            className="px-3 py-2 text-xs font-medium rounded-lg bg-white border border-slate-200"
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
           >
             Tùy chỉnh cột
           </button>
@@ -494,18 +495,15 @@ export default function DeliveriesPage() {
                       {show("plate") && (
                         <div className="flex items-center justify-between gap-2 py-1">
                           <span className="text-[13px] opacity-80">Biển số</span>
-                          {d.orderId ? (
-                            <Link
-                              href={`/orders?q=${encodeURIComponent(d.orderId)}`}
-                              className={PLATE_CLASS + " hover:opacity-90"}
-                            >
-                              {d.vehiclePlate || d.vehicleId || "—"}
-                            </Link>
-                          ) : (
+                          <PlateLink
+                            orderFile={d.orderFile}
+                            orderId={d.orderId}
+                            className="inline-flex hover:opacity-90"
+                          >
                             <span className={PLATE_CLASS}>
                               {d.vehiclePlate || d.vehicleId || "—"}
                             </span>
-                          )}
+                          </PlateLink>
                         </div>
                       )}
                       {show("id") &&
@@ -597,7 +595,7 @@ export default function DeliveriesPage() {
                               mode: modeFromDelivery(d, canUpdateDelivery),
                             })
                           }
-                          className={`min-h-[40px] min-w-[88px] px-4 rounded-xl text-sm font-bold border-2 shadow-sm active:scale-[0.98] ${
+                          className={`min-h-[30px] min-w-[64px] px-3 rounded-md text-xs font-semibold border active:opacity-80 ${
                             viewOnly
                               ? "bg-white/90 text-slate-700 border-slate-400"
                               : label === "Sửa"
@@ -682,28 +680,16 @@ export default function DeliveriesPage() {
                             if (c.key === "plate")
                               return (
                                 <td key={c.key} className="px-3 py-2.5">
-                                  <div className="flex flex-col gap-0.5">
-                                    {d.orderId ? (
-                                      <Link
-                                        href={`/orders?q=${encodeURIComponent(d.orderId)}`}
-                                        className="inline-flex"
-                                      >
-                                        <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                                      </Link>
-                                    ) : (
-                                      <PlateBadge plate={d.vehiclePlate || d.vehicleId} />
-                                    )}
-                                    {d.orderFile ? (
-                                      <a
-                                        href={d.orderFile}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-[10px] text-red-600 font-semibold"
-                                      >
-                                        📄 PDF
-                                      </a>
-                                    ) : null}
-                                  </div>
+                                  <PlateLink
+                                    plate={d.vehiclePlate || d.vehicleId}
+                                    orderFile={d.orderFile}
+                                    orderId={d.orderId}
+                                  />
+                                  {transportSub(d) && (
+                                    <div className="text-[11px] opacity-80 mt-0.5">
+                                      {transportSub(d)}
+                                    </div>
+                                  )}
                                 </td>
                               );
                             if (c.key === "orderId")
@@ -842,7 +828,7 @@ export default function DeliveriesPage() {
                                         mode: modeFromDelivery(d, canUpdateDelivery),
                                       });
                                     }}
-                                    className={`px-2.5 py-1 text-[11px] font-bold rounded border shadow-sm ${
+                                    className={`px-2 py-0.5 text-xs font-semibold rounded border ${
                                       isViewOnly(d)
                                         ? "bg-white text-slate-600 border-slate-300"
                                         : actionLabel(d) === "Sửa"
@@ -873,7 +859,7 @@ export default function DeliveriesPage() {
               <button
                 disabled={page <= 1}
                 onClick={() => load(page - 1)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 disabled:opacity-40"
               >
                 ‹ Trước
               </button>
@@ -883,7 +869,7 @@ export default function DeliveriesPage() {
               <button
                 disabled={!hasMore}
                 onClick={() => load(page + 1)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
+                className="px-2.5 py-1 text-xs font-semibold rounded-md border border-slate-300 disabled:opacity-40"
               >
                 Sau ›
               </button>
