@@ -12,7 +12,7 @@ import {
   resolveAllowedSupplierIds, applyListScopeFilter } from "@/lib/scope";
 import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
-import { updateSheetRowByKey } from "@/lib/sheets/dal";
+import { updateSheetRowByKey, invalidateSheetCache } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { writeAudit } from "@/lib/sheets/audit";
@@ -1325,6 +1325,11 @@ export class OrderService {
               }),
               year: y,
             });
+            try {
+              invalidateSheetCache([SHEETS.DH, SHEETS.CT, SHEETS.LOG_GUI_MAIL], y);
+            } catch {
+              /* ignore */
+            }
             return recovered;
           }
           throw {
@@ -1407,6 +1412,11 @@ export class OrderService {
             }),
             year: y,
           });
+          try {
+            invalidateSheetCache([SHEETS.DH, SHEETS.CT, SHEETS.LOG_GUI_MAIL], y);
+          } catch {
+            /* ignore */
+          }
           return recovered;
         }
         const errMsg = cleanMsg(
@@ -1441,6 +1451,13 @@ export class OrderService {
         }),
         year: y,
       });
+
+      // GAS đã ghi LanGui/CT trên Sheet — xóa cache Vercel để listOrders thấy ngay
+      try {
+        invalidateSheetCache([SHEETS.DH, SHEETS.CT, SHEETS.LOG_GUI_MAIL], y);
+      } catch (e) {
+        console.warn("[sendOrder] invalidateSheetCache after GAS", e);
+      }
 
       const notified = gasBody.notifiedNcc !== false;
       // Nhánh GAS chỉ còn email/zalo (APP return sớm phía trên)

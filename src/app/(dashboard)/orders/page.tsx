@@ -160,8 +160,24 @@ function OrderActions({
       appGuide?: boolean;
       isDuyenHa?: boolean;
       dayDiff?: number;
+      via?: string;
     };
     const ch = (data?.channel || methodNorm || "").toLowerCase();
+    /** Email/Zalo qua GAS — Sheet cập nhật phía GAS; đợi + refresh để LanGui/nút đúng */
+    const refreshList = async (via?: string) => {
+      const isGas =
+        via === "gas" ||
+        ch.includes("zalo") ||
+        ch.includes("email") ||
+        ch.includes("mail");
+      if (isGas) {
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+      onChanged?.();
+      if (isGas) {
+        setTimeout(() => onChanged?.(), 2500);
+      }
+    };
     // Gửi muộn (mọi kênh kể cả APP) → mở modal chọn phương án
     if (data?.needConfirm) {
       onNeedSendAction?.({
@@ -179,7 +195,7 @@ function OrderActions({
         data?.message ||
           `NCC nhận đơn qua APP.\nVui lòng mở ứng dụng nhà cung cấp để đặt đơn ${o.orderId}.`
       );
-      onChanged?.();
+      await refreshList(data?.via || "app");
       return;
     }
     const base =
@@ -194,7 +210,7 @@ function OrderActions({
             ? `\nKênh: ${method}.`
             : "";
     alert(base + extra);
-    onChanged?.();
+    await refreshList(data?.via || ch);
   }
 
   if (terminal) {
@@ -417,7 +433,10 @@ export default function OrdersPage() {
           message: "",
           loading: false,
         });
+        // GAS send/reset: đợi Sheet rồi reload (2 lần)
+        await new Promise((r) => setTimeout(r, 1200));
         load();
+        setTimeout(() => load(), 2500);
       } catch (e) {
         alert("Lỗi: " + (e instanceof Error ? e.message : String(e)));
         setSendModal((s) => ({ ...s, loading: false }));
