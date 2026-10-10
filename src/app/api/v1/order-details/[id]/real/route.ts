@@ -7,6 +7,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /** PUT /api/v1/order-details/:id/real — Lưu thực giao batch (V21 saveDeliveryData realMode) */
 export async function PUT(req: NextRequest, ctx: Ctx) {
+  let detailId = "";
   try {
     const token =
       req.headers.get("authorization")?.replace("Bearer ", "") || null;
@@ -15,6 +16,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401);
 
     const { id } = await ctx.params;
+    detailId = decodeURIComponent(id);
     const body = await req.json().catch(() => ({}));
     const year = body.year ? Number(body.year) : new Date().getFullYear();
     const rows = Array.isArray(body.rows) ? body.rows : [];
@@ -23,7 +25,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       adminOverride: !!body.adminOverride,
     };
     const result = await DeliveryService.saveReal(
-      decodeURIComponent(id),
+      detailId,
       rows,
       options,
       user,
@@ -55,7 +57,7 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     }
     if (err?.code) {
       console.warn("[order-details/real]", err.code, err.message, {
-        id: decodeURIComponent(id),
+        id: detailId || undefined,
       });
       return jsonResponse(error(err.code, err.message || ""), 400);
     }
