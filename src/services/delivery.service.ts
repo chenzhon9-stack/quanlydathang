@@ -1,11 +1,14 @@
 import { writeAudit } from "@/lib/sheets/audit";
 import type { AccessScope, Delivery, UserContext } from "@/types";
-import { hasPermission } from "@/lib/auth";
+import { hasPermission, resolveScope } from "@/lib/auth";
 import {
+  resolveAllowedSupplierIds,
+  resolveAllowedCustomerIds,
   resolveOwnerOrderIdSet,
   filterByOwnerOrderIds,
   filterByCustomerIds,
-  resolveAllowedCustomerIds, applyListScopeFilter } from "@/lib/scope";
+  applyListScopeFilter,
+} from "@/lib/scope";
 import { DeliveryRepository } from "@/repositories/delivery.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
@@ -239,6 +242,68 @@ export class DeliveryService {
         code: "VALIDATION_ERROR",
         message: "Chi tiết đã xóa khỏi đơn, không được lưu giao hàng.",
       };
+    }
+
+    // P0: Data Scope trên bản ghi GH / CT / KH
+    {
+      const scope = resolveScope(user);
+      if (scope.scopeType !== "ALL") {
+        const khAllowed = await resolveAllowedCustomerIds(scope);
+        const targetKh = String(
+          payload.customerId || current.customerId || ""
+        ).trim();
+        if (khAllowed) {
+          if (
+            targetKh &&
+            !khAllowed.has(targetKh) &&
+            !khAllowed.has(targetKh.toUpperCase())
+          ) {
+            throw {
+              code: "PERMISSION_DENIED",
+              message: "Khách hàng ngoài phạm vi quản lý — không được cập nhật GH.",
+            };
+          }
+        }
+        const nccAllowed = await resolveAllowedSupplierIds(scope);
+        const sid = String(ct.supplierId || "").trim();
+        if (nccAllowed) {
+          if (
+            sid &&
+            !nccAllowed.has(sid) &&
+            !nccAllowed.has(sid.toUpperCase())
+          ) {
+            throw {
+              code: "PERMISSION_DENIED",
+              message: "NCC ngoài phạm vi quản lý — không được cập nhật GH.",
+            };
+          }
+        }
+        // OWNER-only: chỉ đơn do mình tạo
+        if (
+          (scope.scopeType === "OWNER" || !!scope.allowOwner) &&
+          !scope.allowManagement &&
+          scope.scopeType !== "UNION"
+        ) {
+          const { OrderRepository } = await import(
+            "@/repositories/order.repository"
+          );
+          const order = await OrderRepository.findById(ct.orderId, y).catch(
+            () => null
+          );
+          const em = String(scope.ownerEmail || user.email || "")
+            .toLowerCase()
+            .trim();
+          const by = String(order?.createdBy || "")
+            .toLowerCase()
+            .trim();
+          if (em && by && by !== em) {
+            throw {
+              code: "PERMISSION_DENIED",
+              message: "Chỉ thao tác giao hàng trên đơn do mình tạo.",
+            };
+          }
+        }
+      }
     }
 
     // HH: chia hết + hao hụt

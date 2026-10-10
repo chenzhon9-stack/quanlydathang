@@ -166,7 +166,7 @@ export class ReportService {
   static async getPlans(
     filter: ReportFilter,
     user: UserContext,
-    _scope: AccessScope
+    scope: AccessScope
   ) {
     if (
       !hasPermission(user, "REPORT_VIEW") &&
@@ -182,10 +182,24 @@ export class ReportService {
     const year = filter.year ?? new Date().getFullYear();
     let plans = await ReportRepository.getPlans(year);
 
+    // P0: Data Scope — không tin supplierId client là phạm vi được cấp
+    const allowed = await resolveAllowedSupplierIds(scope);
+    plans = filterBySupplierIds(plans, allowed);
+
     if (filter.supplierId) {
-      plans = plans.filter(
-        (p: ProductionPlan) => p.supplierId === filter.supplierId
-      );
+      const sid = String(filter.supplierId).trim();
+      // Chỉ giữ nếu nằm trong scope (allowed null = ALL)
+      if (
+        allowed &&
+        !allowed.has(sid) &&
+        !allowed.has(sid.toUpperCase())
+      ) {
+        plans = [];
+      } else {
+        plans = plans.filter(
+          (p: ProductionPlan) => p.supplierId === filter.supplierId
+        );
+      }
     }
 
     return applyPagination(plans, filter.page, filter.pageSize);

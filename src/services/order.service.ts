@@ -6,7 +6,7 @@ import {
   ymdDate,
 } from "@/lib/sheets/date";
 import type { AccessScope, Order, UserContext } from "@/types";
-import { hasPermission } from "@/lib/auth";
+import { hasPermission, resolveScope } from "@/lib/auth";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds, applyListScopeFilter } from "@/lib/scope";
@@ -243,9 +243,9 @@ export class OrderService {
     user: UserContext,
     year?: number
   ) {
+    // P0: hủy đơn chỉ ORDER_CANCEL / * — không dùng ORDER_UPDATE thay thế
     if (
       !hasPermission(user, "ORDER_CANCEL") &&
-      !hasPermission(user, "ORDER_UPDATE") &&
       !hasPermission(user, "*")
     ) {
       throw { code: "PERMISSION_DENIED", message: "Không có quyền hủy đơn" };
@@ -259,6 +259,25 @@ export class OrderService {
     const { DeliveryRepository } = await import(
       "@/repositories/delivery.repository"
     );
+    const { OrderRepository } = await import(
+      "@/repositories/order.repository"
+    );
+
+    const order = await OrderRepository.findById(orderId, y);
+    if (!order) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
+    }
+    // P0: scope / OWNER — không hủy đơn ngoài phạm vi
+    {
+      const scope = resolveScope(user);
+      const visible = await applyListScopeFilter([order], scope, y);
+      if (!visible.length) {
+        throw {
+          code: "PERMISSION_DENIED",
+          message: "Đơn ngoài phạm vi quản lý — không được hủy.",
+        };
+      }
+    }
 
     const details = await DetailRepository.findMany({
       year: y,
@@ -1217,9 +1236,7 @@ export class OrderService {
       // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
       const baselineLanGui = Number(lanGui) || 0;
-      const WINDOW_MS = 5 * 60 * 1000;
-	const windowId = Math.floor(Date.now() / WINDOW_MS);
-	const idempotencyKey = `send:${orderId}:w${windowId}:${action || "default"}`;
+      const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
       const payload: Record<string, unknown> = {
         action: "sendOrderEmail",
         maDon: orderId,

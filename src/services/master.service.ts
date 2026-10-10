@@ -2,7 +2,11 @@
  * Master CRUD — parity V21 getMasterRows / saveMasterRow / deleteMasterRow / toggleMasterRow
  */
 import type { UserContext } from "@/types";
-import { isAdminRole, hasPermission } from "@/lib/auth";
+import { isAdminRole, hasPermission, resolveScope } from "@/lib/auth";
+import {
+  resolveAllowedSupplierIds,
+  resolveAllowedCustomerIds,
+} from "@/lib/scope";
 import {
   getMasterConfig,
   getMasterSchemaPublic,
@@ -85,7 +89,53 @@ export class MasterService {
     const type = this.assertType(typeRaw);
     const cfg = getMasterConfig(type)!;
     const schema = getMasterSchemaPublic(type);
-    const rows = await MasterRepository.list(type);
+    let rows = await MasterRepository.list(type);
+
+    // P0: Data Scope — NCC / KH / NCC_HH (không chỉ lọc UI)
+    const scope = resolveScope(user);
+    if (scope.scopeType !== "ALL") {
+      const needNcc =
+        scope.scopeType === "MANAGEMENT" ||
+        scope.scopeType === "UNION" ||
+        !!scope.allowManagement;
+      const needKh =
+        scope.scopeType === "OWN_CUSTOMER" ||
+        scope.scopeType === "UNION" ||
+        !!scope.allowOwnCustomer;
+
+      if ((type === "NCC" || type === "NCC_HH") && needNcc) {
+        const allowed = await resolveAllowedSupplierIds(scope);
+        // null = ALL (không lọc); empty Set = DENIED
+        if (allowed) {
+          rows = rows.filter((r) => {
+            const id = String(
+              (r as Record<string, unknown>).MaNCC ||
+                (r as Record<string, unknown>).MaNcc ||
+                (r as Record<string, unknown>).maNCC ||
+                ""
+            ).trim();
+            if (!id) return false;
+            return allowed.has(id) || allowed.has(id.toUpperCase());
+          });
+        }
+      }
+      if (type === "KH" && needKh) {
+        const allowed = await resolveAllowedCustomerIds(scope);
+        if (allowed) {
+          rows = rows.filter((r) => {
+            const id = String(
+              (r as Record<string, unknown>).MaKh ||
+                (r as Record<string, unknown>).MaKH ||
+                (r as Record<string, unknown>).maKh ||
+                ""
+            ).trim();
+            if (!id) return false;
+            return allowed.has(id) || allowed.has(id.toUpperCase());
+          });
+        }
+      }
+    }
+
     return {
       type,
       schema,

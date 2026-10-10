@@ -11,8 +11,8 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
   /** STEP 7: ORDER_UPDATE / PLAN_UPDATE / PAYABLE_CANCEL — tách khỏi CREATE */
   ADMIN: ["*"],
   MANAGER: [
+    // Read-only: dashboard/báo cáo — không DELIVERY_UPDATE / ORDER_* / PLAN_UPDATE
     "DELIVERY_VIEW",
-    "DELIVERY_UPDATE",
     "DELIVERY_VIEW_ACTUAL_RECEIVE",
     "DELIVERY_VIEW_ACTUAL_DELIVER",
     "PLAN_VIEW",
