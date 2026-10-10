@@ -73,7 +73,10 @@ export class ReportRepository {
       const rows = await readSheetAsObjects(SHEETS.orders, { year });
       const orders = rows.map(mapOrderRow).filter((o) => o.orderId);
       // Hợp đồng năm: khớp OrderRepository — chỉ dòng yearOfDate === year
-      return orders.filter((o) => yearOfDate(o.orderDate) === year);
+      return orders.filter((o) => {
+        if (!o.orderDate) return false;
+        return yearOfDate(o.orderDate) === year;
+      });
     } catch (e) {
       console.error("[ReportRepository] getOrders failed", e);
       return [];
@@ -95,7 +98,9 @@ export class ReportRepository {
       const rows = await readSheetAsObjects(SHEETS.details, { year });
       const details = rows.map(mapDetailRow).filter((d) => d.detailId);
       return details.filter((d) => {
-        const y = yearOfDate(d.orderDate || d.receivedDate);
+        const raw = d.orderDate || d.receivedDate;
+        if (!raw) return true; // thiếu ngày → giữ (sheet đã chọn theo year)
+        const y = yearOfDate(raw);
         return y == null || y === year;
       });
     } catch (e) {
