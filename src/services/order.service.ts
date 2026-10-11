@@ -69,14 +69,20 @@ export class OrderService {
 
     const nccMap = await MasterRepository.nccNames();
     const nccSend = await MasterRepository.nccSendMethods();
+    const resolveSend = (sid: string) => {
+      const k = String(sid || "").trim();
+      if (!k) return "";
+      return (
+        nccSend[k] ||
+        nccSend[k.toUpperCase()] ||
+        nccSend[k.toLowerCase()] ||
+        ""
+      );
+    };
     orders = orders.map((o) => ({
       ...o,
       supplierName: o.supplierName || nccMap[o.supplierId] || o.supplierId,
-      sendMethod:
-        o.sendMethod ||
-        nccSend[o.supplierId] ||
-        nccSend[String(o.supplierId || "").toUpperCase()] ||
-        "",
+      sendMethod: o.sendMethod || resolveSend(o.supplierId) || "",
     }));
 
     const page = Math.max(1, filter.page ?? 1);

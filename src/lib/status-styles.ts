@@ -93,7 +93,7 @@ export function statusChipClass(status: string): string {
 
 /** Biển số kiểu V21 */
 export const PLATE_CLASS =
-  "inline-block bg-[#facc15] text-black px-2.5 py-0.5 rounded font-black text-[12px] border-2 border-slate-800 shadow-[inset_1px_1px_1px_#fff,2px_2px_4px_rgba(0,0,0,.25)] tracking-wide";
+  "inline-block bg-[#facc15] text-black px-2.5 py-1 rounded font-black text-[14px] sm:text-[15px] border-2 border-slate-800 shadow-[inset_1px_1px_1px_#fff,2px_2px_4px_rgba(0,0,0,.25)] tracking-wide leading-none";
 
 export const DATE_GROUP_HEADER =
   "sticky top-0 z-10 rounded-xl bg-[#1a3a5c] text-white px-3.5 py-2.5 text-sm font-semibold shadow-md";

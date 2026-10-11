@@ -25,7 +25,7 @@ export function PlateBadge({
 }) {
   if (!plate) return <span className="text-slate-400">—</span>;
   const base =
-    "inline-block bg-[#facc15] text-black px-2 py-0.5 rounded font-black text-[12px] border-2 border-slate-800 shadow-[inset_1px_1px_1px_#fff,2px_2px_4px_rgba(0,0,0,.25)] tracking-wide leading-none";
+    "inline-block bg-[#facc15] text-black px-2.5 py-1 rounded font-black text-[14px] sm:text-[15px] border-2 border-slate-800 shadow-[inset_1px_1px_1px_#fff,2px_2px_4px_rgba(0,0,0,.25)] tracking-wide leading-none";
   const hover = interactive
     ? " transition duration-150 ease-out group-hover:brightness-110 group-hover:scale-105 group-hover:shadow-md group-hover:ring-2 group-hover:ring-amber-400 group-hover:border-amber-700"
     : "";

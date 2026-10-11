@@ -37,10 +37,12 @@ function formatSendMethod(raw?: string | null): string {
   const n = s
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-  if (n.includes("email") || n.includes("mail") || n.includes("thu")) return "Email";
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+  if (n.includes("email") || n === "mail" || n.includes("gmail")) return "Email";
   if (n.includes("zalo")) return "Zalo";
-  if (n.includes("app") || n.includes("ung dung")) return "APP";
+  if (n.includes("app") || n.includes("ungdung")) return "APP";
+  // Giữ nguyên nếu NCC ghi nhãn khác
   return s;
 }
 
@@ -48,11 +50,11 @@ function OrderStatusCell({ o }: { o: Order }) {
   const label = STATUS_LABEL[o.status] || o.status;
   const method = formatSendMethod(o.sendMethod);
   return (
-    <div className="flex flex-col items-start gap-0.5">
+    <div className="flex flex-col items-start gap-0.5 min-w-0">
       <StatusBadge status={label} />
       {method ? (
         <span
-          className="text-[10px] font-medium text-slate-500 leading-tight"
+          className="text-[11px] font-semibold text-indigo-700 leading-tight"
           title={`Hình thức gửi NCC: ${o.sendMethod || method}`}
         >
           Gửi: {method}

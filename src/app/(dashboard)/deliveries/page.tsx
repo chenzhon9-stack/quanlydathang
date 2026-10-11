@@ -685,11 +685,11 @@ export default function DeliveriesPage() {
                                     orderFile={d.orderFile}
                                     orderId={d.orderId}
                                   />
-                                  {transportSub(d) && (
-                                    <div className="text-[11px] opacity-80 mt-0.5">
+                                  {transportSub(d) ? (
+                                    <div className="text-[10px] text-slate-500 font-medium mt-0.5 leading-tight max-w-[9rem]">
                                       {transportSub(d)}
                                     </div>
-                                  )}
+                                  ) : null}
                                 </td>
                               );
                             if (c.key === "orderId")
