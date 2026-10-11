@@ -1,5 +1,9 @@
 "use client";
-import { effectivePlanStatus } from "@/lib/plan-status";
+import {
+  computePlanStatus,
+  planProgressPct,
+  planPctBand,
+} from "@/lib/plan-status";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -28,46 +32,35 @@ function fmtDate(ymd?: string) {
 }
 
 function progressPct(p: PlanRow) {
-  if (!p.plannedQuantity) return 0;
-  return Math.round((Number(p.actualQuantity || 0) / p.plannedQuantity) * 1000) / 10;
+  return planProgressPct(p.plannedQuantity, p.actualQuantity);
 }
 
 /**
- * Màu nền dòng/card kế hoạch — parity V21 (GAS):
- * - Hủy: đỏ nhạt
- * - Hoàn thành / %≥100: xanh
- * - Quá hạn hoặc %≥70: vàng kem
- * - % 40–70: cam nhạt
- * - % <40: hồng nhạt (như bảng GAS)
+ * Màu nền dòng: theo % HT (V21 renderKeHoachList).
+ * Hủy → xám; không suy status lúc render.
  */
 function planRowTone(p: PlanRow, pct: number, withBorder = false) {
-  // Status hiệu lực (V21): Hủy / Hoàn thành / Quá hạn / Đang thực hiện
-  const st = effectivePlanStatus(p);
-
+  const st = String(p.status || "");
   let bg: string;
   let border: string;
   if (st.includes("Hủy")) {
-    bg = "bg-red-50";
-    border = "border-red-200";
-  } else if (st.includes("Hoàn")) {
-    // Không tô xanh chỉ vì %≥100 nếu sheet chưa đánh Hoàn thành
-    bg = "bg-emerald-50";
-    border = "border-emerald-200";
-  } else if (st.includes("Quá hạn") && pct >= 70) {
-    bg = "bg-amber-50";
-    border = "border-amber-200";
-  } else if (st.includes("Quá hạn")) {
-    bg = "bg-rose-50";
-    border = "border-rose-200";
-  } else if (pct >= 70) {
-    bg = "bg-[#fff7e0]";
-    border = "border-amber-200";
-  } else if (pct >= 40) {
-    bg = "bg-[#ffe9d2]";
-    border = "border-orange-200";
+    bg = "bg-[#E5E7EB]";
+    border = "border-slate-300";
   } else {
-    bg = "bg-[#fde2e2]";
-    border = "border-rose-200";
+    const band = planPctBand(pct);
+    if (band === "done") {
+      bg = "bg-[#dcfce7]";
+      border = "border-emerald-200";
+    } else if (band === "high") {
+      bg = "bg-[#fef9e7]";
+      border = "border-amber-200";
+    } else if (band === "mid") {
+      bg = "bg-[#ffedd5]";
+      border = "border-orange-200";
+    } else {
+      bg = "bg-[#fee2e2]";
+      border = "border-rose-200";
+    }
   }
   return withBorder ? `${bg} ${border}` : bg;
 }
@@ -78,17 +71,17 @@ function planCardTone(p: PlanRow, pct: number) {
 
 /** Chip trạng thái dạng tô nền (GAS). */
 function planStatusChip(st: string) {
-  if (st.includes("Hoàn")) return "bg-green-400";
-  if (st.includes("Hủy")) return "bg-red-300";
-  if (st.includes("Quá hạn")) return "bg-red-500";
-  return "bg-amber-500";
+  if (st.includes("Hoàn")) return "bg-[#22c55e]";
+  if (st.includes("Hủy")) return "bg-[#94a3b8]";
+  if (st.includes("Quá hạn")) return "bg-[#ef4444]";
+  return "bg-[#f59e0b]";
 }
 
 function statusTone(st: string) {
-  if (st.includes("Hoàn")) return "bg-emerald-100 text-emerald-800 border-emerald-200";
-  if (st.includes("Hủy")) return "bg-red-100 text-red-700 border-red-200";
-  if (st.includes("Quá hạn")) return "bg-red-50 text-red-700 border-red-200";
-  return "bg-amber-100 text-amber-800 border-amber-200";
+  if (st.includes("Hoàn")) return "bg-[#22c55e] text-white border-[#16a34a]";
+  if (st.includes("Hủy")) return "bg-[#94a3b8] text-white border-[#64748b]";
+  if (st.includes("Quá hạn")) return "bg-[#ef4444] text-white border-[#dc2626]";
+  return "bg-[#f59e0b] text-white border-[#d97706]";
 }
 
 const iconProps = {
@@ -571,7 +564,7 @@ export default function PlansPage() {
           <div className="md:hidden space-y-3">
             {items.map((p) => {
               const pct = progressPct(p);
-              const cancelled = effectivePlanStatus(p).includes("Hủy");
+              const cancelled = String(p.status || "").includes("Hủy");
               const rows: [string, string][] = [
                 ["Mã KH", p.id],
                 ["Chương trình", p.programName],
@@ -612,9 +605,9 @@ export default function PlansPage() {
                         Trạng thái
                       </span>
                       <span
-                        className={`px-1.5 py-0.5 text-[15px] text-black ${planStatusChip(effectivePlanStatus(p))}`}
+                        className={`px-1.5 py-0.5 text-[15px] text-black ${planStatusChip(String(p.status || ""))}`}
                       >
-                        {effectivePlanStatus(p)}
+                        {String(p.status || "")}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-300/70">
@@ -666,7 +659,34 @@ export default function PlansPage() {
             )}
           </div>
 
-          {/* Desktop table */}
+          
+      {/* Legend màu % + badge status — luôn hiện */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-slate-600">
+        <span className="font-semibold text-slate-700">Màu dòng (% HT):</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded border border-emerald-200 bg-[#dcfce7]" /> ≥100%
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded border border-amber-200 bg-[#fef9e7]" /> 70–99%
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded border border-orange-200 bg-[#ffedd5]" /> 40–69%
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded border border-rose-200 bg-[#fee2e2]" /> &lt;40%
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block h-3 w-5 rounded border border-slate-300 bg-[#E5E7EB]" /> Hủy
+        </span>
+        <span className="mx-1 text-slate-300">|</span>
+        <span className="font-semibold text-slate-700">Badge:</span>
+        <span className="rounded px-1.5 py-0.5 text-white bg-[#f59e0b]">Đang TH</span>
+        <span className="rounded px-1.5 py-0.5 text-white bg-[#22c55e]">Hoàn thành</span>
+        <span className="rounded px-1.5 py-0.5 text-white bg-[#ef4444]">Quá hạn</span>
+        <span className="rounded px-1.5 py-0.5 text-white bg-[#94a3b8]">Hủy</span>
+      </div>
+
+      {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="min-w-full text-sm">
               <thead>
@@ -739,9 +759,9 @@ export default function PlansPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <span
-                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusTone(effectivePlanStatus(p))}`}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusTone(String(p.status || ""))}`}
                         >
-                          {effectivePlanStatus(p)}
+                          {String(p.status || "")}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
@@ -1048,6 +1068,22 @@ export default function PlansPage() {
                   className="w-full border rounded-lg px-3 py-2"
                 />
               </label>
+                <label className="block text-xs text-slate-600">
+                  Thực tế (tấn)
+                  <input
+                    type="number"
+                    step="any"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={form.actualQuantity ?? 0}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        actualQuantity:
+                          e.target.value === "" ? 0 : Number(e.target.value),
+                      }))
+                    }
+                  />
+                </label>
               <label className="block space-y-1">
                 <span className="text-xs text-slate-600">Trạng thái</span>
                 <select

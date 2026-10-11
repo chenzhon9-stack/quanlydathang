@@ -19,7 +19,7 @@ import {
   ymdDate,
   currentYearVN,
 } from "@/lib/sheets/date"
-import { effectivePlanStatus } from "@/lib/plan-status";
+import { computePlanStatus, isPlanCancelled } from "@/lib/plan-status";
 import { writeAudit } from "@/lib/sheets/audit";
 import { matchSearchVn, buildHaystack } from "@/lib/vn-search";
 
@@ -30,6 +30,7 @@ export type PlanInput = {
   fromDate: string;
   toDate: string;
   plannedQuantity: number;
+  actualQuantity?: number;
   status?: string;
   note?: string;
   year?: number;
@@ -125,8 +126,8 @@ export class PlanningService {
         .filter(Boolean);
       if (wanted.length) {
         plans = plans.filter((p) => {
-          // Filter theo status hiệu lực (Quá hạn suy ra từ DenNgay) — parity V21
-          const st = effectivePlanStatus(p).toLowerCase();
+          // Status trên Sheet (đã compute lúc create/update) — không suy lại
+          const st = String(p.status || "").toLowerCase();
           return wanted.some((w) => st.includes(w));
         });
       }
@@ -198,7 +199,7 @@ export class PlanningService {
           MasterRepository.resolveName(nccMap, p.supplierId) ||
           p.supplierId,
         actualQuantity: Number(p.actualQuantity) || 0,
-        // status = sheet thô; UI dùng effectivePlanStatus(p) để hiện Quá hạn
+        // status = Sheet (compute lúc create/update)
         productNames,
       } as ProductionPlan & { productNames: string[] });
     }
@@ -284,8 +285,12 @@ export class PlanningService {
     });
     const id = codes[0];
     const now = formatDateTimeVN();
-    const status =
-      String(input.status || "Đang thực hiện").trim() || "Đang thực hiện";
+    const status = computePlanStatus({
+      status: input.status,
+      toDate,
+      plannedQuantity: planned,
+      actualQuantity: 0,
+    });
 
     await appendSheetRow(
       SHEETS.KHSL,
@@ -345,24 +350,53 @@ export class PlanningService {
       (x) => String(x.id).toUpperCase() === String(id).trim().toUpperCase()
     );
     if (!found) throw { code: "NOT_FOUND", message: "Không tìm thấy kế hoạch" };
-    if (String(found.status || "").includes("Hủy")) {
-      throw { code: "INVALID_STATE", message: "Kế hoạch đã hủy, không sửa được" };
+    if (isPlanCancelled(found.status)) {
+      throw { code: "INVALID_STATE", message: "Kế hoạch đã hủy, không sửa được." };
     }
 
-    const patch: Record<string, string | number> = {
+    const fromDate =
+      input.fromDate != null
+        ? ymdDate(input.fromDate) || String(input.fromDate).slice(0, 10)
+        : found.fromDate;
+    const toDate =
+      input.toDate != null
+        ? ymdDate(input.toDate) || String(input.toDate).slice(0, 10)
+        : found.toDate;
+    const planned =
+      input.plannedQuantity != null
+        ? Number(input.plannedQuantity) || 0
+        : Number(found.plannedQuantity) || 0;
+    // ThucTe: cho phép cập nhật thực tế tại thời điểm sửa; không tự cộng từ CT trên list
+    const actual =
+      input.actualQuantity != null
+        ? Number(input.actualQuantity) || 0
+        : Number(found.actualQuantity) || 0;
+
+    const productIds =
+      input.productIds != null
+        ? splitDanhSachHH(input.productIds)
+        : splitDanhSachHH(found.productIds);
+
+    const nextStatus = computePlanStatus({
+      status: input.status != null ? input.status : found.status,
+      toDate,
+      plannedQuantity: planned,
+      actualQuantity: actual,
+    });
+
+    const patch: Record<string, string | number | boolean> = {
       NgayCapNhat: formatDateTimeVN(),
+      TrangThai: nextStatus,
+      ThucTe: actual,
+      SoLuongKeHoach: planned,
     };
     if (input.programName != null)
       patch.Tenchuongtrinh = String(input.programName).trim();
     if (input.supplierId != null) patch.MaNCC = String(input.supplierId).trim();
-    if (input.productIds != null)
-      patch.DanhSachHH = splitDanhSachHH(input.productIds).join(";");
-    if (input.fromDate != null) patch.TuNgay = ymdDate(input.fromDate) || "";
-    if (input.toDate != null) patch.DenNgay = ymdDate(input.toDate) || "";
-    if (input.plannedQuantity != null)
-      patch.SoLuongKeHoach = Number(input.plannedQuantity) || 0;
-    if (input.status != null) patch.TrangThai = String(input.status).trim();
-    if (input.note != null) patch.GhiChu = String(input.note);
+    if (input.productIds != null) patch.DanhSachHH = productIds.join(";");
+    if (input.fromDate != null) patch.TuNgay = fromDate || "";
+    if (input.toDate != null) patch.DenNgay = toDate || "";
+    if (input.note != null) patch.GhiChu = String(input.note || "");
 
     await updateSheetRowByKey(SHEETS.KHSL, "ID_KeHoach", id, patch, y);
 
@@ -376,7 +410,7 @@ export class PlanningService {
       year: y,
     }).catch(() => null);
 
-    return { id, ok: true };
+    return { id, ok: true, status: nextStatus, actualQuantity: actual, plannedQuantity: planned };
   }
 
   static async cancelPlan(id: string, user: UserContext, year?: number) {
