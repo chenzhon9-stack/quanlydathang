@@ -18,7 +18,8 @@ import {
   formatDateTimeVN,
   ymdDate,
   currentYearVN,
-} from "@/lib/sheets/date";
+} from "@/lib/sheets/date"
+import { effectivePlanStatus } from "@/lib/plan-status";
 import { writeAudit } from "@/lib/sheets/audit";
 import { matchSearchVn, buildHaystack } from "@/lib/vn-search";
 
@@ -124,7 +125,8 @@ export class PlanningService {
         .filter(Boolean);
       if (wanted.length) {
         plans = plans.filter((p) => {
-          const st = String(p.status || "").toLowerCase();
+          // Filter theo status hiệu lực (Quá hạn suy ra từ DenNgay) — parity V21
+          const st = effectivePlanStatus(p).toLowerCase();
           return wanted.some((w) => st.includes(w));
         });
       }
@@ -196,6 +198,7 @@ export class PlanningService {
           MasterRepository.resolveName(nccMap, p.supplierId) ||
           p.supplierId,
         actualQuantity: Number(p.actualQuantity) || 0,
+        // status = sheet thô; UI dùng effectivePlanStatus(p) để hiện Quá hạn
         productNames,
       } as ProductionPlan & { productNames: string[] });
     }

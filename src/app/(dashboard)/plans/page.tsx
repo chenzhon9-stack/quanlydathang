@@ -1,4 +1,5 @@
 "use client";
+import { effectivePlanStatus } from "@/lib/plan-status";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -40,28 +41,22 @@ function progressPct(p: PlanRow) {
  * - % <40: hồng nhạt (như bảng GAS)
  */
 function planRowTone(p: PlanRow, pct: number, withBorder = false) {
-  const st = String(p.status || "");
-  const to = String(p.toDate || "").slice(0, 10);
-  // Ngày VN gần đúng (UTC+7) để nhận Quá hạn
-  const now = new Date();
-  const vn = new Date(now.getTime() + 7 * 3600 * 1000);
-  const today = vn.toISOString().slice(0, 10);
-  const overdue =
-    st.includes("Quá hạn") ||
-    (!!to && to < today && !st.includes("Hoàn") && !st.includes("Hủy") && pct < 100);
+  // Status hiệu lực (V21): Hủy / Hoàn thành / Quá hạn / Đang thực hiện
+  const st = effectivePlanStatus(p);
 
   let bg: string;
   let border: string;
   if (st.includes("Hủy")) {
     bg = "bg-red-50";
     border = "border-red-200";
-  } else if (st.includes("Hoàn") || pct >= 100) {
+  } else if (st.includes("Hoàn")) {
+    // Không tô xanh chỉ vì %≥100 nếu sheet chưa đánh Hoàn thành
     bg = "bg-emerald-50";
     border = "border-emerald-200";
-  } else if (overdue && pct >= 70) {
+  } else if (st.includes("Quá hạn") && pct >= 70) {
     bg = "bg-amber-50";
     border = "border-amber-200";
-  } else if (overdue) {
+  } else if (st.includes("Quá hạn")) {
     bg = "bg-rose-50";
     border = "border-rose-200";
   } else if (pct >= 70) {
@@ -576,7 +571,7 @@ export default function PlansPage() {
           <div className="md:hidden space-y-3">
             {items.map((p) => {
               const pct = progressPct(p);
-              const cancelled = String(p.status).includes("Hủy");
+              const cancelled = effectivePlanStatus(p).includes("Hủy");
               const rows: [string, string][] = [
                 ["Mã KH", p.id],
                 ["Chương trình", p.programName],
@@ -617,9 +612,9 @@ export default function PlansPage() {
                         Trạng thái
                       </span>
                       <span
-                        className={`px-1.5 py-0.5 text-[15px] text-black ${planStatusChip(p.status)}`}
+                        className={`px-1.5 py-0.5 text-[15px] text-black ${planStatusChip(effectivePlanStatus(p))}`}
                       >
-                        {p.status}
+                        {effectivePlanStatus(p)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-slate-300/70">
@@ -744,9 +739,9 @@ export default function PlansPage() {
                       </td>
                       <td className="px-3 py-2.5">
                         <span
-                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusTone(p.status)}`}
+                          className={`text-[11px] px-2 py-0.5 rounded-full border ${statusTone(effectivePlanStatus(p))}`}
                         >
-                          {p.status}
+                          {effectivePlanStatus(p)}
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
