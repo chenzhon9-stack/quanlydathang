@@ -78,6 +78,39 @@ function statusLabelVN(raw: string): string {
   return map[n] || (raw ? String(raw) : "—");
 }
 
+/** Ghi chú hình thức gửi đơn NCC dưới trạng thái CT */
+function formatSendMethod(raw?: string | null): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const n = s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+  if (n.includes("email") || n.includes("mail") || n.includes("gmail")) return "Email";
+  if (n.includes("zalo")) return "Zalo";
+  if (n.includes("app") || n.includes("ungdung")) return "APP";
+  return s;
+}
+
+function DeliveryStatusCell({ d }: { d: Delivery }) {
+  const label = statusLabelVN(d.detailStatus || "");
+  const method = formatSendMethod(d.sendMethod);
+  return (
+    <div className="flex flex-col items-start gap-0.5 min-w-0">
+      <StatusBadge status={label} />
+      {method ? (
+        <span
+          className="text-[11px] font-semibold text-indigo-700 leading-tight"
+          title={`Hình thức gửi NCC: ${d.sendMethod || method}`}
+        >
+          Gửi: {method}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 /** V21 deliveryActionText — CANCEL/DELETE/DONE → Xem (không Giao) */
 function actionLabel(d: Delivery) {
   if (d.deleted) return "Xem";
@@ -578,11 +611,9 @@ export default function DeliveriesPage() {
                       {show("status") && (
                         <div className="flex items-center justify-between gap-2 py-1">
                           <span className="text-[13px] opacity-80">Trạng thái</span>
-                          <span
-                            className={`inline-flex px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${statusBadgeClass(st)}`}
-                          >
-                            {statusLabelVN(st)}
-                          </span>
+                          <div className="text-right">
+                            <DeliveryStatusCell d={d} />
+                          </div>
                         </div>
                       )}
                       <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-black/10">
@@ -727,7 +758,7 @@ export default function DeliveriesPage() {
                             if (c.key === "status")
                               return (
                                 <td key={c.key} className="px-3 py-2.5">
-                                  <StatusBadge status={statusLabelVN(d.detailStatus || "")} />
+                                  <DeliveryStatusCell d={d} />
                                 </td>
                               );
                             if (c.key === "customer")

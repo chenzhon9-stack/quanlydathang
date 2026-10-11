@@ -66,13 +66,20 @@ export class DeliveryService {
 
     // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
     const year = filter.year ?? currentYearVN();
-    const [khMap, xeMap, hhMap, details, htvtMap] = await Promise.all([
+    const [khMap, xeMap, hhMap, details, htvtMap, nccSend] = await Promise.all([
       MasterRepository.khNames(),
       MasterRepository.xeNames(),
       MasterRepository.hhNames(),
       DetailRepository.findMany({ year }).catch(() => []),
       MasterRepository.htvtNames().catch(() => ({} as Record<string, string>)),
+      // DM_NCC nhỏ + thường đã cache sheet — không chậm đáng kể
+      MasterRepository.nccSendMethods().catch(() => ({} as Record<string, string>)),
     ]);
+    const resolveSend = (sid?: string) => {
+      const k = String(sid || "").trim();
+      if (!k) return "";
+      return nccSend[k] || nccSend[k.toUpperCase()] || nccSend[k.toLowerCase()] || "";
+    };
     const ctById = new Map(
       details.map((ct) => [String(ct.detailId || "").trim(), ct])
     );
@@ -92,6 +99,7 @@ export class DeliveryService {
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
       const status = ct?.status || d.detailStatus;
+      const supplierId = d.supplierId || ct?.supplierId;
       return {
         ...d,
         customerName:
@@ -118,6 +126,9 @@ export class DeliveryService {
         receivedDate: ct?.receivedDate || d.receivedDate,
         isDuyenHa: !!(ct as { isDuyenHa?: boolean } | undefined)?.isDuyenHa || d.isDuyenHa,
         orderId: d.orderId || ct?.orderId || undefined,
+        supplierId,
+        // Hình thức gửi đơn (NCC) — map 1 lần từ nccSend, không gọi Sheet theo từng dòng
+        sendMethod: d.sendMethod || resolveSend(supplierId) || "",
       };
     });
 

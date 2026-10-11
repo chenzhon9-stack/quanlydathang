@@ -143,6 +143,11 @@ export interface Delivery {
   /** Ngày nhận từ CT — khóa ngày giao */
   receivedDate?: string;
   isDuyenHa?: boolean;
+  /**
+   * Hình thức gửi đơn NCC (DM_NCC.HinhThucGui) — enrich list, chỉ hiển thị.
+   * Email | Zalo | APP …
+   */
+  sendMethod?: string;
 }
 
 export interface ProductionPlan {
