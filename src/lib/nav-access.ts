@@ -77,6 +77,13 @@ export const NAV_ITEMS: NavItem[] = [
     anyOf: ["USER_MANAGE", "USER_VIEW", "*"],
     rolesOnly: ["ADMIN"],
   },
+  {
+    href: "/system",
+    label: "Hệ thống",
+    icon: "🛠️",
+    anyOf: ["*", "USER_MANAGE"],
+    rolesOnly: ["ADMIN"],
+  },
 ];
 
 export type ClientUser = {
