@@ -30,6 +30,39 @@ const STATUS_LABEL: Record<string, string> = {
   CANCEL: "Hủy đơn",
 };
 
+/** Ghi chú hình thức gửi (DM_NCC.HinhThucGui) dưới trạng thái đơn */
+function formatSendMethod(raw?: string | null): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  const n = s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  if (n.includes("email") || n.includes("mail") || n.includes("thu")) return "Email";
+  if (n.includes("zalo")) return "Zalo";
+  if (n.includes("app") || n.includes("ung dung")) return "APP";
+  return s;
+}
+
+function OrderStatusCell({ o }: { o: Order }) {
+  const label = STATUS_LABEL[o.status] || o.status;
+  const method = formatSendMethod(o.sendMethod);
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <StatusBadge status={label} />
+      {method ? (
+        <span
+          className="text-[10px] font-medium text-slate-500 leading-tight"
+          title={`Hình thức gửi NCC: ${o.sendMethod || method}`}
+        >
+          Gửi: {method}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+
 /**
  * Ma trận nút tab Đơn hàng — parity V21 (permission + business rule):
  *
@@ -647,7 +680,7 @@ export default function OrdersPage() {
                       {o.orderDate}
                     </div>
                   </div>
-                  <StatusBadge status={STATUS_LABEL[o.status] || o.status} />
+                  <OrderStatusCell o={o} />
                 </div>
                 <div className="mt-3 space-y-1.5 text-sm">
                   <div className="flex justify-between gap-2">
@@ -787,7 +820,7 @@ export default function OrdersPage() {
                           </td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{o.detailCount}</td>
                           <td className="px-3 py-2.5">
-                            <StatusBadge status={STATUS_LABEL[o.status] || o.status} />
+                            <OrderStatusCell o={o} />
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             {o.orderFile ? (
