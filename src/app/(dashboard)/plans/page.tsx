@@ -168,6 +168,7 @@ export default function PlansPage() {
     fromDate: "",
     toDate: "",
     plannedQuantity: "",
+    actualQuantity: "",
     status: "Đang thực hiện",
     note: "",
   });
@@ -280,6 +281,7 @@ export default function PlansPage() {
       fromDate: "",
       toDate: "",
       plannedQuantity: "",
+      actualQuantity: "",
       status: "Đang thực hiện",
       note: "",
     });
@@ -296,6 +298,7 @@ export default function PlansPage() {
       fromDate: (p.fromDate || "").slice(0, 10),
       toDate: (p.toDate || "").slice(0, 10),
       plannedQuantity: String(p.plannedQuantity ?? ""),
+      actualQuantity: String(p.actualQuantity ?? ""),
       status: p.status || "Đang thực hiện",
       note: p.note || "",
     });
@@ -316,6 +319,7 @@ export default function PlansPage() {
         fromDate: form.fromDate,
         toDate: form.toDate,
         plannedQuantity: Number(String(form.plannedQuantity).replace(",", ".")),
+        actualQuantity: Number(String(form.actualQuantity ?? "0").replace(",", ".")) || 0,
         status: form.status,
         note: form.note,
       };
@@ -1074,14 +1078,14 @@ export default function PlansPage() {
                     type="number"
                     step="any"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    value={form.actualQuantity ?? 0}
+                    value={form.actualQuantity}
                     onChange={(e) =>
                       setForm((f) => ({
                         ...f,
-                        actualQuantity:
-                          e.target.value === "" ? 0 : Number(e.target.value),
+                        actualQuantity: e.target.value,
                       }))
                     }
+                    inputMode="decimal"
                   />
                 </label>
               <label className="block space-y-1">
