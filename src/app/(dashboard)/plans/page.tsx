@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { statusRowClass } from "@/lib/status-styles";
 import {
   ACTION,
   clientHasAny,
@@ -32,26 +31,69 @@ function progressPct(p: PlanRow) {
   return Math.round((Number(p.actualQuantity || 0) / p.plannedQuantity) * 1000) / 10;
 }
 
-function statusTone(st: string) {
-  if (st.includes("Hoàn")) return "bg-emerald-100 text-emerald-800 border-emerald-200";
-  if (st.includes("Hủy")) return "bg-red-100 text-red-700 border-red-200";
-  return "bg-amber-100 text-amber-800 border-amber-200";
-}
-
-/** Màu nền card mobile theo tiến độ — giống bản GAS (cam → vàng nhạt → xanh). */
-function planCardTone(p: PlanRow, pct: number) {
+/**
+ * Màu nền dòng/card kế hoạch — parity V21 (GAS):
+ * - Hủy: đỏ nhạt
+ * - Hoàn thành / %≥100: xanh
+ * - Quá hạn hoặc %≥70: vàng kem
+ * - % 40–70: cam nhạt
+ * - % <40: hồng nhạt (như bảng GAS)
+ */
+function planRowTone(p: PlanRow, pct: number, withBorder = false) {
   const st = String(p.status || "");
-  if (st.includes("Hủy")) return "bg-red-50 border-red-200";
-  if (st.includes("Hoàn") || pct >= 100) return "bg-green-100 border-green-200";
-  if (pct >= 70) return "bg-[#fff7e0] border-amber-200";
-  return "bg-[#ffe9d2] border-orange-200";
+  const to = String(p.toDate || "").slice(0, 10);
+  // Ngày VN gần đúng (UTC+7) để nhận Quá hạn
+  const now = new Date();
+  const vn = new Date(now.getTime() + 7 * 3600 * 1000);
+  const today = vn.toISOString().slice(0, 10);
+  const overdue =
+    st.includes("Quá hạn") ||
+    (!!to && to < today && !st.includes("Hoàn") && !st.includes("Hủy") && pct < 100);
+
+  let bg: string;
+  let border: string;
+  if (st.includes("Hủy")) {
+    bg = "bg-red-50";
+    border = "border-red-200";
+  } else if (st.includes("Hoàn") || pct >= 100) {
+    bg = "bg-emerald-50";
+    border = "border-emerald-200";
+  } else if (overdue && pct >= 70) {
+    bg = "bg-amber-50";
+    border = "border-amber-200";
+  } else if (overdue) {
+    bg = "bg-rose-50";
+    border = "border-rose-200";
+  } else if (pct >= 70) {
+    bg = "bg-[#fff7e0]";
+    border = "border-amber-200";
+  } else if (pct >= 40) {
+    bg = "bg-[#ffe9d2]";
+    border = "border-orange-200";
+  } else {
+    bg = "bg-[#fde2e2]";
+    border = "border-rose-200";
+  }
+  return withBorder ? `${bg} ${border}` : bg;
 }
 
-/** Chip trạng thái dạng tô nền (GAS): đang thực hiện = cam. */
+function planCardTone(p: PlanRow, pct: number) {
+  return planRowTone(p, pct, true);
+}
+
+/** Chip trạng thái dạng tô nền (GAS). */
 function planStatusChip(st: string) {
   if (st.includes("Hoàn")) return "bg-green-400";
   if (st.includes("Hủy")) return "bg-red-300";
+  if (st.includes("Quá hạn")) return "bg-red-500";
   return "bg-amber-500";
+}
+
+function statusTone(st: string) {
+  if (st.includes("Hoàn")) return "bg-emerald-100 text-emerald-800 border-emerald-200";
+  if (st.includes("Hủy")) return "bg-red-100 text-red-700 border-red-200";
+  if (st.includes("Quá hạn")) return "bg-red-50 text-red-700 border-red-200";
+  return "bg-amber-100 text-amber-800 border-amber-200";
 }
 
 const iconProps = {
@@ -429,7 +471,7 @@ export default function PlansPage() {
             </button>
             {statusOpen && (
               <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg p-2 space-y-1">
-                {["Đang thực hiện", "Hoàn thành", "Hủy"].map((s) => (
+                {["Đang thực hiện", "Hoàn thành", "Quá hạn", "Hủy"].map((s) => (
                   <label
                     key={s}
                     className="flex items-center gap-2 text-sm px-1 py-1 hover:bg-slate-50 rounded"
@@ -659,9 +701,7 @@ export default function PlansPage() {
                   return (
                     <tr
                       key={p.id}
-                      className={`border-t border-slate-100 ${
-                        idx % 2 ? "bg-slate-50/80" : "bg-white"
-                      } ${statusRowClass(p.status)}`}
+                      className={`border-t border-slate-200/60 ${planRowTone(p, pct)}`}
                     >
                       <td className="px-3 py-2.5 font-mono text-xs whitespace-nowrap">
                         {p.id}
