@@ -156,12 +156,15 @@ function colLetter(idx: number): string {
   return s;
 }
 
+/** Dòng sheet + số dòng A1 (header = 1). __row nội bộ — cast khi gán. */
+type RowWithIndex = Record<string, string> & { __row: number };
+
 async function loadSheetWithRowIndex(
   sheetName: string,
   year?: number
 ): Promise<{
   headers: string[];
-  rows: Array<Record<string, string> & { __row: number }>;
+  rows: RowWithIndex[];
 }> {
   const sheets = getSheetsClient();
   const spreadsheetId = getSpreadsheetId(year);
@@ -174,16 +177,17 @@ async function loadSheetWithRowIndex(
   const values = res.data.values || [];
   if (!values.length) return { headers: [], rows: [] };
   const headers = (values[0] as unknown[]).map((h) => String(h ?? "").trim());
-  const rows = values.slice(1).map((row, i) => {
-    const obj: Record<string, string> & { __row: number } = { __row: i + 2 };
+  const rows: RowWithIndex[] = values.slice(1).map((row, i) => {
+    const cells: Record<string, string> = {};
     headers.forEach((h, ci) => {
       if (!h) return;
       const cell = row[ci];
-      if (cell === null || cell === undefined) obj[h] = "";
-      else if (typeof cell === "number") obj[h] = String(cell);
-      else obj[h] = String(cell).trim();
+      if (cell === null || cell === undefined) cells[h] = "";
+      else if (typeof cell === "number") cells[h] = String(cell);
+      else cells[h] = String(cell).trim();
     });
-    return obj;
+    // Ép kiểu: __row chỉ dùng nội bộ, không nằm trong index signature data
+    return { ...cells, __row: i + 2 } as RowWithIndex;
   });
   return { headers, rows };
 }
