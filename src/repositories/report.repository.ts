@@ -83,6 +83,10 @@ export class ReportRepository {
     }
   }
 
+  /**
+   * Đọc CT từ spreadsheet năm `year`.
+   * Giữ dòng nếu năm đặt **hoặc** năm nhận khớp (đặt năm trước / nhận năm nay).
+   */
   static async getDetails(year: number): Promise<OrderDetail[]> {
     if (!isSheetsConfigured()) {
       if (!allowMockData()) {
@@ -98,16 +102,62 @@ export class ReportRepository {
       const rows = await readSheetAsObjects(SHEETS.details, { year });
       const details = rows.map(mapDetailRow).filter((d) => d.detailId);
       return details.filter((d) => {
-        const raw = d.orderDate || d.receivedDate;
-        if (!raw) return true; // thiếu ngày → giữ (sheet đã chọn theo year)
-        const y = yearOfDate(raw);
-        return y == null || y === year;
+        const yOrder = d.orderDate ? yearOfDate(d.orderDate) : null;
+        const yRecv = d.receivedDate ? yearOfDate(d.receivedDate) : null;
+        // Cross-year: đặt 2025 nhận 2026 vẫn thuộc sheet 2025 và cần cho công nợ 2026
+        if (yOrder === year || yRecv === year) return true;
+        // Sheet đã phân năm — thiếu ngày parse được thì vẫn giữ
+        if (yOrder == null && yRecv == null) return true;
+        return false;
       });
     } catch (e) {
       console.error("[ReportRepository] getDetails failed", e);
-      // Sheets đã cấu hình: không mock
       return [];
     }
+  }
+
+  /**
+   * Chi tiết có **ngày nhận** thuộc năm tài chính `year`.
+   * Gộp sheet năm `year` và `year-1` (đơn đặt năm trước, nhận năm nay).
+   * Dùng cho: công nợ, báo cáo thực nhận theo kỳ nhận.
+   */
+  static async getDetailsForReceiveYear(year: number): Promise<OrderDetail[]> {
+    const years = [year];
+    if (year > 2000) years.push(year - 1);
+    const chunks = await Promise.all(years.map((y) => this.getDetails(y)));
+    const seen = new Set<string>();
+    const out: OrderDetail[] = [];
+    for (const d of chunks.flat()) {
+      if (!d.detailId || seen.has(d.detailId)) continue;
+      const yRecv = d.receivedDate ? yearOfDate(d.receivedDate) : null;
+      // Chỉ dòng nhận đúng năm tài chính; không dùng orderDate
+      if (yRecv !== year) continue;
+      if ((d.actualReceived || 0) <= 0) continue;
+      seen.add(d.detailId);
+      out.push(d);
+    }
+    return out;
+  }
+
+  /**
+   * Giao hàng có **ngày giao** thuộc năm `year`.
+   * Gộp sheet year + year-1 (đặt năm trước, giao năm nay).
+   */
+  static async getDeliveriesForDeliveryYear(year: number): Promise<Delivery[]> {
+    const years = [year];
+    if (year > 2000) years.push(year - 1);
+    const chunks = await Promise.all(years.map((y) => this.getDeliveries(y)));
+    const seen = new Set<string>();
+    const out: Delivery[] = [];
+    for (const d of chunks.flat()) {
+      if (!d.deliveryId || seen.has(d.deliveryId)) continue;
+      if (d.deleted) continue;
+      const yDel = d.deliveryDate ? yearOfDate(d.deliveryDate) : null;
+      if (yDel !== year) continue;
+      seen.add(d.deliveryId);
+      out.push(d);
+    }
+    return out;
   }
 
   static async getDeliveries(year: number): Promise<Delivery[]> {

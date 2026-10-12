@@ -68,7 +68,8 @@ export class ReportService {
     }
 
     const year = filter.year ?? new Date().getFullYear();
-    let details = await ReportRepository.getDetails(year);
+    // Sản lượng nhận theo năm nhận (gộp sheet năm trước nếu đặt năm cũ)
+    let details = await ReportRepository.getDetailsForReceiveYear(year);
 
     details = details.filter(
       (d: OrderDetail) =>
@@ -245,16 +246,18 @@ export class ReportService {
     const [payablesAll, openings, details] = await Promise.all([
       ReportRepository.getPayables(Y),
       ReportRepository.getOpening(Y),
-      ReportRepository.getDetails(Y),
+      // Đặt năm trước + nhận năm Y → lấy từ sheet Y-1 và Y, lọc theo NgayNhanHang
+      ReportRepository.getDetailsForReceiveYear(Y),
     ]);
 
     let openingsScoped = openings.filter((o) => o.active !== false);
     let detailsScoped = details.filter((d) => {
       if (isExcludedDetailStatus(d.status)) return false;
-      if ((d.actualReceived || 0) <= 0) return false;
+      const tons = Number(d.actualReceived);
+      if (!Number.isFinite(tons) || tons <= 0) return false;
       const dt = (d.receivedDate || "").slice(0, 10);
       if (!dt) return false;
-      // trong năm Y đến toDate (V21: yearStart → toMs)
+      // trong năm Y đến toDate (V21: yearStart → toMs) — theo ngày nhận, không theo ngày đặt
       return dt >= yearStart && dt <= toDate;
     });
     let payables = payablesAll.filter((p) => p.active);
@@ -332,7 +335,7 @@ export class ReportService {
       const maNcc = d.supplierId;
       const dt = (d.receivedDate || "").slice(0, 10);
       const makv = String(d.regionId || "").trim(); // CT.Khuvuc
-      const tons = Number(d.actualReceived) || 0;
+      const tons = Number.isFinite(Number(d.actualReceived)) ? Number(d.actualReceived) : 0;
       const resolved = resolveDonGiaMua(
         prices,
         maNcc,
@@ -493,7 +496,7 @@ export class ReportService {
 
     const [details, payables, openings, pricesRaw, xeMap, kvMap] =
       await Promise.all([
-        ReportRepository.getDetails(Y),
+        ReportRepository.getDetailsForReceiveYear(Y),
         ReportRepository.getPayables(Y),
         ReportRepository.getOpening(Y),
         (async () => {
@@ -546,7 +549,7 @@ export class ReportService {
     for (const d of details) {
       if (d.supplierId !== maNcc) continue;
       if (d.status === "DELETE") continue;
-      const tons = Number(d.actualReceived) || 0;
+      const tons = Number.isFinite(Number(d.actualReceived)) ? Number(d.actualReceived) : 0;
       if (tons <= 0) continue;
       const dt = (d.receivedDate || "").slice(0, 10);
       if (!dt || dt < yearStart || dt > toDate) continue;
