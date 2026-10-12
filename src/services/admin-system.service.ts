@@ -13,6 +13,7 @@ import { listUsersFromSheet } from "@/lib/auth";
 import { isSheetsConfigured, getSheetsClient, getSpreadsheetId } from "@/lib/sheets/client";
 import {
   readSheetAsObjects,
+  appendSheetRow,
   updateSheetRowByKey,
   invalidateSheetCache,
 } from "@/lib/sheets/dal";
@@ -833,6 +834,291 @@ export type AdminSystemAction =
   | "purgeOldSystemCounters"
   | "normalizeLegacyDeliveryIdsDryRun"
   | "normalizeLegacyDeliveryIdsApply";
+
+
+// ─── System_Config (parity GAS Script Properties) ───────────
+
+const PROP_SECRET_RE = /(SECRET|TOKEN|SALT|PASSWORD|API_?KEY|_KEY$|PRIVATE)/i;
+const PROP_MASK = "********";
+
+export function isSecretPropKey(key: string): boolean {
+  return PROP_SECRET_RE.test(String(key || ""));
+}
+
+export function maskPropValue(key: string, value: string): string {
+  if (value == null || value === "") return "";
+  if (isSecretPropKey(key)) return PROP_MASK;
+  if (/URL|WEBHOOK/i.test(key) && String(value).length > 28) {
+    return String(value).slice(0, 24) + "…";
+  }
+  return String(value);
+}
+
+/** Env runtime — chỉ đọc từ process.env */
+const ENV_PROP_KEYS = [
+  "NODE_ENV",
+  "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_SPREADSHEET_ID_2025",
+  "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+  "GAS_SEND_ORDER_URL",
+  "GAS_WEBHOOK_SECRET",
+  "AUTH_SECRET",
+  "SECRET_SALT",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASS",
+  "SMTP_FROM",
+  "SHEET_CACHE_TTL_MS",
+  "ALLOW_MOCK_LOGIN",
+  "ALLOW_LEGACY_UNSIGNED_TOKEN",
+] as const;
+
+async function ensureSystemConfigSheet(year?: number): Promise<void> {
+  const sheets = getSheetsClient();
+  const spreadsheetId = getSpreadsheetId(year);
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties.title",
+  });
+  const titles = (meta.data.sheets || [])
+    .map((s) => s.properties?.title || "")
+    .filter(Boolean);
+  const headers = STANDARD_HEADERS[SHEETS.SYS_CONFIG] || [
+    "Key",
+    "Value",
+    "GhiChu",
+    "UpdatedAt",
+    "UpdatedBy",
+  ];
+  if (!titles.includes(SHEETS.SYS_CONFIG)) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: SHEETS.SYS_CONFIG } } }],
+      },
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEETS.SYS_CONFIG}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [headers] },
+    });
+    invalidateSheetCache(SHEETS.SYS_CONFIG, year);
+    return;
+  }
+  const h = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SHEETS.SYS_CONFIG}!1:1`,
+  });
+  if (!(h.data.values || [])[0]?.length) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SHEETS.SYS_CONFIG}!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [headers] },
+    });
+    invalidateSheetCache(SHEETS.SYS_CONFIG, year);
+  }
+}
+
+export type SystemPropItem = {
+  key: string;
+  value: string;
+  displayValue: string;
+  source: "env" | "sheet";
+  readOnly: boolean;
+  isSecret: boolean;
+  ghiChu?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
+export async function listSystemProperties(
+  year?: number
+): Promise<{ items: SystemPropItem[]; sheetReady: boolean }> {
+  const items: SystemPropItem[] = [];
+
+  for (const k of ENV_PROP_KEYS) {
+    const raw = process.env[k];
+    if (raw === undefined || raw === "") continue;
+    items.push({
+      key: k,
+      value: "",
+      displayValue: maskPropValue(k, raw),
+      source: "env",
+      readOnly: true,
+      isSecret: isSecretPropKey(k),
+      ghiChu: "Vercel Environment Variable (chỉ đọc)",
+    });
+  }
+
+  let sheetReady = false;
+  try {
+    if (!isSheetsConfigured()) {
+      return { items, sheetReady: false };
+    }
+    await ensureSystemConfigSheet(year);
+    sheetReady = true;
+    const rows = await readSheetAsObjects(SHEETS.SYS_CONFIG, {
+      year,
+      noCache: true,
+    });
+    for (const r of rows) {
+      const key = String(r.Key || r.key || "").trim();
+      if (!key) continue;
+      const val = String(r.Value ?? r.value ?? "");
+      items.push({
+        key,
+        value: isSecretPropKey(key) ? "" : val,
+        displayValue: maskPropValue(key, val),
+        source: "sheet",
+        readOnly: false,
+        isSecret: isSecretPropKey(key),
+        ghiChu: String(r.GhiChu || "") || undefined,
+        updatedAt: String(r.UpdatedAt || "") || undefined,
+        updatedBy: String(r.UpdatedBy || "") || undefined,
+      });
+    }
+  } catch (e) {
+    console.error("[listSystemProperties]", e);
+  }
+
+  items.sort((a, b) => {
+    if (a.source !== b.source) return a.source === "env" ? -1 : 1;
+    return a.key.localeCompare(b.key);
+  });
+  return { items, sheetReady };
+}
+
+export async function upsertSystemProperty(
+  input: { key: string; value: string; ghiChu?: string },
+  user: UserContext,
+  year?: number
+) {
+  const key = String(input.key || "").trim();
+  if (!key) throw { code: "VALIDATION", message: "Thiếu Key" };
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(key)) {
+    throw {
+      code: "VALIDATION",
+      message: "Key chỉ gồm chữ, số, _ ; bắt đầu bằng chữ",
+    };
+  }
+  if ((ENV_PROP_KEYS as readonly string[]).includes(key)) {
+    throw {
+      code: "VALIDATION",
+      message:
+        "Key trùng biến môi trường Vercel — sửa trên Vercel Dashboard",
+    };
+  }
+  let value = String(input.value ?? "");
+  if (value === PROP_MASK || value === "********") {
+    throw {
+      code: "VALIDATION",
+      message: "******** = không đổi — nhập giá trị mới",
+    };
+  }
+
+  await ensureSystemConfigSheet(year);
+  const rows = await readSheetAsObjects(SHEETS.SYS_CONFIG, {
+    year,
+    noCache: true,
+  });
+  const existing = rows.find(
+    (r) => String(r.Key || "").trim().toUpperCase() === key.toUpperCase()
+  );
+  const now = formatDateTimeVN();
+  const ghiChu = String(input.ghiChu ?? existing?.GhiChu ?? "").trim();
+
+  if (existing) {
+    let writeVal = value;
+    if (isSecretPropKey(key) && !value) {
+      writeVal = String(existing.Value ?? "");
+    }
+    await updateSheetRowByKey(
+      SHEETS.SYS_CONFIG,
+      "Key",
+      String(existing.Key || key),
+      {
+        Value: writeVal,
+        GhiChu: ghiChu,
+        UpdatedAt: now,
+        UpdatedBy: user.email,
+      },
+      year
+    );
+  } else {
+    await appendSheetRow(
+      SHEETS.SYS_CONFIG,
+      {
+        Key: key,
+        Value: value,
+        GhiChu: ghiChu,
+        UpdatedAt: now,
+        UpdatedBy: user.email,
+      },
+      year
+    );
+  }
+
+  await writeAudit({
+    email: user.email,
+    role: user.role,
+    action: "SYSTEM_PROP_UPSERT",
+    targetId: key,
+    newValue: { key, isSecret: isSecretPropKey(key), hasValue: Boolean(value) },
+    year,
+  }).catch(() => null);
+
+  return { success: true, key };
+}
+
+export async function deleteSystemProperty(
+  key: string,
+  user: UserContext,
+  year?: number
+) {
+  const k = String(key || "").trim();
+  if (!k) throw { code: "VALIDATION", message: "Thiếu Key" };
+  if ((ENV_PROP_KEYS as readonly string[]).includes(k)) {
+    throw {
+      code: "VALIDATION",
+      message: "Không xóa biến môi trường Vercel từ đây",
+    };
+  }
+  await ensureSystemConfigSheet(year);
+  const rows = await readSheetAsObjects(SHEETS.SYS_CONFIG, {
+    year,
+    noCache: true,
+  });
+  const existing = rows.find(
+    (r) => String(r.Key || "").trim().toUpperCase() === k.toUpperCase()
+  );
+  if (!existing) {
+    throw { code: "NOT_FOUND", message: `Không thấy key ${k}` };
+  }
+  await updateSheetRowByKey(
+    SHEETS.SYS_CONFIG,
+    "Key",
+    String(existing.Key || k),
+    {
+      Key: "",
+      Value: "",
+      GhiChu: `Deleted by ${user.email}`,
+      UpdatedAt: formatDateTimeVN(),
+      UpdatedBy: user.email,
+    },
+    year
+  );
+  await writeAudit({
+    email: user.email,
+    role: user.role,
+    action: "SYSTEM_PROP_DELETE",
+    targetId: k,
+    year,
+  }).catch(() => null);
+  return { success: true, key: k };
+}
 
 export async function runAdminSystemAction(
   action: AdminSystemAction,

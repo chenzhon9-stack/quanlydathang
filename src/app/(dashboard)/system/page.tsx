@@ -114,6 +114,27 @@ export default function SystemPage() {
   const [loadingStats, setLoadingStats] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [resultText, setResultText] = useState("Chưa chạy lệnh nào.");
+  const [propItems, setPropItems] = useState<
+    Array<{
+      key: string;
+      value: string;
+      displayValue: string;
+      source: "env" | "sheet";
+      readOnly: boolean;
+      isSecret: boolean;
+      ghiChu?: string;
+      updatedAt?: string;
+      updatedBy?: string;
+    }>
+  >([]);
+  const [propLoading, setPropLoading] = useState(false);
+  const [propBusy, setPropBusy] = useState(false);
+  const [propForm, setPropForm] = useState({
+    key: "",
+    value: "",
+    ghiChu: "",
+  });
+  const [propEditKey, setPropEditKey] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
@@ -138,9 +159,31 @@ export default function SystemPage() {
     }
   }, [year]);
 
+  
+  const loadProps = useCallback(async () => {
+    setPropLoading(true);
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(
+        `/api/v1/admin/system/properties?year=${year}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const json = await res.json();
+      if (json.success) {
+        setPropItems(json.data?.items || []);
+      }
+    } catch {
+      /* ignore */
+    } finally {
+      setPropLoading(false);
+    }
+  }, [year]);
+
   useEffect(() => {
     loadStats();
-  }, [loadStats]);
+    loadProps();
+  }, [year, loadStats, loadProps]);
+
 
   async function runAction(def: ActionDef) {
     if (def.confirm && !window.confirm(def.confirm)) return;
@@ -178,6 +221,65 @@ export default function SystemPage() {
       setResultText("❌ Không kết nối API.");
     } finally {
       setBusyAction(null);
+    }
+  }
+
+
+  async function saveProp() {
+    if (!propForm.key.trim()) {
+      alert("Nhập Key");
+      return;
+    }
+    setPropBusy(true);
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch("/api/v1/admin/system/properties", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          key: propForm.key.trim(),
+          value: propForm.value,
+          ghiChu: propForm.ghiChu,
+          year,
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.error?.message || "Lưu thất bại");
+        return;
+      }
+      setPropForm({ key: "", value: "", ghiChu: "" });
+      setPropEditKey(null);
+      await loadProps();
+    } catch {
+      alert("Không kết nối API");
+    } finally {
+      setPropBusy(false);
+    }
+  }
+
+  async function removeProp(key: string) {
+    if (!confirm(`Xóa property «${key}» trên Sheet System_Config?`)) return;
+    setPropBusy(true);
+    try {
+      const token = localStorage.getItem("token") || "";
+      const res = await fetch(
+        `/api/v1/admin/system/properties?key=${encodeURIComponent(key)}&year=${year}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+      );
+      const json = await res.json();
+      if (!json.success) {
+        alert(json.error?.message || "Xóa thất bại");
+        return;
+      }
+      await loadProps();
+    } catch {
+      alert("Không kết nối API");
+    } finally {
+      setPropBusy(false);
     }
   }
 
@@ -315,6 +417,180 @@ export default function SystemPage() {
               <div className="text-[11px] text-slate-500 mt-0.5">{a.desc}</div>
             </button>
           ))}
+        </div>
+      </section>
+
+
+      {/* Properties — parity GAS getSystemProperties / updateSystemProperty */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">
+              Properties (cấu hình)
+            </h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Env Vercel = chỉ đọc (che secret). Thêm/sửa ghi vào sheet{" "}
+              <code className="bg-slate-100 px-1 rounded">System_Config</code>{" "}
+              (parity Script Properties GAS).
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={loadProps}
+            disabled={propLoading}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50"
+          >
+            {propLoading ? "Đang tải…" : "Tải lại"}
+          </button>
+        </div>
+
+        <div className="overflow-x-auto border border-slate-100 rounded-lg mb-3">
+          <table className="min-w-full text-xs">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="text-left px-2 py-1.5 font-medium">Key</th>
+                <th className="text-left px-2 py-1.5 font-medium">Giá trị</th>
+                <th className="text-left px-2 py-1.5 font-medium">Nguồn</th>
+                <th className="text-left px-2 py-1.5 font-medium">Ghi chú</th>
+                <th className="text-right px-2 py-1.5 font-medium">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {propItems.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-2 py-3 text-slate-400 text-center">
+                    {propLoading ? "Đang tải…" : "Chưa có property"}
+                  </td>
+                </tr>
+              )}
+              {propItems.map((p) => (
+                <tr key={`${p.source}-${p.key}`} className="border-t border-slate-100">
+                  <td className="px-2 py-1.5 font-mono text-[11px] text-slate-800">
+                    {p.key}
+                    {p.isSecret && (
+                      <span className="ml-1 text-[10px] text-amber-700">secret</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-[11px] text-slate-600 break-all max-w-[220px]">
+                    {p.displayValue || "—"}
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <span
+                      className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${
+                        p.source === "env"
+                          ? "bg-violet-50 text-violet-800"
+                          : "bg-emerald-50 text-emerald-800"
+                      }`}
+                    >
+                      {p.source}
+                    </span>
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-500 max-w-[160px] truncate">
+                    {p.ghiChu || "—"}
+                  </td>
+                  <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                    {!p.readOnly && (
+                      <>
+                        <button
+                          type="button"
+                          className="text-blue-600 hover:underline mr-2"
+                          disabled={propBusy}
+                          onClick={() => {
+                            setPropEditKey(p.key);
+                            setPropForm({
+                              key: p.key,
+                              value: p.isSecret ? "" : p.value,
+                              ghiChu: p.ghiChu || "",
+                            });
+                          }}
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          type="button"
+                          className="text-rose-600 hover:underline"
+                          disabled={propBusy}
+                          onClick={() => removeProp(p.key)}
+                        >
+                          Xóa
+                        </button>
+                      </>
+                    )}
+                    {p.readOnly && (
+                      <span className="text-slate-400 text-[10px]">chỉ đọc</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+          <div className="text-xs font-medium text-slate-700">
+            {propEditKey ? `Sửa «${propEditKey}»` : "Thêm property (Sheet)"}
+          </div>
+          <div className="grid sm:grid-cols-3 gap-2">
+            <label className="text-[11px] text-slate-600 block">
+              Key *
+              <input
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm font-mono bg-white disabled:bg-slate-100"
+                value={propForm.key}
+                disabled={!!propEditKey || propBusy}
+                onChange={(e) =>
+                  setPropForm((f) => ({ ...f, key: e.target.value }))
+                }
+                placeholder="VD: FEATURE_FLAG_X"
+              />
+            </label>
+            <label className="text-[11px] text-slate-600 block">
+              Value {propEditKey?.match(/SECRET|TOKEN|SALT|PASSWORD|KEY/i) ? "(để trống = giữ cũ nếu secret)" : ""}
+              <input
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm font-mono bg-white"
+                value={propForm.value}
+                disabled={propBusy}
+                onChange={(e) =>
+                  setPropForm((f) => ({ ...f, value: e.target.value }))
+                }
+                placeholder="Giá trị"
+              />
+            </label>
+            <label className="text-[11px] text-slate-600 block">
+              Ghi chú
+              <input
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white"
+                value={propForm.ghiChu}
+                disabled={propBusy}
+                onChange={(e) =>
+                  setPropForm((f) => ({ ...f, ghiChu: e.target.value }))
+                }
+                placeholder="Mô tả ngắn"
+              />
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={propBusy}
+              onClick={saveProp}
+              className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {propBusy ? "Đang lưu…" : propEditKey ? "Cập nhật" : "Thêm mới"}
+            </button>
+            {propEditKey && (
+              <button
+                type="button"
+                disabled={propBusy}
+                onClick={() => {
+                  setPropEditKey(null);
+                  setPropForm({ key: "", value: "", ghiChu: "" });
+                }}
+                className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
+              >
+                Hủy
+              </button>
+            )}
+          </div>
         </div>
       </section>
 

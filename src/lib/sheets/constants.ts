@@ -31,6 +31,7 @@ export const SHEETS = {
   GM: "DM_GiaMua",
   CN: "NCC_CongNo",
   DD: "NCC_DuDauNam",
+  SYS_CONFIG: "System_Config",
 } as const;
 
 export type SheetKey = keyof typeof SHEETS;
@@ -269,5 +270,12 @@ export const STANDARD_HEADERS: Record<string, string[]> = {
     "NguoiChot",
     "NgayChot",
     "HoatDong",
+  ],
+  [SHEETS.SYS_CONFIG]: [
+    "Key",
+    "Value",
+    "GhiChu",
+    "UpdatedAt",
+    "UpdatedBy",
   ],
 };
