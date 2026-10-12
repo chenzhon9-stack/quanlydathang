@@ -194,18 +194,12 @@ export class ReportBuilderService {
   }
 
   private static async yearsFor(params: ReportBuilderParams): Promise<number[]> {
-    const from = ymdDate(params.fromDate || "");
-    const to = ymdDate(params.toDate || "");
-    if (from && to) {
-      const y1 = Number(from.slice(0, 4));
-      const y2 = Number(to.slice(0, 4));
-      const ys: number[] = [];
-      if (Number.isFinite(y1) && Number.isFinite(y2)) {
-        for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) ys.push(y);
-      }
-      return ys.length ? ys : [new Date().getFullYear()];
-    }
-    return [params.year ?? new Date().getFullYear()];
+    // Cùng năm from–to → 1 sheet; span năm → đúng các sheet trong khoảng (không đọc year-1 mặc định)
+    return ReportRepository.yearsForDateRange(
+      params.fromDate,
+      params.toDate,
+      params.year ?? new Date().getFullYear()
+    );
   }
 
   /** Chuẩn hóa khoảng ngày lọc — parity V21 _paramDateStartMs_/_paramDateEndMs_ (so sánh yyyy-MM-dd). */
