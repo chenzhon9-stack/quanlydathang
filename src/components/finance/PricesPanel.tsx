@@ -1327,7 +1327,9 @@ export function PricesPanel() {
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Chọn tường minh HH (lọc Bao/Rời). Khu vực để trống = mọi vùng
-                  của HH đã chọn.
+                  của HH đã chọn. Mốc{" "}
+                  <span className="font-semibold text-amber-700">Makv=km</span>{" "}
+                  luôn giữ giá 0 — không điều chỉnh.
                 </p>
               </div>
               <button

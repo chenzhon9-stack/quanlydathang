@@ -422,17 +422,10 @@ export class FinanceService {
         }
 
         const makv = String(src.Makv || src.MaKV || "").trim();
-        const isKm = makv.toLowerCase() === "km";
+        const isKm = normCode(makv) === "KM";
+        // KM khuyến mãi: luôn DonGia = 0 (không áp dụng add/multiply)
         if (isKm) {
-          if (donGia < 0) {
-            skipped.push({
-              maNCC: String(src.MaNCC || ""),
-              maHH: maHHDich,
-              makv,
-              reason: "Giá KM không được âm",
-            });
-            continue;
-          }
+          donGia = 0;
         } else if (!(donGia > 0)) {
           skipped.push({
             maNCC: String(src.MaNCC || ""),
@@ -647,6 +640,18 @@ export class FinanceService {
         });
         continue;
       }
+
+      // V21: Makv=km = khuyến mãi, DonGia luôn 0 — không bao giờ điều chỉnh hàng loạt
+      const isKm = normCode(cur.makv) === "KM";
+      if (isKm) {
+        skipped.push({
+          maHH: cur.maHH,
+          makv: cur.makv || "km",
+          reason: "Makv=km luôn giữ DonGia=0 — không điều chỉnh",
+        });
+        continue;
+      }
+
       const oldGia = cur.oldGia;
       const delta =
         mode === "percent"
@@ -658,17 +663,7 @@ export class FinanceService {
           : Number((oldGia + delta).toFixed(2));
       if (newGia < 0) newGia = 0;
 
-      const isKm = cur.makv.toLowerCase() === "km";
-      if (isKm) {
-        if (newGia < 0) {
-          skipped.push({
-            maHH: cur.maHH,
-            makv: cur.makv,
-            reason: "Giá KM không được âm",
-          });
-          continue;
-        }
-      } else if (!(newGia > 0)) {
+      if (!(newGia > 0)) {
         skipped.push({
           maHH: cur.maHH,
           makv: cur.makv,
