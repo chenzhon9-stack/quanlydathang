@@ -11,8 +11,41 @@ export async function POST(req: NextRequest) {
     const user = getCurrentUser(token);
     if (!user)
       return jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401);
-    const body = await req.json().catch(() => ({}));
-    const result = await FinanceService.adjustGiaMuaTheoNCC(body, user);
+    const body = (await req.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    // Chuẩn hóa maHH/makv ngay tại route — tránh string/array lệch
+    const rawHH = body.maHH;
+    const maHH = Array.isArray(rawHH)
+      ? rawHH
+      : typeof rawHH === "string" && rawHH
+        ? rawHH.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+    const rawKv = body.makv;
+    const makv = Array.isArray(rawKv)
+      ? rawKv
+      : typeof rawKv === "string" && rawKv
+        ? rawKv.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
+        : [];
+    console.info("[prices/adjust]", {
+      maNCC: body.maNCC,
+      maHHCount: maHH.length,
+      maHH,
+      makvCount: makv.length,
+    });
+    const result = await FinanceService.adjustGiaMuaTheoNCC(
+      {
+        maNCC: String(body.maNCC || ""),
+        tuNgayMoi: String(body.tuNgayMoi || ""),
+        maHH,
+        makv,
+        mode: body.mode as "amount" | "percent" | undefined,
+        direction: body.direction as "increase" | "decrease" | undefined,
+        value: Number(body.value),
+      },
+      user
+    );
     return jsonResponse(success(result));
   } catch (e: unknown) {
     const err = e as { code?: string; message?: string };

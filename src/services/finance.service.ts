@@ -52,6 +52,35 @@ function isActiveFlag(v: unknown): boolean {
   return !(s === "false" || s === "0" || s === "không" || s === "no");
 }
 
+/** Chuẩn hóa mã NCC/HH/KV để so khớp (trim, bỏ ZWSP, upper). */
+function normCode(v: unknown): string {
+  return String(v ?? "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+/** Body maHH có thể là string[] | string | "a;b" — luôn ra mảng sạch. */
+function asCodeList(v: unknown): string[] {
+  if (v == null || v === "") return [];
+  const parts: string[] = [];
+  if (Array.isArray(v)) {
+    for (const x of v) parts.push(...String(x ?? "").split(/[;,]/));
+  } else {
+    parts.push(...String(v).split(/[;,]/));
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const p of parts) {
+    const c = normCode(p);
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+  }
+  return out;
+}
+
+
 // ─── Giá mua ───────────────────────────────────────────────
 
 export class FinanceService {
@@ -531,31 +560,38 @@ export class FinanceService {
     const direction: "increase" | "decrease" =
       input.direction === "decrease" ? "decrease" : "increase";
 
-    const maHHScope = (input.maHH || [])
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
-    const makvScope = (input.makv || [])
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
+    // Bắt buộc chọn HH tường minh — không bao giờ suy diễn «tất cả»
+    const maHHScope = asCodeList(input.maHH);
+    if (!maHHScope.length) {
+      throw {
+        code: "VALIDATION_ERROR",
+        message:
+          "Phải chọn ít nhất một hàng hóa cần điều chỉnh. Không áp dụng «tất cả HH».",
+      };
+    }
+    const hhAllow = new Set(maHHScope); // đã upper
+    const makvScope = asCodeList(input.makv); // upper; rỗng = mọi KV của HH đã chọn
+    const makvAllow = makvScope.length ? new Set(makvScope) : null;
+    const nccKey = normCode(maNCC);
 
     const rows = await readSheetAsObjects(SHEETS.GM, {});
     const scopeRows = rows.filter((r) => {
       if (!isActiveFlag(r.HoatDong)) return false;
-      if (String(r.MaNCC || "").trim() !== maNCC) return false;
-      if (maHHScope.length && !maHHScope.includes(String(r.MaHH || "").trim()))
-        return false;
-      if (
-        makvScope.length &&
-        !makvScope.includes(String(r.Makv || r.MaKV || "").trim())
-      )
-        return false;
+      if (normCode(r.MaNCC) !== nccKey) return false;
+      const hh = normCode(r.MaHH);
+      if (!hh || !hhAllow.has(hh)) return false;
+      if (makvAllow) {
+        const kv = normCode(r.Makv || r.MaKV);
+        if (!makvAllow.has(kv)) return false;
+      }
       return true;
     });
 
     if (!scopeRows.length) {
       throw {
         code: "VALIDATION_ERROR",
-        message: "Không có dòng giá nào phù hợp bộ lọc cho NCC này.",
+        message:
+          "Không có dòng giá active khớp NCC + HH đã chọn. Kiểm tra mã HH (có thể khác hoa/thường trên Sheet).",
       };
     }
 
@@ -568,20 +604,27 @@ export class FinanceService {
     };
     const currentByKey = new Map<string, Current>();
     for (const r of scopeRows) {
-      const maHH = String(r.MaHH || "").trim();
+      const maHH = String(r.MaHH || "").trim(); // giữ nguyên casing sheet khi ghi
       const makv = String(r.Makv || r.MaKV || "").trim();
-      const key = `${maHH}|${makv}`;
+      // Guard kép: không bao giờ đưa HH ngoài scope vào map
+      if (!hhAllow.has(normCode(maHH))) continue;
+      const key = `${normCode(maHH)}|${normCode(makv)}`;
       const tuNgay = ymdDate(r.TuNgay) || "";
       const cur = currentByKey.get(key);
       if (!cur || tuNgay > cur.tuNgay) {
         currentByKey.set(key, {
           maHH,
           makv,
-          oldGia: Number(r.DonGia) || 0,
+          oldGia: Number(String(r.DonGia ?? "").replace(",", ".")) || 0,
           srcId: String(r.ID_Gia || ""),
           tuNgay,
         });
       }
+    }
+
+    // Guard 3: loại mọi entry lạ (phòng thủ)
+    for (const [k, cur] of [...currentByKey.entries()]) {
+      if (!hhAllow.has(normCode(cur.maHH))) currentByKey.delete(k);
     }
 
     const now = formatDateTimeVN();
@@ -595,6 +638,15 @@ export class FinanceService {
     }> = [];
 
     for (const cur of currentByKey.values()) {
+      // Guard trong vòng lặp ghi — tuyệt đối không ghi HH ngoài danh sách chọn
+      if (!hhAllow.has(normCode(cur.maHH))) {
+        skipped.push({
+          maHH: cur.maHH,
+          makv: cur.makv,
+          reason: "Bỏ qua: MaHH không nằm trong danh sách đã chọn",
+        });
+        continue;
+      }
       const oldGia = cur.oldGia;
       const delta =
         mode === "percent"
@@ -693,12 +745,29 @@ export class FinanceService {
       lyDo: `Điều chỉnh hàng loạt giá NCC ${maNCC}`,
     });
 
+    const appliedMaHH = [
+      ...new Set(preview.map((p) => normCode(p.maHH)).filter(Boolean)),
+    ];
+    const unexpected = appliedMaHH.filter((h) => !hhAllow.has(h));
+    if (unexpected.length) {
+      // Không được xảy ra sau 3 lớp guard — fail closed
+      throw {
+        code: "SYSTEM_UNEXPECTED_ERROR",
+        message:
+          "Phát hiện MaHH ngoài phạm vi chọn: " + unexpected.join(", "),
+      };
+    }
+
     return {
       created: created.length,
       skipped: skipped.length,
       createdIds: created,
       preview,
       skippedDetail: skipped,
+      requestedMaHH: maHHScope,
+      appliedMaHH,
+      scopeRowCount: scopeRows.length,
+      pairCount: currentByKey.size,
     };
   }
 

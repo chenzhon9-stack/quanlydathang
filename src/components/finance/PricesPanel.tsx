@@ -23,7 +23,7 @@ type GiaMua = {
   ghiChu?: string;
 };
 
-type MasterOpt = { id: string; label: string };
+type MasterOpt = { id: string; label: string; phanLoai?: string };
 
 function fmtMoney(n: number) {
   return Math.round(n).toLocaleString("vi-VN");
@@ -122,6 +122,10 @@ export function PricesPanel() {
     direction: "increase" as "increase" | "decrease",
     value: "",
   });
+  /** Lọc danh sách HH trong modal: "" | Bao | Roi | Khac */
+  const [adjustPhanLoai, setAdjustPhanLoai] = useState<
+    "" | "Bao" | "Roi" | "Khac"
+  >("");
   const [adjustResult, setAdjustResult] = useState<{
     created?: number;
     skipped?: number;
@@ -139,16 +143,34 @@ export function PricesPanel() {
     const ncc = adjustForm.maNCC;
     const hhSet = new Set<string>();
     const kvSet = new Set<string>();
-    if (!ncc) return { hhIds: [] as string[], kvIds: [] as string[] };
+    if (!ncc) {
+      return {
+        hhIds: [] as string[],
+        kvIds: [] as string[],
+        hhMeta: {} as Record<string, { label: string; phanLoai: string }>,
+      };
+    }
     for (const r of items) {
       if (!r.active) continue;
       if (r.maNcc !== ncc) continue;
       if (r.maHh) hhSet.add(r.maHh);
-      // makv rỗng = mặc định — vẫn cho chọn qua id ""
       kvSet.add(r.makv || "");
     }
+    const hhMeta: Record<string, { label: string; phanLoai: string }> = {};
+    for (const id of hhSet) {
+      const opt = hhOpts.find((o) => o.id === id);
+      const pl = opt?.phanLoai || "Khac";
+      const label =
+        opt?.label?.split(" — ")[1] || opt?.label || id;
+      hhMeta[id] = { label, phanLoai: pl };
+    }
     return {
-      hhIds: Array.from(hhSet).sort(),
+      hhIds: Array.from(hhSet).sort((a, b) => {
+        const pa = hhMeta[a]?.phanLoai || "";
+        const pb = hhMeta[b]?.phanLoai || "";
+        if (pa !== pb) return pa.localeCompare(pb);
+        return a.localeCompare(b);
+      }),
       kvIds: Array.from(kvSet).sort((a, b) => {
         if (a === "") return -1;
         if (b === "") return 1;
@@ -156,8 +178,17 @@ export function PricesPanel() {
         if (b.toLowerCase() === "km") return 1;
         return a.localeCompare(b);
       }),
+      hhMeta,
     };
-  }, [items, adjustForm.maNCC]);
+  }, [items, adjustForm.maNCC, hhOpts]);
+
+  const adjustHhVisible = useMemo(() => {
+    const ids = adjustScopeFromPrices.hhIds;
+    if (!adjustPhanLoai) return ids;
+    return ids.filter(
+      (id) => adjustScopeFromPrices.hhMeta[id]?.phanLoai === adjustPhanLoai
+    );
+  }, [adjustScopeFromPrices, adjustPhanLoai]);
 
   const loadMasters = useCallback(async () => {
     try {
@@ -186,7 +217,27 @@ export function PricesPanel() {
                   r.label ||
                   id
               ).trim() || id;
-            return id ? { id, label: `${id} — ${label}` } : null;
+            const plRaw = String(
+              r.PhanLoaiHH || r.PhanLoai || r.phanLoai || ""
+            ).trim();
+            let phanLoai: string | undefined;
+            if (plRaw) {
+              const fold = plRaw
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase();
+              if (fold === "bao" || fold.includes("bao")) phanLoai = "Bao";
+              else if (
+                fold === "roi" ||
+                fold.includes("roi") ||
+                fold.includes("rời")
+              )
+                phanLoai = "Roi";
+              else phanLoai = "Khac";
+            }
+            return id
+              ? { id, label: `${id} — ${label}`, phanLoai }
+              : null;
           })
           .filter((x): x is MasterOpt => !!x);
       };
@@ -488,6 +539,12 @@ export function PricesPanel() {
       alert("Chọn Từ ngày áp dụng");
       return;
     }
+    if (!adjustForm.maHH.length) {
+      alert(
+        "Phải chọn ít nhất một hàng hóa (tick từng mã hoặc «Chọn HH đang lọc»).\nKhông cho để trống (= tất cả) để tránh chỉnh nhầm Bao/Rời."
+      );
+      return;
+    }
     if (!(Number(adjustForm.value) > 0)) {
       alert("Giá trị điều chỉnh phải > 0");
       return;
@@ -497,9 +554,23 @@ export function PricesPanel() {
         ? `${adjustForm.value}%`
         : fmtMoney(Number(adjustForm.value));
     const dirText = adjustForm.direction === "increase" ? "TĂNG" : "GIẢM";
+    const hhPreview = adjustForm.maHH
+      .slice(0, 8)
+      .map((id) => {
+        const m = adjustScopeFromPrices.hhMeta[id];
+        return m ? `${id} [${m.phanLoai}]` : id;
+      })
+      .join(", ");
+    const more =
+      adjustForm.maHH.length > 8
+        ? ` … (+${adjustForm.maHH.length - 8})`
+        : "";
     if (
       !confirm(
-        `Xác nhận ${dirText} giá ${modeText} cho các mốc giá hiện hành của NCC này?\nÁp dụng từ ${adjustForm.tuNgayMoi}.`
+        `Xác nhận ${dirText} giá ${modeText}?\n` +
+          `NCC: ${adjustForm.maNCC}\n` +
+          `HH đã chọn: ${adjustForm.maHH.length} mã\n${hhPreview}${more}\n` +
+          `Áp dụng từ ${adjustForm.tuNgayMoi}.`
       )
     )
       return;
@@ -509,10 +580,11 @@ export function PricesPanel() {
       const json = await apiJson("/api/v1/finance/prices/adjust", {
         method: "POST",
         body: JSON.stringify({
-          maNCC: adjustForm.maNCC,
+          maNCC: String(adjustForm.maNCC || "").trim(),
           tuNgayMoi: adjustForm.tuNgayMoi,
-          maHH: adjustForm.maHH,
-          makv: adjustForm.makv,
+          // Gửi tường minh mảng mã đã chọn (không gửi rỗng)
+          maHH: adjustForm.maHH.map((x) => String(x || "").trim()).filter(Boolean),
+          makv: adjustForm.makv.map((x) => String(x || "").trim()),
           mode: adjustForm.mode,
           direction: adjustForm.direction,
           value: Number(adjustForm.value),
@@ -522,23 +594,41 @@ export function PricesPanel() {
         alert(json.error?.message || "Điều chỉnh thất bại");
         return;
       }
-      setAdjustResult(
-        json.data as {
-          created?: number;
-          skipped?: number;
-          preview?: Array<{
-            maHH: string;
-            makv: string;
-            giaCu: number;
-            giaMoi: number;
-          }>;
-          skippedDetail?: Array<{
-            maHH: string;
-            makv: string;
-            reason: string;
-          }>;
-        }
+      const data = json.data as {
+        created?: number;
+        skipped?: number;
+        preview?: Array<{
+          maHH: string;
+          makv: string;
+          giaCu: number;
+          giaMoi: number;
+        }>;
+        skippedDetail?: Array<{
+          maHH: string;
+          makv: string;
+          reason: string;
+        }>;
+        requestedMaHH?: string[];
+        appliedMaHH?: string[];
+      };
+      // Cảnh báo nếu server áp dụng HH ngoài danh sách chọn (không được xảy ra)
+      const req = new Set(
+        (data.requestedMaHH || adjustForm.maHH).map((x) =>
+          String(x).trim().toUpperCase()
+        )
       );
+      const applied = (data.appliedMaHH || []).map((x) =>
+        String(x).trim().toUpperCase()
+      );
+      const extra = applied.filter((h) => h && !req.has(h));
+      if (extra.length) {
+        alert(
+          "CẢNH BÁO: Server ghi cả mã HH không chọn: " +
+            extra.join(", ") +
+            "\nHãy kiểm tra log / báo admin."
+        );
+      }
+      setAdjustResult(data);
       load();
     } finally {
       setAdjustBusy(false);
@@ -1235,8 +1325,8 @@ export function PricesPanel() {
                   Điều chỉnh giá hàng loạt theo NCC
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Chọn HH / khu vực cần điều chỉnh — để trống = tất cả mốc có
-                  giá của NCC
+                  Chọn tường minh HH (lọc Bao/Rời). Khu vực để trống = mọi vùng
+                  của HH đã chọn.
                 </p>
               </div>
               <button
@@ -1257,10 +1347,10 @@ export function PricesPanel() {
                     setAdjustForm((f) => ({
                       ...f,
                       maNCC: e.target.value,
-                      // Đổi NCC → xóa lựa chọn phạm vi cũ
                       maHH: [],
                       makv: [],
-                    }))
+                    }));
+                    setAdjustPhanLoai("");
                   }
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white"
                 >
@@ -1288,12 +1378,12 @@ export function PricesPanel() {
                 />
               </label>
 
-              {/* Phạm vi hàng hóa — user tự chọn */}
+              {/* Phạm vi hàng hóa — bắt buộc tick; lọc Bao/Rời */}
               <div>
                 <div className="text-xs font-medium text-slate-700 mb-1">
                   Phạm vi hàng hóa{" "}
-                  <span className="font-normal text-slate-500">
-                    (để trống = tất cả HH đang có giá của NCC này)
+                  <span className="font-normal text-rose-600">
+                    * bắt buộc chọn (không còn «tất cả»)
                   </span>
                 </div>
                 {!adjustForm.maNCC ? (
@@ -1305,43 +1395,117 @@ export function PricesPanel() {
                     NCC này chưa có mốc giá đang hiệu lực.
                   </div>
                 ) : (
-                  <div className="border border-slate-300 rounded-lg max-h-36 overflow-y-auto p-2 bg-slate-50">
-                    {adjustScopeFromPrices.hhIds.map((id) => {
-                      const checked = adjustForm.maHH.includes(id);
-                      const label =
-                        nameHh.get(id)?.split(" — ")[1] ||
-                        nameHh.get(id) ||
-                        id;
-                      return (
-                        <label
-                          key={id}
-                          className="flex items-center gap-2 text-xs text-slate-700 py-1 cursor-pointer"
+                  <>
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {(
+                        [
+                          ["", "Tất cả"],
+                          ["Bao", "Bao"],
+                          ["Roi", "Rời"],
+                          ["Khac", "Khác"],
+                        ] as const
+                      ).map(([k, lab]) => (
+                        <button
+                          key={k || "all"}
+                          type="button"
+                          onClick={() => setAdjustPhanLoai(k)}
+                          className={`px-2 py-1 text-[11px] rounded-lg border ${
+                            adjustPhanLoai === k
+                              ? "bg-violet-600 text-white border-violet-600"
+                              : "bg-white text-slate-600 border-slate-300"
+                          }`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) =>
-                              setAdjustForm((f) => ({
-                                ...f,
-                                maHH: e.target.checked
-                                  ? [...f.maHH, id]
-                                  : f.maHH.filter((x) => x !== id),
-                              }))
-                            }
-                          />
-                          <span>
-                            {label}
-                            <span className="text-slate-400 ml-1">({id})</span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
+                          {lab}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="px-2 py-1 text-[11px] rounded-lg border border-emerald-300 text-emerald-800 bg-emerald-50"
+                        onClick={() =>
+                          setAdjustForm((f) => ({
+                            ...f,
+                            maHH: [
+                              ...new Set([...f.maHH, ...adjustHhVisible]),
+                            ],
+                          }))
+                        }
+                      >
+                        Chọn HH đang lọc
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2 py-1 text-[11px] rounded-lg border border-slate-300 text-slate-600 bg-white"
+                        onClick={() =>
+                          setAdjustForm((f) => ({
+                            ...f,
+                            maHH: f.maHH.filter(
+                              (id) => !adjustHhVisible.includes(id)
+                            ),
+                          }))
+                        }
+                      >
+                        Bỏ chọn đang lọc
+                      </button>
+                    </div>
+                    <div className="border border-slate-300 rounded-lg max-h-40 overflow-y-auto p-2 bg-slate-50">
+                      {adjustHhVisible.map((id) => {
+                        const checked = adjustForm.maHH.includes(id);
+                        const meta = adjustScopeFromPrices.hhMeta[id];
+                        const label = meta?.label || id;
+                        const pl = meta?.phanLoai || "";
+                        const plClass =
+                          pl === "Bao"
+                            ? "text-amber-700 bg-amber-50 border-amber-200"
+                            : pl === "Roi"
+                              ? "text-sky-700 bg-sky-50 border-sky-200"
+                              : "text-slate-600 bg-slate-100 border-slate-200";
+                        return (
+                          <label
+                            key={id}
+                            className="flex items-center gap-2 text-xs text-slate-700 py-1 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) =>
+                                setAdjustForm((f) => ({
+                                  ...f,
+                                  maHH: e.target.checked
+                                    ? [...f.maHH, id]
+                                    : f.maHH.filter((x) => x !== id),
+                                }))
+                              }
+                            />
+                            <span className="flex-1 min-w-0">
+                              {label}
+                              <span className="text-slate-400 ml-1">
+                                ({id})
+                              </span>
+                            </span>
+                            {pl ? (
+                              <span
+                                className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border ${plClass}`}
+                              >
+                                {pl === "Roi" ? "Rời" : pl === "Khac" ? "Khác" : pl}
+                              </span>
+                            ) : null}
+                          </label>
+                        );
+                      })}
+                      {!adjustHhVisible.length && (
+                        <p className="text-[11px] text-slate-500 py-1">
+                          Không có HH thuộc phân loại đang lọc.
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
                 {adjustForm.maNCC && (
                   <p className="text-[11px] text-slate-500 mt-1">
                     Đã chọn: <strong>{adjustForm.maHH.length}</strong> HH
-                    {adjustForm.maHH.length === 0 ? " (tất cả)" : ""}
+                    {adjustForm.maHH.length === 0
+                      ? " — chưa chọn (bắt buộc)"
+                      : ""}
                   </p>
                 )}
               </div>
