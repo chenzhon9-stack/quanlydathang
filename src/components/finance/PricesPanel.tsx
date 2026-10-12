@@ -203,43 +203,44 @@ export function PricesPanel() {
       }): MasterOpt[] => {
         if (!json.success) return [];
         const rows = json.data?.items || [];
-        return rows
-          .map((r) => {
-            const id = String(
-              r.MaNCC || r.MaHH || r.Makv || r.MaKV || r.id || ""
-            ).trim();
-            const label =
-              String(
-                r.TenNCC ||
-                  r.TenHangHoa ||
-                  r.Khuvuc ||
-                  r.Ten ||
-                  r.label ||
-                  id
-              ).trim() || id;
-            const plRaw = String(
-              r.PhanLoaiHH || r.PhanLoai || r.phanLoai || ""
-            ).trim();
-            let phanLoai: string | undefined;
-            if (plRaw) {
-              const fold = plRaw
-                .normalize("NFD")
-                .replace(/[\u0300-\u036f]/g, "")
-                .toLowerCase();
-              if (fold === "bao" || fold.includes("bao")) phanLoai = "Bao";
-              else if (
-                fold === "roi" ||
-                fold.includes("roi") ||
-                fold.includes("rời")
-              )
-                phanLoai = "Roi";
-              else phanLoai = "Khac";
-            }
-            return id
-              ? { id, label: `${id} — ${label}`, phanLoai }
-              : null;
-          })
-          .filter((x): x is MasterOpt => !!x);
+        const out: MasterOpt[] = [];
+        for (const r of rows) {
+          const id = String(
+            r.MaNCC || r.MaHH || r.Makv || r.MaKV || r.id || ""
+          ).trim();
+          if (!id) continue;
+          const label =
+            String(
+              r.TenNCC ||
+                r.TenHangHoa ||
+                r.Khuvuc ||
+                r.Ten ||
+                r.label ||
+                id
+            ).trim() || id;
+          const plRaw = String(
+            r.PhanLoaiHH || r.PhanLoai || r.phanLoai || ""
+          ).trim();
+          let phanLoai: string | undefined;
+          if (plRaw) {
+            const fold = plRaw
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .toLowerCase();
+            if (fold === "bao" || fold.includes("bao")) phanLoai = "Bao";
+            else if (
+              fold === "roi" ||
+              fold.includes("roi") ||
+              fold.includes("rời")
+            )
+              phanLoai = "Roi";
+            else phanLoai = "Khac";
+          }
+          const opt: MasterOpt = { id, label: `${id} — ${label}` };
+          if (phanLoai) opt.phanLoai = phanLoai;
+          out.push(opt);
+        }
+        return out;
       };
       setNccOpts(mapItems(ncc as never));
       setHhOpts(mapItems(hh as never));

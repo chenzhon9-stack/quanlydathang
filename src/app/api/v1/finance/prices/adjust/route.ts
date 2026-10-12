@@ -15,19 +15,18 @@ export async function POST(req: NextRequest) {
       string,
       unknown
     >;
-    // Chuẩn hóa maHH/makv ngay tại route — tránh string/array lệch
-    const rawHH = body.maHH;
-    const maHH = Array.isArray(rawHH)
-      ? rawHH
-      : typeof rawHH === "string" && rawHH
-        ? rawHH.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
-        : [];
-    const rawKv = body.makv;
-    const makv = Array.isArray(rawKv)
-      ? rawKv
-      : typeof rawKv === "string" && rawKv
-        ? rawKv.split(/[;,]/).map((s) => s.trim()).filter(Boolean)
-        : [];
+    // Chuẩn hóa maHH/makv ngay tại route — luôn string[]
+    const toStrList = (v: unknown): string[] => {
+      if (Array.isArray(v)) {
+        return v.map((x) => String(x ?? "").trim()).filter(Boolean);
+      }
+      if (typeof v === "string" && v.trim()) {
+        return v.split(/[;,]/).map((s) => s.trim()).filter(Boolean);
+      }
+      return [];
+    };
+    const maHH = toStrList(body.maHH);
+    const makv = toStrList(body.makv);
     console.info("[prices/adjust]", {
       maNCC: body.maNCC,
       maHHCount: maHH.length,
