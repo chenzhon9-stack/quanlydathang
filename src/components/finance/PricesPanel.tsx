@@ -1343,7 +1343,7 @@ export function PricesPanel() {
                 Nhà cung cấp *
                 <select
                   value={adjustForm.maNCC}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setAdjustForm((f) => ({
                       ...f,
                       maNCC: e.target.value,
@@ -1351,7 +1351,7 @@ export function PricesPanel() {
                       makv: [],
                     }));
                     setAdjustPhanLoai("");
-                  }
+                  }}
                   className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm bg-white"
                 >
                   <option value="">Chọn NCC…</option>
