@@ -5,15 +5,19 @@ import {
   listSystemProperties,
   upsertSystemProperty,
   deleteSystemProperty,
+  updateGasSystemProperty,
 } from "@/services/admin-system.service";
 import { currentYearVN } from "@/lib/sheets/date";
 
 /**
  * GET  /api/v1/admin/system/properties?year=
- * POST { key, value, ghiChu?, year? } — thêm/sửa sheet System_Config
- * DELETE ?key=&year= — xóa (clear) dòng sheet
+ *   → env (read-only) + GAS Script Properties + Sheet System_Config
  *
- * Env Vercel chỉ hiển thị mask, không ghi được từ app.
+ * POST { key, value, ghiChu?, year?, source?: "sheet" | "gas" }
+ *   source=sheet (default) → System_Config
+ *   source=gas → GAS updateSystemProperty
+ *
+ * DELETE ?key=&year= → chỉ xóa dòng Sheet (không xóa GAS prop)
  */
 export async function GET(req: NextRequest) {
   try {
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest) {
     const year = Number(
       new URL(req.url).searchParams.get("year") || currentYearVN()
     );
-    const data = await listSystemProperties(year);
+    const data = await listSystemProperties(year, gate.user!.email);
     return jsonResponse(success(data));
   } catch (e) {
     console.error("[admin/system/properties GET]", e);
@@ -49,8 +53,22 @@ export async function POST(req: NextRequest) {
       value?: string;
       ghiChu?: string;
       year?: number;
+      source?: string;
     };
     const year = body.year ?? currentYearVN();
+    const source = String(body.source || "sheet").toLowerCase();
+
+    if (source === "gas") {
+      const result = await updateGasSystemProperty(
+        {
+          key: String(body.key || ""),
+          value: String(body.value ?? ""),
+        },
+        gate.user!
+      );
+      return jsonResponse(success(result));
+    }
+
     const result = await upsertSystemProperty(
       {
         key: String(body.key || ""),
@@ -60,12 +78,16 @@ export async function POST(req: NextRequest) {
       gate.user!,
       year
     );
-    return jsonResponse(success(result));
+    return jsonResponse(success({ ...result, source: "sheet" }));
   } catch (e: unknown) {
     const err = e as { code?: string; message?: string };
     if (err?.code) {
       const status =
-        err.code === "NOT_FOUND" ? 404 : err.code === "VALIDATION" ? 400 : 400;
+        err.code === "NOT_FOUND"
+          ? 404
+          : err.code === "GAS_NOT_CONFIGURED" || err.code === "GAS_PROP_FAILED"
+            ? 502
+            : 400;
       return jsonResponse(error(err.code, err.message || ""), status);
     }
     console.error("[admin/system/properties POST]", e);

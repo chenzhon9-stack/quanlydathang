@@ -119,7 +119,7 @@ export default function SystemPage() {
       key: string;
       value: string;
       displayValue: string;
-      source: "env" | "sheet";
+      source: "env" | "sheet" | "gas";
       readOnly: boolean;
       isSecret: boolean;
       ghiChu?: string;
@@ -133,8 +133,11 @@ export default function SystemPage() {
     key: "",
     value: "",
     ghiChu: "",
+    source: "sheet" as "sheet" | "gas",
   });
   const [propEditKey, setPropEditKey] = useState<string | null>(null);
+  const [gasReady, setGasReady] = useState(false);
+  const [gasError, setGasError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const loadStats = useCallback(async () => {
@@ -171,6 +174,8 @@ export default function SystemPage() {
       const json = await res.json();
       if (json.success) {
         setPropItems(json.data?.items || []);
+        setGasReady(Boolean(json.data?.gasReady));
+        setGasError(json.data?.gasError ? String(json.data.gasError) : null);
       }
     } catch {
       /* ignore */
@@ -242,8 +247,9 @@ export default function SystemPage() {
         body: JSON.stringify({
           key: propForm.key.trim(),
           value: propForm.value,
-          ghiChu: propForm.ghiChu,
+          ghiChu: propForm.source === "sheet" ? propForm.ghiChu : undefined,
           year,
+          source: propForm.source,
         }),
       });
       const json = await res.json();
@@ -251,7 +257,10 @@ export default function SystemPage() {
         alert(json.error?.message || "Lưu thất bại");
         return;
       }
-      setPropForm({ key: "", value: "", ghiChu: "" });
+      if (json.data?.unchanged) {
+        alert("Secret giữ nguyên (giá trị ******** — không ghi đè).");
+      }
+      setPropForm({ key: "", value: "", ghiChu: "", source: "sheet" });
       setPropEditKey(null);
       await loadProps();
     } catch {
@@ -429,10 +438,21 @@ export default function SystemPage() {
               Properties (cấu hình)
             </h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Env Vercel = chỉ đọc (che secret). Thêm/sửa ghi vào sheet{" "}
-              <code className="bg-slate-100 px-1 rounded">System_Config</code>{" "}
-              (parity Script Properties GAS).
+              <strong>env</strong> = Vercel (chỉ đọc) · <strong>gas</strong> = Script
+              Properties qua webhook · <strong>sheet</strong> ={" "}
+              <code className="bg-slate-100 px-1 rounded">System_Config</code>
             </p>
+            {gasError && (
+              <p className="text-[11px] text-amber-700 mt-1">
+                GAS Properties: {gasError}
+                {!gasReady && " — bổ sung action getSystemProperties trong doPost + Deploy."}
+              </p>
+            )}
+            {gasReady && !gasError && (
+              <p className="text-[11px] text-emerald-700 mt-1">
+                Đã kết nối GAS Script Properties.
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -479,7 +499,9 @@ export default function SystemPage() {
                       className={`inline-block px-1.5 py-0.5 rounded text-[10px] ${
                         p.source === "env"
                           ? "bg-violet-50 text-violet-800"
-                          : "bg-emerald-50 text-emerald-800"
+                          : p.source === "gas"
+                            ? "bg-sky-50 text-sky-800"
+                            : "bg-emerald-50 text-emerald-800"
                       }`}
                     >
                       {p.source}
@@ -501,19 +523,22 @@ export default function SystemPage() {
                               key: p.key,
                               value: p.isSecret ? "" : p.value,
                               ghiChu: p.ghiChu || "",
+                              source: p.source === "gas" ? "gas" : "sheet",
                             });
                           }}
                         >
                           Sửa
                         </button>
-                        <button
-                          type="button"
-                          className="text-rose-600 hover:underline"
-                          disabled={propBusy}
-                          onClick={() => removeProp(p.key)}
-                        >
-                          Xóa
-                        </button>
+                        {p.source === "sheet" && (
+                          <button
+                            type="button"
+                            className="text-rose-600 hover:underline"
+                            disabled={propBusy}
+                            onClick={() => removeProp(p.key)}
+                          >
+                            Xóa
+                          </button>
+                        )}
                       </>
                     )}
                     {p.readOnly && (
@@ -528,9 +553,28 @@ export default function SystemPage() {
 
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
           <div className="text-xs font-medium text-slate-700">
-            {propEditKey ? `Sửa «${propEditKey}»` : "Thêm property (Sheet)"}
+            {propEditKey
+              ? `Sửa «${propEditKey}» (${propForm.source})`
+              : "Thêm / cập nhật property"}
           </div>
-          <div className="grid sm:grid-cols-3 gap-2">
+          <div className="grid sm:grid-cols-4 gap-2">
+            <label className="text-[11px] text-slate-600 block">
+              Nguồn
+              <select
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white disabled:bg-slate-100"
+                value={propForm.source}
+                disabled={!!propEditKey || propBusy}
+                onChange={(e) =>
+                  setPropForm((f) => ({
+                    ...f,
+                    source: e.target.value === "gas" ? "gas" : "sheet",
+                  }))
+                }
+              >
+                <option value="sheet">Sheet System_Config</option>
+                <option value="gas">GAS Script Properties</option>
+              </select>
+            </label>
             <label className="text-[11px] text-slate-600 block">
               Key *
               <input
@@ -583,7 +627,7 @@ export default function SystemPage() {
                 disabled={propBusy}
                 onClick={() => {
                   setPropEditKey(null);
-                  setPropForm({ key: "", value: "", ghiChu: "" });
+                  setPropForm({ key: "", value: "", ghiChu: "", source: "sheet" });
                 }}
                 className="px-3 py-1.5 text-sm rounded-lg border border-slate-300 bg-white"
               >

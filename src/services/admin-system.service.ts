@@ -33,6 +33,7 @@ import { writeAudit } from "@/lib/sheets/audit";
 import { validateTolerance, qty3 } from "@/lib/business-rules";
 import { isStandardGhId } from "@/lib/sheets/counter";
 import type { UserContext } from "@/types";
+import { postGasWebhook, gasWebhookUrl } from "@/lib/gas-webhook";
 
 // ─── helpers ────────────────────────────────────────────────
 
@@ -926,7 +927,7 @@ export type SystemPropItem = {
   key: string;
   value: string;
   displayValue: string;
-  source: "env" | "sheet";
+  source: "env" | "sheet" | "gas";
   readOnly: boolean;
   isSecret: boolean;
   ghiChu?: string;
@@ -935,10 +936,17 @@ export type SystemPropItem = {
 };
 
 export async function listSystemProperties(
-  year?: number
-): Promise<{ items: SystemPropItem[]; sheetReady: boolean }> {
+  year?: number,
+  userEmail?: string
+): Promise<{
+  items: SystemPropItem[];
+  sheetReady: boolean;
+  gasReady: boolean;
+  gasError?: string;
+}> {
   const items: SystemPropItem[] = [];
 
+  // (A) Vercel env — chỉ đọc
   for (const k of ENV_PROP_KEYS) {
     const raw = process.env[k];
     if (raw === undefined || raw === "") continue;
@@ -953,42 +961,147 @@ export async function listSystemProperties(
     });
   }
 
-  let sheetReady = false;
-  try {
-    if (!isSheetsConfigured()) {
-      return { items, sheetReady: false };
+  // (C) GAS Script Properties — qua webhook
+  let gasReady = false;
+  let gasError: string | undefined;
+  if (userEmail && gasWebhookUrl()) {
+    try {
+      const gasRes = await postGasWebhook(
+        {
+          action: "getSystemProperties",
+          email: userEmail,
+        },
+        { timeoutMs: 20_000 }
+      );
+      const body = gasRes.body || {};
+      if (body.success === true && body.properties && typeof body.properties === "object") {
+        gasReady = true;
+        const props = body.properties as Record<string, unknown>;
+        for (const [key, rawVal] of Object.entries(props)) {
+          const k = String(key || "").trim();
+          if (!k) continue;
+          const val = rawVal == null ? "" : String(rawVal);
+          const secret = isSecretPropKey(k) || val === PROP_MASK;
+          items.push({
+            key: k,
+            value: secret ? "" : val,
+            displayValue: secret ? (val ? PROP_MASK : "") : val,
+            source: "gas",
+            readOnly: false,
+            isSecret: secret,
+            ghiChu: "GAS Script Properties",
+          });
+        }
+      } else {
+        gasError =
+          String(body.error || body.message || "") ||
+          `GAS HTTP ${gasRes.status}` ||
+          "Không đọc được Script Properties";
+        if (body._gasHtml) {
+          gasError =
+            "GAS trả HTML — kiểm tra doPost action getSystemProperties + Deploy New version";
+        }
+      }
+    } catch (e) {
+      gasError = e instanceof Error ? e.message : String(e);
+      console.error("[listSystemProperties] GAS", e);
     }
-    await ensureSystemConfigSheet(year);
-    sheetReady = true;
-    const rows = await readSheetAsObjects(SHEETS.SYS_CONFIG, {
-      year,
-      noCache: true,
-    });
-    for (const r of rows) {
-      const key = String(r.Key || r.key || "").trim();
-      if (!key) continue;
-      const val = String(r.Value ?? r.value ?? "");
-      items.push({
-        key,
-        value: isSecretPropKey(key) ? "" : val,
-        displayValue: maskPropValue(key, val),
-        source: "sheet",
-        readOnly: false,
-        isSecret: isSecretPropKey(key),
-        ghiChu: String(r.GhiChu || "") || undefined,
-        updatedAt: String(r.UpdatedAt || "") || undefined,
-        updatedBy: String(r.UpdatedBy || "") || undefined,
-      });
-    }
-  } catch (e) {
-    console.error("[listSystemProperties]", e);
+  } else if (userEmail && !gasWebhookUrl()) {
+    gasError = "Chưa cấu hình GAS_SEND_ORDER_URL — không gọi được Script Properties";
   }
 
+  // (B) Sheet System_Config
+  let sheetReady = false;
+  try {
+    if (isSheetsConfigured()) {
+      await ensureSystemConfigSheet(year);
+      sheetReady = true;
+      const rows = await readSheetAsObjects(SHEETS.SYS_CONFIG, {
+        year,
+        noCache: true,
+      });
+      for (const r of rows) {
+        const key = String(r.Key || r.key || "").trim();
+        if (!key) continue;
+        const val = String(r.Value ?? r.value ?? "");
+        items.push({
+          key,
+          value: isSecretPropKey(key) ? "" : val,
+          displayValue: maskPropValue(key, val),
+          source: "sheet",
+          readOnly: false,
+          isSecret: isSecretPropKey(key),
+          ghiChu: String(r.GhiChu || "") || undefined,
+          updatedAt: String(r.UpdatedAt || "") || undefined,
+          updatedBy: String(r.UpdatedBy || "") || undefined,
+        });
+      }
+    }
+  } catch (e) {
+    console.error("[listSystemProperties] sheet", e);
+  }
+
+  const sourceOrder: Record<string, number> = { env: 0, gas: 1, sheet: 2 };
   items.sort((a, b) => {
-    if (a.source !== b.source) return a.source === "env" ? -1 : 1;
+    const d = (sourceOrder[a.source] ?? 9) - (sourceOrder[b.source] ?? 9);
+    if (d !== 0) return d;
     return a.key.localeCompare(b.key);
   });
-  return { items, sheetReady };
+  return { items, sheetReady, gasReady, gasError };
+}
+
+/**
+ * Cập nhật / thêm Script Property trên GAS (parity updateSystemProperty).
+ * value === "********" → GAS giữ nguyên (unchanged).
+ */
+export async function updateGasSystemProperty(
+  input: { key: string; value: string },
+  user: UserContext
+) {
+  const key = String(input.key || "").trim();
+  if (!key) throw { code: "VALIDATION", message: "Thiếu Key" };
+  if (!gasWebhookUrl()) {
+    throw {
+      code: "GAS_NOT_CONFIGURED",
+      message: "Chưa cấu hình GAS_SEND_ORDER_URL",
+    };
+  }
+  const value = String(input.value ?? "");
+  const gasRes = await postGasWebhook(
+    {
+      action: "updateSystemProperty",
+      email: user.email,
+      key,
+      value,
+    },
+    { timeoutMs: 20_000 }
+  );
+  const body = gasRes.body || {};
+  if (body.success === true) {
+    await writeAudit({
+      email: user.email,
+      role: user.role,
+      action: "GAS_PROP_UPSERT",
+      targetId: key,
+      newValue: {
+        key,
+        isSecret: isSecretPropKey(key),
+        unchanged: Boolean(body.unchanged),
+      },
+    }).catch(() => null);
+    return {
+      success: true as const,
+      key,
+      source: "gas" as const,
+      unchanged: Boolean(body.unchanged),
+    };
+  }
+  const errMsg =
+    String(body.error || body.message || "") ||
+    (body._gasHtml
+      ? "GAS trả HTML — bổ sung action updateSystemProperty trong doPost + Deploy"
+      : `GAS HTTP ${gasRes.status}`);
+  throw { code: "GAS_PROP_FAILED", message: errMsg };
 }
 
 export async function upsertSystemProperty(
