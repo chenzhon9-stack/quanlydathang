@@ -1029,16 +1029,22 @@ export class OrderService {
   }
 
     /**
-   * Gửi đơn NCC — Strangler V21.
+   * Gửi đơn NCC — hybrid đã chốt (cùng Gmail GAS owner = SMTP OTP).
    *
-   * Có GAS_SEND_ORDER_URL:
-   *   → Uỷ quyền toàn bộ cho GAS `sendOrderEmail` (PDF + mail/Zalo + cập nhật Sheet).
-   *   Không ghi Sheet phía Vercel (tránh tăng LanGui 2 lần).
+   * Email / Zalo + có GAS_SEND_ORDER_URL:
+   *   → Webhook action `sendOrderFromWebhook` (PDF + MailApp/Zalo + ghi Sheet phía GAS).
+   *   Vercel KHÔNG tăng LanGui (tránh gửi trùng).
    *
-   * Không có GAS:
-   *   → Chỉ cập nhật Sheet nội bộ (status/CT/snapshot/log) — không mail/PDF.
+   * APP:
+   *   → Chỉ ghi Sheet phía Vercel (không mail).
+   *
+   * Không có GAS (Email/Zalo):
+   *   → Chỉ cập nhật Sheet nội bộ — không mail/PDF.
    *
    * sendAction: '' | 'send' | 'reset' | 'cancel' | 'markSent' (parity modal late-send V21)
+   *
+   * GAS doPost: xem docs/GAS_doPost_sendOrderFromWebhook.gs — bắt buộc WEBHOOK_SECRET;
+   * không deploy docs cũ GAS_doPost_sendOrderEmail.gs (ghi đè mất createPdf/OTP).
    */
   static async sendOrder(
     orderId: string,
@@ -1235,16 +1241,16 @@ export class OrderService {
       };
     }
 
-    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
+    // ─── Nhánh 1: GAS sendOrderFromWebhook (Email / Zalo) — PDF + mail Gmail chủ script ───
     if (gasUrl) {
-      // V21 sendOrderEmail(maDon, email, action|null)
-      // action: null | send | reset | cancel | markSent
+      // GAS: sendOrderFromWebhook → sendOrderEmail(maDon, email, sendAction)
+      // sendAction: null | send | reset | cancel | markSent
       // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
       const baselineLanGui = Number(lanGui) || 0;
       const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
       const payload: Record<string, unknown> = {
-        action: "sendOrderEmail",
+        action: "sendOrderFromWebhook",
         maDon: orderId,
         email: user.email,
         sendAction: action || null,
@@ -1433,7 +1439,7 @@ export class OrderService {
           /unauthorized/i.test(errMsg)
             ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp WEBHOOK_SECRET/GAS_WEBHOOK_SECRET (Vercel)."
             : /unknown action/i.test(errMsg)
-              ? " — doPost chưa nhận action sendOrderEmail (deploy Web App mới)."
+              ? " — doPost chưa nhận action sendOrderFromWebhook (deploy Web App mới, xem docs/GAS_doPost_sendOrderFromWebhook.gs)."
               : gasBody._gasHtml
                 ? " — GAS trả HTML; kiểm tra LanGui trên Sheet trước khi gửi lại."
                 : "";
@@ -1604,7 +1610,7 @@ export class OrderService {
       needConfirm: false,
       notifiedNcc: false,
       message:
-        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL để uỷ quyền GAS sendOrderEmail.",
+        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL và action sendOrderFromWebhook trên doPost.",
     };
   }
 
