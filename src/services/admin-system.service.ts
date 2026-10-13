@@ -839,17 +839,54 @@ export type AdminSystemAction =
 
 // ─── System_Config (parity GAS Script Properties) ───────────
 
-const PROP_SECRET_RE = /(SECRET|TOKEN|SALT|PASSWORD|API_?KEY|_KEY$|PRIVATE)/i;
+const PROP_SECRET_RE = /(SECRET|TOKEN|SALT|PASSWORD|API_?KEY|_KEY$|PRIVATE|SMTP_PASS|SMTP_USER|SMTP_FROM)/i;
 const PROP_MASK = "********";
 
+/** Key luôn che toàn bộ (********) — env + GAS */
+const PROP_FULL_MASK_KEYS = new Set(
+  [
+    "SMTP_PASS",
+    "SMTP_USER",
+    "SMTP_FROM",
+    "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+    "GOOGLE_PRIVATE_KEY",
+    "AUTH_SECRET",
+    "SECRET_SALT",
+    "GAS_WEBHOOK_SECRET",
+    "WEBHOOK_SECRET",
+  ].map((k) => k.toUpperCase())
+);
+
+/** ID spreadsheet — chỉ hiện ngắn */
+const PROP_SHORT_ID_KEYS = new Set(
+  [
+    "GOOGLE_SHEETS_SPREADSHEET_ID",
+    "GOOGLE_SHEETS_SPREADSHEET_ID_2025",
+    "SPREADSHEET_ID",
+    "PDF_FOLDER_ID",
+  ].map((k) => k.toUpperCase())
+);
+
 export function isSecretPropKey(key: string): boolean {
-  return PROP_SECRET_RE.test(String(key || ""));
+  const k = String(key || "").trim();
+  if (!k) return false;
+  if (PROP_FULL_MASK_KEYS.has(k.toUpperCase())) return true;
+  return PROP_SECRET_RE.test(k);
+}
+
+function shortIdDisplay(value: string): string {
+  const s = String(value);
+  if (s.length <= 12) return s.slice(0, 4) + "…";
+  return s.slice(0, 6) + "…" + s.slice(-4);
 }
 
 export function maskPropValue(key: string, value: string): string {
   if (value == null || value === "") return "";
-  if (isSecretPropKey(key)) return PROP_MASK;
-  if (/URL|WEBHOOK/i.test(key) && String(value).length > 28) {
+  const k = String(key || "").trim();
+  const ku = k.toUpperCase();
+  if (isSecretPropKey(k)) return PROP_MASK;
+  if (PROP_SHORT_ID_KEYS.has(ku)) return shortIdDisplay(String(value));
+  if (/URL|WEBHOOK/i.test(k) && String(value).length > 28) {
     return String(value).slice(0, 24) + "…";
   }
   return String(value);
