@@ -1261,7 +1261,7 @@ export class OrderService {
       const baselineLanGui = Number(lanGui) || 0;
       const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
       const payload: Record<string, unknown> = {
-        action: "sendOrderEmail",
+        action: "sendOrderFromWebhook",
         maDon: orderId,
         email: user.email,
         sendAction: action || null,
