@@ -45,6 +45,12 @@ export function statusExportNumber(raw?: string): number {
   return 0;
 }
 
+/** V21: MaHH có thể là "MAHH|KHO_XUAT" → mã hàng ngắn (trước "|") và Kho xuất (sau "|") */
+export function splitMaHH(raw?: string): { maHH: string; khoXuat: string } {
+  const parts = String(raw || "").split("|");
+  return { maHH: (parts[0] || "").trim(), khoXuat: (parts[1] || "").trim() };
+}
+
 const n = (v: unknown) => {
   const x = Number(v);
   return Number.isFinite(x) ? x : 0;
@@ -57,10 +63,10 @@ export const DELIVERY_EXPORT_COLS: Record<string, DeliveryExportCol> = {
   plate: { header: "Biển số", kind: "text", get: (d) => d.vehiclePlate || d.vehicleId || "" },
   orderId: { header: "Mã đơn", kind: "text", get: (d) => d.orderId },
   supplierId: { header: "Mã NCC", kind: "text", get: (d) => d.supplierId },
-  productId: { header: "Mã HH", kind: "text", get: (d) => d.productId },
+  productId: { header: "Mã HH", kind: "text", get: (d) => splitMaHH(d.productId).maHH },
   regionId: { header: "Mã khu vực", kind: "text", get: (d) => d.regionId },
   region: { header: "Tên khu vực", kind: "text", get: (d) => d.regionName },
-  khoXuat: { header: "Kho xuất", kind: "text", get: (d) => d.warehouse },
+  khoXuat: { header: "Kho xuất", kind: "text", get: (d) => splitMaHH(d.productId).khoXuat },
   planned: { header: "KH giao", kind: "num", get: (d) => d.plannedQty },
   customerId: { header: "Mã KH", kind: "text", get: (d) => d.customerId },
   htvtCode: { header: "Mã HTVT", kind: "text", get: (d) => htvtExportCode(d.transportTypeId) },
