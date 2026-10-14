@@ -141,6 +141,10 @@ export interface Delivery {
   /** Hình thức vận tải từ CT (enrich) — chỉ hiển thị, không ghi Sheet */
   transportTypeId?: string;
   transportTypeName?: string;
+  /** MaDVT từ DM_Xe */
+  carrierId?: string;
+  /** TenDVT — ghi chú Thuê ngoài dưới biển số */
+  carrierName?: string;
   productId?: string;
   productName?: string;
   note?: string;

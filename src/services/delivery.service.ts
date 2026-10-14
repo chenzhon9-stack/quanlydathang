@@ -126,26 +126,16 @@ export class DeliveryService {
           ct?.transportTypeId,
         carrierId: (() => {
           const vid = String(d.vehicleId || ct?.vehicleId || "").trim();
-          if (!vid) return d.carrierId;
-          return (
-            xeDvt[vid] ||
-            xeDvt[vid.toUpperCase()] ||
-            d.carrierId
-          );
+          if (!vid) return undefined;
+          return xeDvt[vid] || xeDvt[vid.toUpperCase()] || undefined;
         })(),
         carrierName: (() => {
           const vid = String(d.vehicleId || ct?.vehicleId || "").trim();
-          const ma =
-            (vid && (xeDvt[vid] || xeDvt[vid.toUpperCase()])) ||
-            d.carrierId ||
-            "";
-          if (!ma) return d.carrierName;
-          return (
-            dvtMap[ma] ||
-            dvtMap[String(ma).toUpperCase()] ||
-            d.carrierName ||
-            ma
-          );
+          const ma = vid
+            ? xeDvt[vid] || xeDvt[vid.toUpperCase()] || ""
+            : "";
+          if (!ma) return undefined;
+          return dvtMap[ma] || dvtMap[String(ma).toUpperCase()] || ma;
         })(),
         detailStatus: status,
         actualReceived: ct?.actualReceived ?? d.actualReceived,
