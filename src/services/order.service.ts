@@ -1314,13 +1314,12 @@ export class OrderService {
       if (action === "cancel") {
         const cancelled = await this.cancelOrder(orderId, user, y);
         return {
-          orderId,
-          via: "app" as const,
-          needConfirm: false,
-          channel: "app",
-          hinhThucGui,
-          cancelled: true,
           ...cancelled,
+          via: "app" as const,
+          needConfirm: false as const,
+          channel: "app" as const,
+          hinhThucGui,
+          cancelled: true as const,
           message:
             cancelled.message ||
             `Đã hủy đơn ${orderId} (APP — không gửi mail/Zalo).`,
