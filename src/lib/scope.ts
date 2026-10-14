@@ -1,6 +1,11 @@
 /**
  * AccessScope helpers — parity V21 `_parseQuanly_` / `_itemGroupAllowed_`
  * FACT: separator is semicolon `;` (not comma). "all" / "tất cả" = isAll.
+ *
+ * SALES/VIEWER (OWN_CUSTOMER):
+ * - Xem theo KH thuộc Quanly, HOẶC
+ * - Xem CT/GH gắn xe thuộc ĐVVT (DM_DonViVanTai.Quanly) trùng nhóm quản lý
+ *   (dù MaKh không thuộc Quanly của user).
  */
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
@@ -51,6 +56,19 @@ function isActiveFlag(v: unknown): boolean {
   return true;
 }
 
+function idMatch(set: Set<string>, id: string | undefined | null): boolean {
+  if (!id) return false;
+  const raw = String(id).trim();
+  if (!raw) return false;
+  if (set.has(raw)) return true;
+  const up = raw.toUpperCase();
+  if (set.has(up)) return true;
+  for (const x of set) {
+    if (String(x).toUpperCase() === up) return true;
+  }
+  return false;
+}
+
 /**
  * Hợp đồng scope IDs (P0 fail-closed):
  * - `null`  = ALL — chỉ khi scopeType ALL / quanly "tất cả" / OWNER lọc chỗ khác
@@ -78,11 +96,9 @@ export async function resolveAllowedSupplierIds(
   const parsed = parseManagementGroups(scope.quanly);
   if (parsed.isAll) return null;
   if (!parsed.groups.length) {
-    // no groups → empty set (see nothing) unless ADMIN already handled
     return new Set();
   }
 
-  // Role bị giới hạn mà chưa cấu hình Sheets → DENIED (không fail-open)
   if (!isSheetsConfigured()) {
     console.warn(
       "[Scope] NCC: Sheets chưa cấu hình — DENIED (empty set) cho MANAGEMENT"
@@ -108,7 +124,7 @@ export async function resolveAllowedSupplierIds(
     return allowed;
   } catch (e) {
     console.error("[Scope] load NCC failed → DENIED (empty set)", e);
-    return new Set(); // fail-closed
+    return new Set();
   }
 }
 
@@ -116,11 +132,9 @@ export function filterBySupplierIds<T extends { supplierId?: string }>(
   items: T[],
   allowed: ScopeIdSet
 ): T[] {
-  // null = ALL; Set (kể cả rỗng) = lọc nghiêm
   if (allowed == null) return items;
-  return items.filter((x) => x.supplierId && allowed.has(x.supplierId));
+  return items.filter((x) => x.supplierId && idMatch(allowed, x.supplierId));
 }
-
 
 /** SALES/MANAGEMENT: KH thuộc nhóm Quanly (V21 _allowedCustomers) */
 export async function resolveAllowedCustomerIds(
@@ -161,7 +175,7 @@ export async function resolveAllowedCustomerIds(
     return allowed;
   } catch (e) {
     console.error("[Scope] load KH failed → DENIED (empty set)", e);
-    return new Set(); // fail-closed
+    return new Set();
   }
 }
 
@@ -170,7 +184,137 @@ export function filterByCustomerIds<T extends { customerId?: string }>(
   allowed: ScopeIdSet
 ): T[] {
   if (allowed == null) return items;
-  return items.filter((x) => x.customerId && allowed.has(x.customerId));
+  return items.filter((x) => x.customerId && idMatch(allowed, x.customerId));
+}
+
+/**
+ * ĐVVT thuộc nhóm Quanly của user (DM_DonViVanTai.Quanly).
+ * Dùng cho SALES/VIEWER: xem chi tiết/giao theo xe của ĐVVT mình quản lý
+ * dù KH không thuộc scope.
+ */
+export async function resolveAllowedDvtIds(
+  scope: AccessScope
+): Promise<ScopeIdSet> {
+  if (scope.scopeType === "ALL") return null;
+  if (scope.scopeType === "OWNER") return null;
+
+  const parsed = parseManagementGroups(scope.quanly);
+  if (parsed.isAll) return null;
+  if (!parsed.groups.length) return new Set();
+
+  if (!isSheetsConfigured()) {
+    console.warn(
+      "[Scope] DVT: Sheets chưa cấu hình — DENIED (empty set) cho role hạn chế"
+    );
+    return new Set();
+  }
+
+  try {
+    const rows = await readSheetAsObjects(SHEETS.DVT, {});
+    const allowed = new Set<string>();
+    for (const r of rows) {
+      const ma = String(r.MaDVT || r.MaDvt || "").trim();
+      if (!ma) continue;
+      if (!isActiveFlag(r.HoatDong)) continue;
+      if (hasGroupIntersection(parsed.groups, r.Quanly || r.QuanLy || "")) {
+        allowed.add(ma);
+      }
+    }
+    console.info(
+      `[Scope] DVT groups=${parsed.groups.join("|")} allowedDVT=${allowed.size}`
+    );
+    return allowed;
+  } catch (e) {
+    console.error("[Scope] load DVT failed → DENIED (empty set)", e);
+    return new Set();
+  }
+}
+
+/** MaXe → MaDVT từ DM_Xe (và fallback CT_VT nếu có). */
+export async function resolveVehicleDvtMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (!isSheetsConfigured()) return map;
+  try {
+    const xeRows = await readSheetAsObjects(SHEETS.XE, {});
+    for (const r of xeRows) {
+      const maXe = String(r.MaXe || "").trim();
+      const maDvt = String(r.MaDVT || r.MaDvt || "").trim();
+      if (!maXe || !maDvt) continue;
+      map.set(maXe, maDvt);
+      map.set(maXe.toUpperCase(), maDvt);
+    }
+  } catch (e) {
+    console.error("[Scope] load DM_Xe for DVT map failed", e);
+  }
+  // Bổ sung DonHang_VanTai nếu sheet có (ID_Chitiet không map ở đây — chỉ MaXe)
+  try {
+    const vtRows = await readSheetAsObjects(SHEETS.CT_VT, {});
+    for (const r of vtRows) {
+      const maXe = String(r.MaXe || "").trim();
+      const maDvt = String(r.MaDVT || r.MaDvt || "").trim();
+      if (!maXe || !maDvt) continue;
+      if (!map.has(maXe)) {
+        map.set(maXe, maDvt);
+        map.set(maXe.toUpperCase(), maDvt);
+      }
+    }
+  } catch {
+    /* sheet có thể trống / không dùng */
+  }
+  return map;
+}
+
+function resolveRowDvtId(
+  row: { dvtId?: string; carrierId?: string; vehicleId?: string },
+  vehicleToDvt: Map<string, string>
+): string {
+  const direct = String(row.dvtId || row.carrierId || "").trim();
+  if (direct) return direct;
+  const vx = String(row.vehicleId || "").trim();
+  if (!vx) return "";
+  return (
+    vehicleToDvt.get(vx) ||
+    vehicleToDvt.get(vx.toUpperCase()) ||
+    ""
+  );
+}
+
+/**
+ * Lọc OWN_CUSTOMER: giữ dòng nếu
+ * - customerId ∈ KH được Quanly, HOẶC
+ * - xe/dvtId ∈ ĐVVT được Quanly
+ *
+ * khAllowed/dvtAllowed null = không giới hạn nhánh đó (quanly all).
+ */
+export function filterByCustomerOrDvt<
+  T extends {
+    customerId?: string;
+    vehicleId?: string;
+    dvtId?: string;
+    carrierId?: string;
+  }
+>(
+  items: T[],
+  khAllowed: ScopeIdSet,
+  dvtAllowed: ScopeIdSet,
+  vehicleToDvt: Map<string, string>
+): T[] {
+  // Cả hai null → xem hết
+  if (khAllowed == null && dvtAllowed == null) return items;
+
+  return items.filter((x) => {
+    if (khAllowed == null && x.customerId) return true;
+    if (khAllowed && idMatch(khAllowed, x.customerId)) return true;
+
+    if (dvtAllowed == null) {
+      // Chỉ khi kh cũng unrestricted mới tới đây (đã return items);
+      // nếu kh restricted mà dvt null (không xảy ra cùng quanly) → không mở thêm
+      return false;
+    }
+    if (dvtAllowed.size === 0) return false;
+    const dvt = resolveRowDvtId(x, vehicleToDvt);
+    return dvt ? idMatch(dvtAllowed, dvt) : false;
+  });
 }
 
 /**
@@ -217,6 +361,7 @@ export function filterByOwnerOrderIds<T extends { orderId?: string }>(
  * - OWNER: orderId ∈ đơn do mình tạo / createdBy
  * - MANAGEMENT: supplierId ∈ NCC được Quanly
  * - OWN_CUSTOMER: customerId ∈ KH được Quanly
+ *                 OR vehicle/ĐVVT ∈ DVT được Quanly (Sale/View)
  * Một nhánh match → giữ dòng (union).
  */
 export async function applyListScopeFilter<
@@ -225,6 +370,9 @@ export async function applyListScopeFilter<
     supplierId?: string;
     customerId?: string;
     createdBy?: string;
+    vehicleId?: string;
+    dvtId?: string;
+    carrierId?: string;
   }
 >(rows: T[], scope: AccessScope, year?: number): Promise<T[]> {
   if (!rows.length) return rows;
@@ -243,10 +391,9 @@ export async function applyListScopeFilter<
     scope.scopeType === "UNION" ||
     !!scope.allowOwnCustomer;
 
-  // Single-branch fast paths (giữ hành vi cũ)
+  // Single-branch fast paths
   if (allowOwner && !allowMgmt && !allowCust) {
     if (rows.some((r) => r.createdBy != null && r.orderId == null)) {
-      // Order list style
       const em = String(scope.ownerEmail || "").toLowerCase();
       return rows.filter(
         (o) => String(o.createdBy || "").toLowerCase() === em
@@ -258,8 +405,8 @@ export async function applyListScopeFilter<
     );
     return filterByOwnerOrderIds(rows, set);
   }
+
   if (allowMgmt && !allowOwner && !allowCust) {
-    // Prefer supplier filter when rows have supplierId
     if (rows.some((r) => r.supplierId)) {
       const allowed = await resolveAllowedSupplierIds({
         ...scope,
@@ -267,31 +414,46 @@ export async function applyListScopeFilter<
       });
       return filterBySupplierIds(rows, allowed);
     }
-    if (rows.some((r) => r.customerId)) {
-      const allowed = await resolveAllowedCustomerIds({
+    // MANAGEMENT không có supplierId nhưng có customer/xe → KH ∪ ĐVVT
+    if (
+      rows.some((r) => r.customerId || r.vehicleId || r.dvtId || r.carrierId)
+    ) {
+      const khAllowed = await resolveAllowedCustomerIds({
         ...scope,
         scopeType: "OWN_CUSTOMER",
       });
-      return filterByCustomerIds(rows, allowed);
+      const dvtAllowed = await resolveAllowedDvtIds({
+        ...scope,
+        scopeType: "OWN_CUSTOMER",
+      });
+      const vehicleToDvt = await resolveVehicleDvtMap();
+      return filterByCustomerOrDvt(rows, khAllowed, dvtAllowed, vehicleToDvt);
     }
-    // P0: thiếu trường scope → DENIED (không trả nguyên list)
     console.warn(
-      "[Scope] MANAGEMENT list thiếu supplierId/customerId — trả [] (không bỏ lọc)"
+      "[Scope] MANAGEMENT list thiếu supplierId/customerId/vehicleId — trả [] (không bỏ lọc)"
     );
     return [];
   }
+
   if (allowCust && !allowOwner && !allowMgmt) {
-    const allowed = await resolveAllowedCustomerIds({
+    const khAllowed = await resolveAllowedCustomerIds({
       ...scope,
       scopeType: "OWN_CUSTOMER",
     });
-    return filterByCustomerIds(rows, allowed);
+    const dvtAllowed = await resolveAllowedDvtIds({
+      ...scope,
+      scopeType: "OWN_CUSTOMER",
+    });
+    const vehicleToDvt = await resolveVehicleDvtMap();
+    return filterByCustomerOrDvt(rows, khAllowed, dvtAllowed, vehicleToDvt);
   }
 
   // UNION — load all needed sets
   let ownerSet: Set<string> | null = null;
   let nccAllowed: Set<string> | null = null;
   let khAllowed: Set<string> | null = null;
+  let dvtAllowed: Set<string> | null = null;
+  let vehicleToDvt = new Map<string, string>();
   const em = String(scope.ownerEmail || "").toLowerCase();
 
   if (allowOwner) {
@@ -311,6 +473,11 @@ export async function applyListScopeFilter<
       ...scope,
       scopeType: "OWN_CUSTOMER",
     });
+    dvtAllowed = await resolveAllowedDvtIds({
+      ...scope,
+      scopeType: "OWN_CUSTOMER",
+    });
+    vehicleToDvt = await resolveVehicleDvtMap();
   }
 
   return rows.filter((r) => {
@@ -328,21 +495,17 @@ export async function applyListScopeFilter<
     ) {
       return true;
     }
-    if (
-      nccAllowed &&
-      r.supplierId &&
-      (nccAllowed.has(String(r.supplierId)) ||
-        nccAllowed.has(String(r.supplierId).toUpperCase()))
-    ) {
+    if (nccAllowed && idMatch(nccAllowed, r.supplierId)) {
       return true;
     }
-    if (
-      khAllowed &&
-      r.customerId &&
-      (khAllowed.has(String(r.customerId)) ||
-        khAllowed.has(String(r.customerId).toUpperCase()))
-    ) {
-      return true;
+    // KH ∪ ĐVVT
+    if (allowCust) {
+      if (khAllowed == null && dvtAllowed == null) return true;
+      if (khAllowed && idMatch(khAllowed, r.customerId)) return true;
+      if (dvtAllowed && dvtAllowed.size > 0) {
+        const dvt = resolveRowDvtId(r, vehicleToDvt);
+        if (dvt && idMatch(dvtAllowed, dvt)) return true;
+      }
     }
     return false;
   });

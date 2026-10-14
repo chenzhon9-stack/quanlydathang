@@ -89,6 +89,8 @@ export interface OrderDetail {
   supplierId: string;
   supplierName?: string;
   vehicleId: string;
+  /** MaDVT từ DM_Xe — scope ĐVVT */
+  dvtId?: string;
   vehiclePlate?: string;
   productId: string;
   productName?: string;
@@ -129,6 +131,8 @@ export interface Delivery {
   /** Ngày đặt lệnh (từ DonHang_Chitiet) — dùng gom nhóm V21 */
   orderDate?: string;
   vehicleId?: string;
+  /** MaDVT — scope Sale/View theo ĐVVT */
+  dvtId?: string;
   vehiclePlate?: string;
   /** Hình thức vận tải từ CT (enrich) — chỉ hiển thị, không ghi Sheet */
   transportTypeId?: string;

@@ -84,17 +84,19 @@ export class DeliveryService {
       details.map((ct) => [String(ct.detailId || "").trim(), ct])
     );
 
-    // Gắn orderId + supplierId từ CT trước khi lọc scope UNION
+    // Gắn orderId + supplierId + vehicleId từ CT trước khi lọc scope
+    // (Sale/View: KH ∪ ĐVVT theo xe — cần vehicleId trước filter)
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
       return {
         ...d,
         orderId: d.orderId || ct?.orderId,
         supplierId: d.supplierId || ct?.supplierId,
+        vehicleId: d.vehicleId || ct?.vehicleId,
       };
     });
 
-    // V21.07 multi-role: OWNER ∪ MANAGEMENT(NCC) ∪ OWN_CUSTOMER(KH)
+    // V21.07 multi-role: OWNER ∪ MANAGEMENT(NCC) ∪ OWN_CUSTOMER(KH ∪ ĐVVT)
     rows = await applyListScopeFilter(rows, scope, year);
     rows = rows.map((d: Delivery) => {
       const ct = ctById.get(String(d.detailId || "").trim());
