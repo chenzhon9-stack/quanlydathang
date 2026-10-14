@@ -2027,7 +2027,10 @@ export class OrderService {
     const sendCount = Number(order.sendCount) || 0;
     const neverSent = sendCount === 0;
     const thresholdDays = neverSent ? 1 : isDha ? 1 : 2;
-    const dayDiff = businessDayDiff(order.orderDate, isDha);
+    const dayDiff = businessDayDiff(
+      String(order.orderDateTime || order.orderDate || ""),
+      isDha
+    );
     if (dayDiff === null) {
       throw {
         code: "INVALID_STATE",
@@ -2072,6 +2075,7 @@ export class OrderService {
     const fullCheck = canResetOrder({
       status: order.status,
       orderDate: order.orderDate,
+      orderDateTime: order.orderDateTime,
       supplierId: order.supplierId,
       sendCount: order.sendCount,
       hasUnreceivedVehicle: true,
@@ -2214,12 +2218,18 @@ export class OrderService {
         y
       );
     }
+    // V21: đơn cũ — TongSoChitiet = xe giữ lại; ChitietHuy = xe Hủy trong phần giữ
+    const keptHuy = daNhanHoacHuy.filter((d) => {
+      const st = String(d.status || "").toUpperCase();
+      return st === "CANCEL" || String(d.status || "").includes("Hủy");
+    }).length;
     await updateSheetRowByKey(
       SHEETS.DH,
       "MaDon",
       orderId,
       {
         TongSoChitiet: daNhanHoacHuy.length,
+        ChitietHuy: keptHuy,
         ChoGuiMail: false,
         GuiLaimail: false,
       },
