@@ -298,6 +298,23 @@ export function toSheetSerialDateTime(
   return (daySerial as number) + (hh * 3600 + mi * 60 + ss) / 86400;
 }
 
+/**
+ * "Đến ngày" (DenNgay…) → serial cuối ngày 23:59:59 — parity V21 _dateEndOfDay_
+ * (KHSL.DenNgay ghi 23:59:59, không phải 00:00:00). Chỉ nhận phần ngày của value.
+ */
+export function toSheetSerialEndOfDay(
+  value: string | number | Date | null | undefined
+): number | "" {
+  const day = toSheetSerialDate(value);
+  if (day === "") return "";
+  return (day as number) + 86399 / 86400;
+}
+
+/** Cột "đến ngày" trên Sheet V21: ghi cuối ngày 23:59:59 */
+export function isSheetDateEndField(field: string): boolean {
+  return /^(DenNgay|ToDate)$/i.test(String(field || "").trim());
+}
+
 /** Ghi Sheet ngày — serial Date 00:00:00 (API vẫn yyyy-MM-dd) */
 export function toSheetDate(
   value: string | number | Date | null | undefined

@@ -1,4 +1,4 @@
-import { isSheetDateOnlyField, toSheetSerialDate, toSheetSerialDateTime, ymdDate } from "./date";
+import { isSheetDateEndField, isSheetDateOnlyField, toSheetSerialDate, toSheetSerialDateTime, toSheetSerialEndOfDay, ymdDate } from "./date";
 import { getSheetsClient, getSpreadsheetId } from "./client";
 import {
   getSheetCache,
@@ -125,6 +125,11 @@ function coerceWriteValue(
   // NgayDatHang: giữ full datetime (serial có giờ)
   if (/^NgayDatHang$/i.test(field) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
     const serial = toSheetSerialDateTime(s);
+    return serial === "" ? s : serial;
+  }
+  // "Đến ngày" (DenNgay) → 23:59:59 — parity V21 _dateEndOfDay_
+  if (isSheetDateEndField(field) && /^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const serial = toSheetSerialEndOfDay(s.slice(0, 10));
     return serial === "" ? s : serial;
   }
   // Date-only business fields → Sheets serial (Date 00:00:00)
