@@ -21,7 +21,7 @@ import {
   SendActionModal,
   type SendAction,
 } from "@/components/SendActionModal";
-import { defaultListDateRange } from "@/lib/sheets/date";
+import { defaultListDateRange, yearOfDate } from "@/lib/sheets/date";
 
 const STATUS_LABEL: Record<string, string> = {
   NEW: "Khởi tạo",
@@ -121,11 +121,24 @@ function OrderActions({
   const hasDetails = (Number(o.detailCount) || 0) > 0;
   const terminal = isCancel || isDone;
 
+  /** Năm sheet theo ngày đặt đơn — không hard-code năm máy */
+  const orderYear =
+    yearOfDate(String(o.orderDateTime || o.orderDate || "")) ||
+    new Date().getFullYear();
+
   async function cancelOrder(label: string) {
+    if (terminal) {
+      alert("Đơn đã hoàn thành hoặc đã hủy — không thể hủy/xóa.");
+      return;
+    }
+    if (o.canCancelOrder === false) {
+      alert("Đơn đã có xe nhận/giao hàng — không được hủy.");
+      return;
+    }
     if (!confirm(`${label} đơn ${o.orderId}?`)) return;
     const json = await apiPost(
       `/api/v1/orders/${encodeURIComponent(o.orderId)}/cancel`,
-      { year: new Date().getFullYear() }
+      { year: orderYear }
     );
     if (!json.success) {
       alert(json.error?.message || `Lỗi ${label.toLowerCase()} đơn`);
@@ -280,23 +293,22 @@ function OrderActions({
         </button>
       )}
 
-      {/* Xóa — ORDER_CANCEL · chưa gửi · không có CT đã nhận (V21 D112) */}
-      {neverSent && canCancel && o.canCancelOrder !== false && (
+      {/* Xóa — ORDER_CANCEL · chưa gửi · không terminal · canCancelOrder (V21 D112) */}
+      {!terminal && neverSent && canCancel && o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Xóa")}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-600 text-white hover:bg-red-500"
+          className="px-2 py-1 text-[11px] rounded-lg border border-red-300 text-red-700 bg-red-50"
         >
           Xóa
         </button>
       )}
-
-      {/* Hủy — ORDER_CANCEL · đã gửi · ẩn khi ≥1 xe đã nhận/giao (V21 D112; BE enforce) */}
-      {!neverSent && canCancel && o.canCancelOrder !== false && (
+      {/* Hủy — ORDER_CANCEL · đã gửi · ẩn terminal / đã nhận (V21 D112; BE enforce) */}
+      {!terminal && !neverSent && canCancel && o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Hủy")}
-          className="px-2.5 py-1 text-[11px] font-medium rounded bg-red-600 text-white hover:bg-red-500"
+          className="px-2 py-1 text-[11px] rounded-lg border border-red-300 text-red-700 bg-red-50"
         >
           Hủy
         </button>

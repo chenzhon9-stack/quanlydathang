@@ -93,9 +93,11 @@ export class OrderService {
 
     // V21: canReset / canCancelOrder — load CT năm 1 lần
     // hasUnreceived: còn xe chưa nhận (reset)
-    // hasReceived: ≥1 CT đã nhận/giao → không hủy đơn (D112)
+    // hasReceived: ≥1 CT ThucNhan>0 hoặc status ∈ {Đã nhận, Đang giao, Hoàn thành}
+    // Fail-closed: lỗi load CT → canCancelOrder = false
     const hasUnreceived = new Map<string, boolean>();
     const hasReceived = new Map<string, boolean>();
+    let ctMetaOk = true;
     try {
       const { DetailRepository } = await import(
         "@/repositories/detail.repository"
@@ -109,16 +111,12 @@ export class OrderService {
         if (!oid) continue;
 
         const receivedQty = Number(d.actualReceived) || 0;
+        // V21 _cancelOrderCore_: chỉ ThucNhan>0 hoặc RECEIVED/DELIVERING/DONE
         const isRecvStatus =
           receivedQty > 0 ||
           stRaw === STATUS_CT.RECEIVED ||
           stRaw === STATUS_CT.DELIVERING ||
-          stRaw === STATUS_CT.DONE ||
-          st.includes("NHẬN") ||
-          st.includes("NHAN") ||
-          st.includes("GIAO") ||
-          st.includes("HOÀN") ||
-          st.includes("HOAN");
+          stRaw === STATUS_CT.DONE;
 
         if (isRecvStatus) {
           hasReceived.set(oid, true);
@@ -137,8 +135,24 @@ export class OrderService {
         }
       }
     } catch (e) {
+      ctMetaOk = false;
       console.error("[listOrders] canReset/canCancel CT load", e);
     }
+
+    const isTerminalOrder = (status: string) => {
+      const raw = String(status || "");
+      const st = raw.toUpperCase();
+      return (
+        st === "CANCEL" ||
+        st === "DONE" ||
+        st.includes("HỦY") ||
+        st.includes("HUY") ||
+        st.includes("HOÀN") ||
+        st.includes("HOAN") ||
+        raw.includes("Hủy đơn") ||
+        raw === "Hoàn thành"
+      );
+    };
 
     items = items.map((o) => {
       const reset = canResetOrder({
@@ -149,8 +163,11 @@ export class OrderService {
         sendCount: o.sendCount,
         hasUnreceivedVehicle: hasUnreceived.get(o.orderId) === true,
       });
-      // V21: đã có ≥1 xe nhận/giao → không hiện Hủy/Xóa
-      const canCancelOrder = hasReceived.get(o.orderId) !== true;
+      // V21 canCancel: !hasReceived; thêm ẩn terminal + fail-closed khi CT lỗi
+      const canCancelOrder =
+        ctMetaOk &&
+        !isTerminalOrder(String(o.status || "")) &&
+        hasReceived.get(o.orderId) !== true;
       return { ...o, canReset: reset.ok, canCancelOrder };
     });
 
@@ -1029,22 +1046,16 @@ export class OrderService {
   }
 
     /**
-   * Gửi đơn NCC — hybrid đã chốt (cùng Gmail GAS owner = SMTP OTP).
+   * Gửi đơn NCC — Strangler V21.
    *
-   * Email / Zalo + có GAS_SEND_ORDER_URL:
-   *   → Webhook action `sendOrderFromWebhook` (PDF + MailApp/Zalo + ghi Sheet phía GAS).
-   *   Vercel KHÔNG tăng LanGui (tránh gửi trùng).
+   * Có GAS_SEND_ORDER_URL:
+   *   → Uỷ quyền toàn bộ cho GAS `sendOrderEmail` (PDF + mail/Zalo + cập nhật Sheet).
+   *   Không ghi Sheet phía Vercel (tránh tăng LanGui 2 lần).
    *
-   * APP:
-   *   → Chỉ ghi Sheet phía Vercel (không mail).
-   *
-   * Không có GAS (Email/Zalo):
-   *   → Chỉ cập nhật Sheet nội bộ — không mail/PDF.
+   * Không có GAS:
+   *   → Chỉ cập nhật Sheet nội bộ (status/CT/snapshot/log) — không mail/PDF.
    *
    * sendAction: '' | 'send' | 'reset' | 'cancel' | 'markSent' (parity modal late-send V21)
-   *
-   * GAS doPost: xem docs/GAS_doPost_sendOrderFromWebhook.gs — bắt buộc WEBHOOK_SECRET;
-   * không deploy docs cũ GAS_doPost_sendOrderEmail.gs (ghi đè mất createPdf/OTP).
    */
   static async sendOrder(
     orderId: string,
@@ -1241,16 +1252,16 @@ export class OrderService {
       };
     }
 
-    // ─── Nhánh 1: GAS sendOrderFromWebhook (Email / Zalo) — PDF + mail Gmail chủ script ───
+    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
     if (gasUrl) {
-      // GAS: sendOrderFromWebhook → sendOrderEmail(maDon, email, sendAction)
-      // sendAction: null | send | reset | cancel | markSent
+      // V21 sendOrderEmail(maDon, email, action|null)
+      // action: null | send | reset | cancel | markSent
       // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
       const baselineLanGui = Number(lanGui) || 0;
       const idempotencyKey = `send:${orderId}:lg${baselineLanGui}:${action || "default"}`;
       const payload: Record<string, unknown> = {
-        action: "sendOrderFromWebhook",
+        action: "sendOrderEmail",
         maDon: orderId,
         email: user.email,
         sendAction: action || null,
@@ -1439,7 +1450,7 @@ export class OrderService {
           /unauthorized/i.test(errMsg)
             ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp WEBHOOK_SECRET/GAS_WEBHOOK_SECRET (Vercel)."
             : /unknown action/i.test(errMsg)
-              ? " — doPost chưa nhận action sendOrderFromWebhook (deploy Web App mới, xem docs/GAS_doPost_sendOrderFromWebhook.gs)."
+              ? " — doPost chưa nhận action sendOrderEmail (deploy Web App mới)."
               : gasBody._gasHtml
                 ? " — GAS trả HTML; kiểm tra LanGui trên Sheet trước khi gửi lại."
                 : "";
@@ -1610,7 +1621,7 @@ export class OrderService {
       needConfirm: false,
       notifiedNcc: false,
       message:
-        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL và action sendOrderFromWebhook trên doPost.",
+        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL để uỷ quyền GAS sendOrderEmail.",
     };
   }
 
