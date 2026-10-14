@@ -206,6 +206,33 @@ export class MasterRepository {
     return loadMap("dvt", SHEETS.DVT, ["MaDVT"], ["TenDVT"]);
   }
 
+  /** MaXe → MaDVT (DM_Xe) — dùng ghi chú Thuê ngoài + scope ĐVVT */
+  static async xeDvtMap(): Promise<Dict> {
+    const hit = cache["xeDvt"];
+    if (hit && Date.now() - hit.at < TTL_MS) return hit.map;
+    if (!isSheetsConfigured()) {
+      cache["xeDvt"] = { at: Date.now(), map: {} };
+      return {};
+    }
+    try {
+      const rows = await readSheetAsObjects(SHEETS.XE, {});
+      const map: Dict = {};
+      for (const r of rows) {
+        const maXe = String(r.MaXe || "").trim();
+        const maDvt = String(r.MaDVT || r.MaDvt || "").trim();
+        if (!maXe || !maDvt) continue;
+        map[maXe] = maDvt;
+        const up = maXe.toUpperCase();
+        if (up !== maXe && !map[up]) map[up] = maDvt;
+      }
+      cache["xeDvt"] = { at: Date.now(), map };
+      return map;
+    } catch (e) {
+      console.error("[Master] xeDvtMap failed", e);
+      return {};
+    }
+  }
+
   static nccQuanly() {
     return loadQuanlyMap("ncc", SHEETS.NCC, ["MaNCC", "MaNcc"]);
   }

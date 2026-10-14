@@ -57,13 +57,15 @@ export class DetailService {
     // V21.07 multi-role scope union
     rows = await applyListScopeFilter(rows, scope, filter.year);
 
-    const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta] = await Promise.all([
+    const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta, dvtMap, xeDvt] = await Promise.all([
       MasterRepository.nccNames(),
       MasterRepository.hhNames(),
       MasterRepository.xeNames(),
       MasterRepository.kvNames(),
       MasterRepository.htvtNames(),
       MasterRepository.hhMeta(),
+      MasterRepository.dvtNames().catch(() => ({} as Record<string, string>)),
+      MasterRepository.xeDvtMap().catch(() => ({} as Record<string, string>)),
     ]);
     rows = rows.map((d) => {
       const meta = hhMeta[d.productId] || hhMeta[String(d.productId || "").toUpperCase()];
@@ -80,6 +82,17 @@ export class DetailService {
           d.transportTypeName ||
           htvtMap[d.transportTypeId || ""] ||
           d.transportTypeId,
+        carrierId: (() => {
+          const vid = String(d.vehicleId || "").trim();
+          if (!vid) return undefined;
+          return xeDvt[vid] || xeDvt[vid.toUpperCase()] || undefined;
+        })(),
+        carrierName: (() => {
+          const vid = String(d.vehicleId || "").trim();
+          const ma = vid ? xeDvt[vid] || xeDvt[vid.toUpperCase()] || "" : "";
+          if (!ma) return undefined;
+          return dvtMap[ma] || dvtMap[String(ma).toUpperCase()] || ma;
+        })(),
         // Enrich từ DM_HangHoa — FE khóa Bao + validate chia hết
         phanLoai: (meta?.phanLoai as typeof d.phanLoai) || d.phanLoai,
         tyleChiahet:

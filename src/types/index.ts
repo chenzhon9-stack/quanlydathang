@@ -106,6 +106,10 @@ export interface OrderDetail {
   actualDelivered?: number;
   transportTypeId?: string;
   transportTypeName?: string;
+  /** MaDVT từ DM_Xe */
+  carrierId?: string;
+  /** TenDVT — ghi chú Thuê ngoài */
+  carrierName?: string;
   isDuyenHa?: boolean;
   phanLoai?: PhanLoaiHH;
   /** TyleChiahet từ DM_HangHoa (enrich lúc list) */

@@ -66,14 +66,15 @@ export class DeliveryService {
 
     // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
     const year = filter.year ?? currentYearVN();
-    const [khMap, xeMap, hhMap, details, htvtMap, nccSend] = await Promise.all([
-      MasterRepository.khNames(),
-      MasterRepository.xeNames(),
-      MasterRepository.hhNames(),
+        const [khMap, xeMap, hhMap, details, htvtMap, nccSend, dvtMap, xeDvt] = await Promise.all([
+      MasterRepository.khNames().catch(() => ({} as Record<string, string>)),
+      MasterRepository.xeNames().catch(() => ({} as Record<string, string>)),
+      MasterRepository.hhNames().catch(() => ({} as Record<string, string>)),
       DetailRepository.findMany({ year }).catch(() => []),
       MasterRepository.htvtNames().catch(() => ({} as Record<string, string>)),
-      // DM_NCC nhỏ + thường đã cache sheet — không chậm đáng kể
       MasterRepository.nccSendMethods().catch(() => ({} as Record<string, string>)),
+      MasterRepository.dvtNames().catch(() => ({} as Record<string, string>)),
+      MasterRepository.xeDvtMap().catch(() => ({} as Record<string, string>)),
     ]);
     const resolveSend = (sid?: string) => {
       const k = String(sid || "").trim();
@@ -123,6 +124,29 @@ export class DeliveryService {
           ct?.transportTypeName ||
           (ct?.transportTypeId ? htvtMap[String(ct.transportTypeId)] : undefined) ||
           ct?.transportTypeId,
+        carrierId: (() => {
+          const vid = String(d.vehicleId || ct?.vehicleId || "").trim();
+          if (!vid) return d.carrierId;
+          return (
+            xeDvt[vid] ||
+            xeDvt[vid.toUpperCase()] ||
+            d.carrierId
+          );
+        })(),
+        carrierName: (() => {
+          const vid = String(d.vehicleId || ct?.vehicleId || "").trim();
+          const ma =
+            (vid && (xeDvt[vid] || xeDvt[vid.toUpperCase()])) ||
+            d.carrierId ||
+            "";
+          if (!ma) return d.carrierName;
+          return (
+            dvtMap[ma] ||
+            dvtMap[String(ma).toUpperCase()] ||
+            d.carrierName ||
+            ma
+          );
+        })(),
         detailStatus: status,
         actualReceived: ct?.actualReceived ?? d.actualReceived,
         receivedDate: ct?.receivedDate || d.receivedDate,
