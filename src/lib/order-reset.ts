@@ -39,6 +39,11 @@ export function businessDayDiff(
   return Math.round((t1 - t0) / 86400000);
 }
 
+/** V21 _lateThresholdDays_(isDha): Duyên Hà 1 ngày, NCC khác 2 ngày (hủy quá hạn không báo NCC). */
+export function lateThresholdDays(isDuyenHa: boolean): number {
+  return isDuyenHa ? 1 : 2;
+}
+
 export type CanResetInput = {
   status: string;
   orderDate: string;

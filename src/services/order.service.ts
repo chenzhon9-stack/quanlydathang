@@ -1,4 +1,5 @@
 import { postGasWebhook, rememberGasIdempotency, gasWebhookUrl } from "@/lib/gas-webhook";
+import { isOrderSentLike } from "@/lib/order-resend";
 import {
   todayYmdVN,
   currentYearVN,
@@ -19,7 +20,7 @@ import { writeAudit } from "@/lib/sheets/audit";
 import { generateMaDon, resolveMaDonClock } from "@/lib/sheets/ma-don";
 import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
-import { canResetOrder, isDuyenHaNcc, businessDayDiff } from "@/lib/order-reset";
+import { canResetOrder, isDuyenHaNcc, businessDayDiff, lateThresholdDays } from "@/lib/order-reset";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
 
 export interface OrderListFilter {
@@ -88,7 +89,8 @@ async function resolveNccChannel(supplierId: string): Promise<{
 async function gasSendOrderFromWebhook(
   maDon: string,
   email: string,
-  sendAction: string | null
+  sendAction: string | null,
+  opts?: { idempotencyKey?: string }
 ): Promise<{ ok: boolean; body: Record<string, unknown>; message: string }> {
   const url = gasWebhookUrl();
   if (!url) {
@@ -98,6 +100,9 @@ async function gasSendOrderFromWebhook(
       message: "Chưa cấu hình GAS_SEND_ORDER_URL",
     };
   }
+  const idKey =
+    opts?.idempotencyKey ||
+    `sendOrderFromWebhook:${maDon}:${sendAction || "default"}:${email}`;
   try {
     const gasRes = await postGasWebhook(
       {
@@ -106,10 +111,17 @@ async function gasSendOrderFromWebhook(
         email,
         sendAction: sendAction || null,
       },
-      { timeoutMs: 55_000 }
+      { timeoutMs: 55_000, idempotencyKey: idKey }
     );
     const body = gasRes.body || {};
     const ok = body.success === true && !body._gasHtml;
+    if (ok) {
+      try {
+        rememberGasIdempotency(idKey, gasRes);
+      } catch {
+        /* ignore */
+      }
+    }
     const message = String(
       body.message || body.error || (ok ? "OK" : `GAS HTTP ${gasRes.status}`)
     );
@@ -419,14 +431,12 @@ export class OrderService {
       };
     }
 
-    // Soft-delete GH chưa có thực giao + hủy CT
-    let cancelledCt = 0;
-    let deletedGh = 0;
-    const now = formatDateTimeVN();
-    for (const d of details) {
+    // 1) Quét toàn bộ GH trước khi ghi — tránh hủy dở nếu có thực giao
+    const activeDetails = details.filter((d) => {
       const st = String(d.status || "").trim();
-      if (st === STATUS_CT.CANCEL || st === STATUS_CT.DELETE) continue;
-
+      return st !== STATUS_CT.CANCEL && st !== STATUS_CT.DELETE;
+    });
+    for (const d of activeDetails) {
       const ghs = await DeliveryRepository.findMany({
         year: y,
         detailId: d.detailId,
@@ -439,6 +449,20 @@ export class OrderService {
             message: `Xe ${d.detailId} đã có thực giao, không hủy đơn.`,
           };
         }
+      }
+    }
+
+    // 2) Soft-delete GH + hủy CT
+    let cancelledCt = 0;
+    let deletedGh = 0;
+    const now = formatDateTimeVN();
+    for (const d of activeDetails) {
+      const ghs = await DeliveryRepository.findMany({
+        year: y,
+        detailId: d.detailId,
+        includeDeleted: false,
+      });
+      for (const g of ghs) {
         const r = await updateSheetRowByKey(
           SHEETS.GH,
           "ID_Giaohang",
@@ -464,19 +488,42 @@ export class OrderService {
       if (r > 0) cancelledCt++;
     }
 
-    // V21 _cancelOrderCore_: wasEverSent + !isExpired → báo NCC (GuiLaimail + xuLyDonHang)
-    const wasEverSent =
-      (Number(order.sendCount) || 0) > 0 ||
-      !!String(order.orderFile || "").trim();
+    // V21: TongSoChitiet / ChitietHuy = mọi CT khác DELETE
+    const tongSo = details.filter((d) => {
+      const st = String(d.status || "").trim();
+      return (
+        st !== STATUS_CT.DELETE &&
+        st !== "DELETE" &&
+        !String(st).includes("Xóa")
+      );
+    }).length;
+    const chitietHuy = tongSo; // sau hủy toàn đơn: mọi CT non-DELETE đều Hủy
+
+    // V21 _isOrderSent_ ≈ isOrderSentLike
+    const wasEverSent = isOrderSentLike({
+      status: order.status,
+      sendCount: order.sendCount,
+      pendingMail: (order as { pendingMail?: boolean }).pendingMail,
+      resendMail: (order as { resendMail?: boolean }).resendMail,
+      mailSentAt: (order as { mailSentAt?: string }).mailSentAt,
+      timeGuimail:
+        (order as { timeGuimail?: string }).timeGuimail ||
+        (order as { mailSentAt?: string }).mailSentAt,
+      sentAt: (order as { sentAt?: string }).sentAt,
+    });
     const isDha = isDuyenHaNcc(order.supplierId);
     const dayDiff = businessDayDiff(
       String(order.orderDateTime || order.orderDate || ""),
       isDha
     );
-    // V21 _lateThresholdDays_(isDha) — hủy quá hạn không báo NCC
-    const lateThreshold = isDha ? 1 : 1;
+    // V21 _lateThresholdDays_: DHA 1, NCC khác 2
+    const lateThreshold = lateThresholdDays(isDha);
     const isExpired = dayDiff !== null && dayDiff >= lateThreshold;
-    const shouldNotifyNcc = wasEverSent && !isExpired;
+
+    const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
+    // APP: không báo mail/Zalo; GuiLaimail=false (trigger bỏ qua đơn Hủy)
+    const shouldNotifyNcc =
+      wasEverSent && !isExpired && channel !== "app";
 
     const row = await updateSheetRowByKey(
       SHEETS.DH,
@@ -484,8 +531,8 @@ export class OrderService {
       orderId,
       {
         TrangThaiDon: STATUS_DON.CANCEL,
-        TongSoChitiet: cancelledCt,
-        ChitietHuy: cancelledCt,
+        TongSoChitiet: tongSo,
+        ChitietHuy: chitietHuy,
         GuiLaimail: shouldNotifyNcc,
         ChoGuiMail: false,
       },
@@ -495,30 +542,34 @@ export class OrderService {
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
 
     let notifiedNcc = false;
+    let notifyFailed = false;
     let notifyNote = "";
-    if (shouldNotifyNcc) {
-      const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
-      if (channel === "app") {
-        notifyNote = `Hình thức APP (${hinhThucGui || "APP"}) — không gửi mail/Zalo hủy cho NCC.`;
-      } else if (gasWebhookUrl()) {
-        // GAS sendAction=cancel → _handleDecisionCancel_ / thông báo hủy
+    if (channel === "app" && wasEverSent && !isExpired) {
+      notifyNote = `Hình thức APP (${hinhThucGui || "APP"}) — không gửi mail/Zalo hủy cho NCC.`;
+    } else if (shouldNotifyNcc) {
+      if (gasWebhookUrl()) {
         const gas = await gasSendOrderFromWebhook(
           orderId,
           user.email,
-          "cancel"
+          "cancel",
+          {
+            idempotencyKey: `cancel:${orderId}:lg${Number(order.sendCount) || 0}`,
+          }
         );
         notifiedNcc = gas.ok;
+        notifyFailed = !gas.ok;
         notifyNote = gas.ok
           ? `Đã báo NCC hủy đơn (${channel}).`
           : `Hủy trên Sheet OK; báo NCC thất bại: ${gas.message}`;
       } else {
+        notifyFailed = true;
         notifyNote =
           "Đã bật GuiLaimail — chưa cấu hình GAS_SEND_ORDER_URL nên chưa gửi thông báo NCC.";
       }
     } else if (!wasEverSent) {
       notifyNote = "Hủy trước khi gửi NCC — không thông báo NCC.";
     } else if (isExpired) {
-      notifyNote = `Hủy quá hạn (${dayDiff} ngày) — chỉ cập nhật nội bộ, không báo NCC.`;
+      notifyNote = `Hủy quá hạn (${dayDiff} ngày, ngưỡng ${lateThreshold}) — chỉ cập nhật nội bộ, không báo NCC.`;
     }
 
     const auditAction = !wasEverSent
@@ -535,675 +586,46 @@ export class OrderService {
       action: auditAction,
       maDon: orderId,
       targetId: orderId,
-      newValue: { cancelledCt, deletedGh, shouldNotifyNcc, notifiedNcc },
-      lyDo:
-        `Hủy đơn: ${cancelledCt} CT, soft-delete ${deletedGh} GH. ${notifyNote}`.trim(),
+      newValue: JSON.stringify({
+        cancelledCt,
+        deletedGh,
+        tongSo,
+        chitietHuy,
+        wasEverSent,
+        isExpired,
+        dayDiff,
+        lateThreshold,
+        notifiedNcc,
+        notifyFailed,
+        channel,
+      }),
+      lyDo: notifyNote || "Hủy đơn",
       year: y,
     });
 
-    try {
-      invalidateSheetCache([SHEETS.DH, SHEETS.CT, SHEETS.GH], y);
-    } catch {
-      /* ignore */
-    }
-
     return {
       orderId,
-      status: "CANCEL",
-      row,
       cancelledCt,
       deletedGh,
       wasEverSent,
       isExpired,
       dayDiff,
-      shouldNotifyNcc,
+      lateThreshold,
       notifiedNcc,
-      message: `Đã hủy đơn ${orderId}. ${notifyNote}`.trim(),
+      notifyFailed,
+      channel,
+      hinhThucGui,
+      message:
+        `Đã hủy đơn ${orderId}` +
+        (cancelledCt ? ` (${cancelledCt} xe)` : "") +
+        (notifyNote ? `. ${notifyNote}` : ""),
     };
   }
-
-  /** Đồng bộ trạng thái đơn theo CT (public helper) */
-  static async syncStatus(orderId: string, year?: number) {
-    return syncOrderStatusByOrderId(orderId, year);
-  }
-
 
   /**
-   * Tạo đơn mới — parity V21 saveFullNewOrder
-   * - ≤ 6 xe
-   * - generateUniqueMaDon + CT/GH counter
-   * - mỗi CT ≥ 1 dòng GH, chia hết TyleChiahet
-   */
-  static async createOrder(
-    payload: {
-      supplierId: string;
-      orderDate?: string;
-      year?: number;
-      details: Array<{
-        vehicleId: string;
-        productId: string;
-        regionId: string;
-        note?: string;
-        transportTypeId?: string;
-        transportTypeName?: string;
-        carrierId?: string;
-        deliveries: Array<{
-          customerId: string;
-          customerDetail?: string;
-          plannedQty: number;
-        }>;
-      }>;
-    },
-    user: UserContext
-  ) {
-    if (
-      !hasPermission(user, "ORDER_CREATE") &&
-      !hasPermission(user, "ORDER_UPDATE") &&
-      !hasPermission(user, "*")
-    ) {
-      throw { code: "PERMISSION_DENIED", message: "Không có quyền tạo đơn" };
-    }
-    if (!isSheetsConfigured()) {
-      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
-    }
-
-    const maNcc = String(payload.supplierId || "").trim();
-    if (!maNcc) {
-      throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp." };
-    }
-    const details = payload.details || [];
-    if (!details.length) {
-      throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết đơn hàng." };
-    }
-    if (details.length > 6) {
-      throw {
-        code: "VALIDATION_ERROR",
-        message: "Mỗi đơn hàng không được vượt quá 6 xe.",
-      };
-    }
-
-    // Trùng xe + hàng trong payload (tạo đơn mới — chưa có CT cũ)
-    const pairKey = (v: string, p: string) =>
-      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
-    const seen = new Set<string>();
-    for (const d of details) {
-      const key = pairKey(d.vehicleId, d.productId);
-      if (seen.has(key)) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
-        };
-      }
-      seen.add(key);
-    }
-
-    const { ymdDate } = await import("@/lib/sheets/date");
-    const { generateUniqueMaDon } = await import("@/lib/sheets/ma-don");
-    const { nextCounterCodes } = await import("@/lib/sheets/counter");
-    const { appendSheetRow, readSheetAsObjects } = await import(
-      "@/lib/sheets/dal"
-    );
-    const { qty3, validateStep } = await import("@/lib/business-rules");
-
-    // API/logic: yyyy-MM-dd hoặc datetime local; DAL ghi Sheet → serial Date (V21)
-    const ngayDatRaw = String(payload.orderDate || "").trim();
-    let ngayDat = "";
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ngayDatRaw)) {
-      ngayDat = ngayDatRaw.length === 16 ? ngayDatRaw + ":00" : ngayDatRaw.slice(0, 19);
-    } else {
-      ngayDat = ymdDate(ngayDatRaw) || ymdDate(new Date()) || "";
-    }
-    const y =
-      payload.year ??
-      Number(String(ngayDat).slice(0, 4)) ??
-      currentYearVN();
-
-    // HH map cho chia hết
-    const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(
-      () => [] as Record<string, string>[]
-    );
-    const hhById = new Map<string, Record<string, string>>();
-    for (const r of hhRows) {
-      const id = String(r.MaHH || r.MaHh || "").trim();
-      if (id) hhById.set(id, r);
-    }
-
-    // Validate từng CT
-    for (const d of details) {
-      if (!String(d.productId || "").trim()) {
-        throw { code: "VALIDATION_ERROR", message: "Thiếu hàng hóa." };
-      }
-      if (!String(d.regionId || "").trim()) {
-        throw { code: "VALIDATION_ERROR", message: "Thiếu Khu vực/Công trình." };
-      }
-      if (!String(d.vehicleId || "").trim()) {
-        throw { code: "VALIDATION_ERROR", message: "Thiếu mã xe." };
-      }
-      if (!d.deliveries?.length) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: "Mỗi xe phải có ít nhất 1 dòng kế hoạch giao.",
-        };
-      }
-      const product = hhById.get(String(d.productId).trim());
-      const tlCH = Number(
-        product?.TyleChiahet || product?.TyleChiaHet || 0
-      ) || 0;
-      const tenHH =
-        product?.TenHangHoa || product?.TenHH || d.productId;
-      for (const dl of d.deliveries) {
-        if (!String(dl.customerId || "").trim()) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: "Dòng kế hoạch giao thiếu khách hàng.",
-          };
-        }
-        const khg = qty3(Number(dl.plannedQty) || 0);
-        if (!(khg > 0)) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: "Sản lượng kế hoạch giao phải lớn hơn 0.",
-          };
-        }
-        if (!validateStep(khg, tlCH)) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: `Kế hoạch giao cho ${tenHH} phải chia hết cho ${tlCH} tấn. Giá trị hiện tại: ${khg} tấn.`,
-          };
-        }
-      }
-    }
-
-    const { maDon } = await generateUniqueMaDon(maNcc, ngayDat, { year: y });
-    const isDuyenHa =
-      ["dha", "btay"].includes(maNcc.toLowerCase());
-
-    const detailIds = await nextCounterCodes("CT", ngayDat, {
-      count: details.length,
-      email: user.email,
-      year: y,
-    });
-    const totalGh = details.reduce(
-      (s, d) => s + (d.deliveries?.length || 0),
-      0
-    );
-    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
-      count: totalGh,
-      email: user.email,
-      year: y,
-    });
-
-    const now = formatDateTimeVN();
-    let ghIndex = 0;
-
-    // DonHang
-    await appendSheetRow(
-      SHEETS.DH,
-      {
-        MaDon: maDon,
-        NgayDatHang: ngayDat,
-        MaNCC: maNcc,
-        LanGui: 0,
-        TrangThaiDon: STATUS_DON.NEW,
-        TongSoChitiet: details.length,
-        ChitietHuy: 0,
-        FileDonhang: "",
-        ChoGuiMail: false,
-        timeGuimail: "",
-        GuiLaimail: false,
-        User: user.email,
-      },
-      y
-    );
-
-    for (let idx = 0; idx < details.length; idx++) {
-      const d = details[idx];
-      const idCt = detailIds[idx];
-      const khTotal = qty3(
-        (d.deliveries || []).reduce(
-          (s, x) => s + (Number(x.plannedQty) || 0),
-          0
-        )
-      );
-
-      await appendSheetRow(
-        SHEETS.CT,
-        {
-          ID_Chitiet: idCt,
-          NgayDatHang: ngayDat,
-          MaDon: maDon,
-          MaNCC: maNcc,
-          MaXe: d.vehicleId,
-          MaHH: d.productId,
-          SoLuong: khTotal,
-          Khuvuc: d.regionId,
-          KhoXuat: "",
-          GhiChu: d.note || "",
-          TrangThaiXe: STATUS_CT.NEW,
-          TimeChange: now,
-          NgayNhanHang: "",
-          ThucNhan: 0,
-          User: user.email,
-          MaHTVT: d.transportTypeId || "",
-          TenHTVT: d.transportTypeName || "",
-          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
-        },
-        y
-      );
-
-      // DonHang_VanTai nếu thuê ngoài
-      if (
-        d.transportTypeId &&
-        String(d.transportTypeId).toUpperCase().includes("THUE") &&
-        d.carrierId
-      ) {
-        await appendSheetRow(
-          SHEETS.CT_VT,
-          {
-            ID_Chitiet: idCt,
-            MaXe: d.vehicleId,
-            MaDVT: d.carrierId,
-            UpdatedAt: now,
-            UpdatedBy: user.email,
-          },
-          y
-        ).catch(() => undefined);
-      }
-
-      for (const dl of d.deliveries || []) {
-        const idGh = deliveryIds[ghIndex++];
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: idCt,
-            MaKh: dl.customerId,
-            ChitietKh: dl.customerDetail || "",
-            KHgiao: qty3(Number(dl.plannedQty) || 0),
-            ThucGiao: 0,
-            Ngaygiao: "",
-            Ghichu: "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
-      }
-    }
-
-    try {
-      const { writeAudit } = await import("@/lib/sheets/audit");
-      await writeAudit({
-        email: user.email,
-        role: user.role,
-        action: "CREATE_ORDER",
-        maDon,
-        targetId: maDon,
-        newValue: JSON.stringify({
-          detailCount: details.length,
-          deliveryCount: totalGh,
-          detailIds,
-        }),
-        year: y,
-      });
-    } catch {
-      /* audit optional */
-    }
-
-    return {
-      orderId: maDon,
-      orderDate: ngayDat,
-      supplierId: maNcc,
-      detailCount: details.length,
-      deliveryCount: totalGh,
-      detailIds,
-      status: "NEW",
-    };
-  }
-
-
-  /**
-   * Thêm xe vào đơn có sẵn — parity V21 saveOrderBatch type ADD_DETAIL
-   * - Đơn editable (NEW / chưa gửi cứng)
-   * - Tổng xe active ≤ 6
-   * - Validate + counter CT/GH giống createOrder
-   */
-  static async addDetailsToOrder(
-    orderId: string,
-    payload: {
-      year?: number;
-      details: Array<{
-        vehicleId: string;
-        productId: string;
-        regionId: string;
-        note?: string;
-        transportTypeId?: string;
-        transportTypeName?: string;
-        carrierId?: string;
-        deliveries: Array<{
-          customerId: string;
-          customerDetail?: string;
-          plannedQty: number;
-        }>;
-      }>;
-    },
-    user: UserContext
-  ) {
-    if (
-      !hasPermission(user, "ORDER_CREATE") &&
-      !hasPermission(user, "ORDER_UPDATE") &&
-      !hasPermission(user, "*")
-    ) {
-      throw { code: "PERMISSION_DENIED", message: "Không có quyền thêm xe" };
-    }
-    if (!isSheetsConfigured()) {
-      throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Google Sheets" };
-    }
-
-    const details = payload.details || [];
-    if (!details.length) {
-      throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết xe cần thêm." };
-    }
-
-    const y = payload.year ?? currentYearVN();
-    const order = await OrderRepository.findById(orderId, y);
-    if (!order) {
-      throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
-    }
-
-    const st = String(order.status || "");
-    const stU = st.toUpperCase();
-    // Cho phép thêm khi Khởi tạo / Đang xử lý; cấm Hủy / Hoàn thành
-    if (
-      stU.includes("CANCEL") ||
-      st.includes("Hủy") ||
-      stU === "DONE" ||
-      st.includes("Hoàn thành")
-    ) {
-      throw {
-        code: "VALIDATION_ERROR",
-        message: "Đơn đã hủy hoặc hoàn thành, không thêm xe.",
-      };
-    }
-    // Nếu đã gửi mail nhiều lần — vẫn cho purchase/admin thêm? V21: !_isOrderEditable_ chặn batch.
-    // Editable khi NEW hoặc chưa có file/lanGui lớn — nới: cho NEW + PROCESSING
-    const editable =
-      stU === "NEW" ||
-      st.includes("Khởi tạo") ||
-      stU === "PROCESSING" ||
-      st.includes("Đang xử lý");
-    if (!editable) {
-      throw {
-        code: "VALIDATION_ERROR",
-        message: "Trạng thái đơn không cho phép thêm xe.",
-      };
-    }
-
-    const { DetailRepository } = await import("@/repositories/detail.repository");
-    const existing = await DetailRepository.findMany({ year: y, orderId });
-    const active = existing.filter((d) => {
-      const s = String(d.status || "");
-      return !s.includes("Xóa") && s !== STATUS_CT.DELETE;
-    });
-    if (active.length + details.length > 6) {
-      throw {
-        code: "VALIDATION_ERROR",
-        message: `Mỗi đơn tối đa 6 xe (hiện ${active.length}, thêm ${details.length}).`,
-      };
-    }
-
-    // Trùng xe+hàng với active hiện có
-    // Trùng xe + hàng với CT active + trong payload (V21, không phân biệt hoa thường)
-    const pairKey = (v: string, p: string) =>
-      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
-    const seen = new Set(
-      active.map((d) => pairKey(d.vehicleId || "", d.productId || "")).filter((k) => k !== "|")
-    );
-    for (const d of details) {
-      const key = pairKey(d.vehicleId, d.productId);
-      if (seen.has(key)) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
-        };
-      }
-      seen.add(key);
-    }
-
-    const { ymdDate, formatDateTimeVN, parseLocalDate } = await import(
-      "@/lib/sheets/date"
-    );
-    const { nextCounterCodes } = await import("@/lib/sheets/counter");
-    const { appendSheetRow, readSheetAsObjects } = await import(
-      "@/lib/sheets/dal"
-    );
-    const { qty3, validateStep } = await import("@/lib/business-rules");
-    const { writeAudit } = await import("@/lib/sheets/audit");
-
-    // NgayDatHang CT = full datetime của đơn (user chọn), KHÔNG ép 00:00:00
-    let ngayDatHangCt: string | number = "";
-    try {
-      const dhRows = await readSheetAsObjects(SHEETS.DH, { year: y });
-      const dhRaw = dhRows.find(
-        (r) =>
-          String(r.MaDon || "")
-            .trim()
-            .toUpperCase() === String(orderId).trim().toUpperCase()
-      );
-      if (dhRaw && dhRaw.NgayDatHang != null && String(dhRaw.NgayDatHang).trim() !== "") {
-        ngayDatHangCt = dhRaw.NgayDatHang as string | number;
-      }
-    } catch {
-      /* fallback */
-    }
-    if (ngayDatHangCt === "" || ngayDatHangCt == null) {
-      // order.orderDate có thể chỉ yyyy-MM-dd — giữ nguyên chuỗi nếu có giờ
-      const rawOd = String(order.orderDate || "").trim();
-      if (/\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}/.test(rawOd)) {
-        ngayDatHangCt = rawOd.length === 16 ? rawOd + ":00" : rawOd.slice(0, 19);
-      } else if (rawOd) {
-        // Có ngày không giờ: giữ yyyy-MM-dd (Sheet serial 00:00) — chỉ khi DH cũng không có giờ
-        ngayDatHangCt = ymdDate(rawOd) || formatDateTimeVN();
-      } else {
-        ngayDatHangCt = formatDateTimeVN();
-      }
-    }
-    // Counter key theo ngày (YYYYMMDD)
-    const ngayDat =
-      ymdDate(ngayDatHangCt) || ymdDate(order.orderDate) || ymdDate(new Date()) || "";
-    const maNcc = order.supplierId;
-    const isDuyenHa = ["dha", "btay"].includes(
-      String(maNcc || "").toLowerCase()
-    );
-
-    const hhRows = await readSheetAsObjects(SHEETS.HH, { year: y }).catch(
-      () => [] as Record<string, string>[]
-    );
-    const hhById = new Map<string, Record<string, string>>();
-    for (const r of hhRows) {
-      const id = String(r.MaHH || r.MaHh || "").trim();
-      if (id) hhById.set(id, r);
-    }
-
-    for (const d of details) {
-      if (!d.vehicleId || !d.productId || !d.regionId) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: "Thiếu xe / hàng / khu vực.",
-        };
-      }
-      if (!d.deliveries?.length) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: "Mỗi xe cần ≥1 dòng kế hoạch giao.",
-        };
-      }
-      const product = hhById.get(String(d.productId).trim());
-      const tlCH =
-        Number(product?.TyleChiahet || product?.TyleChiaHet || 0) || 0;
-      const tenHH = product?.TenHangHoa || d.productId;
-      for (const dl of d.deliveries) {
-        if (!dl.customerId) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: "Thiếu khách hàng trên dòng giao.",
-          };
-        }
-        const khg = qty3(Number(dl.plannedQty) || 0);
-        if (!(khg > 0)) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: "KH giao phải > 0.",
-          };
-        }
-        if (!validateStep(khg, tlCH)) {
-          throw {
-            code: "VALIDATION_ERROR",
-            message: `Kế hoạch giao ${tenHH} phải chia hết cho ${tlCH} tấn (hiện ${khg}).`,
-          };
-        }
-      }
-    }
-
-    const detailIds = await nextCounterCodes("CT", ngayDat, {
-      count: details.length,
-      email: user.email,
-      year: y,
-    });
-    const totalGh = details.reduce(
-      (s, d) => s + (d.deliveries?.length || 0),
-      0
-    );
-    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
-      count: totalGh,
-      email: user.email,
-      year: y,
-    });
-
-    const now = formatDateTimeVN();
-    let ghIndex = 0;
-    const createdCt: string[] = [];
-
-    for (let idx = 0; idx < details.length; idx++) {
-      const d = details[idx];
-      const idCt = detailIds[idx];
-      const khTotal = qty3(
-        (d.deliveries || []).reduce(
-          (s, x) => s + (Number(x.plannedQty) || 0),
-          0
-        )
-      );
-
-      await appendSheetRow(
-        SHEETS.CT,
-        {
-          ID_Chitiet: idCt,
-          NgayDatHang: ngayDatHangCt,
-          MaDon: orderId,
-          MaNCC: maNcc,
-          MaXe: d.vehicleId,
-          MaHH: d.productId,
-          SoLuong: khTotal,
-          Khuvuc: d.regionId,
-          KhoXuat: "",
-          GhiChu: d.note || "",
-          TrangThaiXe: STATUS_CT.NEW,
-          TimeChange: now,
-          NgayNhanHang: "",
-          ThucNhan: 0,
-          User: user.email,
-          MaHTVT: d.transportTypeId || "",
-          TenHTVT: d.transportTypeName || "",
-          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
-        },
-        y
-      );
-      createdCt.push(idCt);
-
-      for (const dl of d.deliveries || []) {
-        const idGh = deliveryIds[ghIndex++];
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: idCt,
-            MaKh: dl.customerId,
-            ChitietKh: dl.customerDetail || "",
-            KHgiao: qty3(Number(dl.plannedQty) || 0),
-            ThucGiao: 0,
-            Ngaygiao: "",
-            Ghichu: "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
-      }
-    }
-
-    // Cập nhật TongSoChitiet
-    const newTong = active.length + details.length;
-    // Đơn đã gửi → bật GuiLaimail + Đang xử lý (V21 _markOrderChoGuiMailIfSent_)
-    const alreadySent =
-      Number(order.sendCount || 0) > 0 ||
-      order.resendMail ||
-      order.pendingMail ||
-      !!order.mailSentAt ||
-      String(order.status || "").toUpperCase() === "PROCESSING" ||
-      String(order.status || "").toUpperCase() === "DONE";
-    await updateSheetRowByKey(
-      SHEETS.DH,
-      "MaDon",
-      orderId,
-      {
-        TongSoChitiet: newTong,
-        ...(alreadySent
-          ? {
-              GuiLaimail: true,
-              ChoGuiMail: true,
-              TrangThaiDon: "Đang xử lý",
-            }
-          : {}),
-      },
-      y
-    );
-
-    await writeAudit({
-      email: user.email,
-      role: user.role,
-      action: "ADD_DETAIL",
-      maDon: orderId,
-      targetId: orderId,
-      newValue: JSON.stringify({ detailIds: createdCt, count: details.length }),
-      year: y,
-    });
-
-    const synced = await syncOrderStatusByOrderId(orderId, y).catch(() => null);
-
-    return {
-      orderId,
-      added: details.length,
-      detailIds: createdCt,
-      tongSoChitiet: newTong,
-      /** Trạng thái đơn sau autoUpdateOrderStatus_ */
-      status: synced?.status || order.status,
-      ngayDatHangCt: typeof ngayDatHangCt === "string" ? ngayDatHangCt : String(ngayDatHangCt),
-    };
-  }
-
-    /**
    * Gửi đơn NCC — Strangler V21.
-   *
-   * Có GAS_SEND_ORDER_URL:
-   *   → Uỷ quyền GAS `sendOrderFromWebhook` → sendOrderEmail nội bộ (PDF + mail/Zalo + Sheet).
-   *   Không ghi Sheet phía Vercel (tránh tăng LanGui 2 lần).
-   *
-   * Không có GAS:
-   *   → Chỉ cập nhật Sheet nội bộ (status/CT/snapshot/log) — không mail/PDF.
-   *
-   * sendAction: '' | 'send' | 'reset' | 'cancel' | 'markSent' (parity modal late-send V21)
+   * APP: Sheet-only + hướng dẫn. Email/Zalo: GAS sendOrderFromWebhook.
+   * sendAction: '' | 'send' | 'reset' | 'cancel' | 'markSent'
    */
   static async sendOrder(
     orderId: string,
