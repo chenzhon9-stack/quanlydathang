@@ -1383,6 +1383,49 @@ export class OrderService {
         };
       }
 
+      // V21 RESEND_EXPIRED_NO_NOTIFY: đã gửi (LanGui>0) + quá hạn → chỉ xóa cờ, KHÔNG tăng LanGui
+      if (
+        lanGuiCur > 0 &&
+        dayDiff !== null &&
+        dayDiff >= lateThresholdDays(isDha)
+      ) {
+        await updateSheetRowByKey(
+          SHEETS.DH,
+          "MaDon",
+          orderId,
+          { ChoGuiMail: false, GuiLaimail: false },
+          y
+        );
+        await writeAudit({
+          email: user.email,
+          role: user.role,
+          action: "RESEND_EXPIRED_NO_NOTIFY",
+          maDon: orderId,
+          targetId: orderId,
+          newValue: JSON.stringify({
+            channel: "app",
+            lanGui: lanGuiCur,
+            dayDiff,
+            threshold: lateThresholdDays(isDha),
+          }),
+          lyDo: `Đơn quá hạn (>= ${lateThresholdDays(isDha)} ngày) kể từ ngày đặt — chỉ cập nhật nội bộ (APP).`,
+          year: y,
+        });
+        return {
+          orderId,
+          via: "app" as const,
+          needConfirm: false as const,
+          notifiedNcc: false,
+          expired: true as const,
+          channel: "app" as const,
+          hinhThucGui,
+          appGuide: false,
+          lanGui: lanGuiCur,
+          message:
+            "Đơn hàng đã quá thời hạn gửi lại nên hệ thống chỉ cập nhật trạng thái nội bộ, không gửi lại thông tin cho NCC.",
+        };
+      }
+
       // reset → resetOrder (đơn mới + gửi APP hướng dẫn)
       if (action === "reset") {
         const resetRes = await this.resetOrder(orderId, user, y);
@@ -1418,6 +1461,23 @@ export class OrderService {
       const markOnly = action === "markSent";
       const lanGuiNext = lanGuiCur + 1;
       const timeLabel = formatDateTimeVN(new Date());
+      const { DetailRepository } = await import(
+        "@/repositories/detail.repository"
+      );
+      const details = await DetailRepository.findMany({ year: y, orderId });
+      // V21 finalizeOrderSent: mọi xe (trừ Xóa) đều Hủy → TrangThaiDon = Hủy
+      const isDelCt = (st: unknown) => {
+        const v = String(st || "").trim();
+        return v === STATUS_CT.DELETE || v === "DELETE" || v.includes("Xóa");
+      };
+      const isCancelCt = (st: unknown) => {
+        const v = String(st || "").trim();
+        return v === STATUS_CT.CANCEL || v.toUpperCase() === "CANCEL" || v.includes("Hủy");
+      };
+      const liveCt = details.filter((d) => !isDelCt(d.status));
+      const huyToanBo =
+        liveCt.length > 0 && liveCt.every((d) => isCancelCt(d.status));
+      const xeHuyCount = liveCt.filter((d) => isCancelCt(d.status)).length;
       await updateSheetRowByKey(
         SHEETS.DH,
         "MaDon",
@@ -1427,15 +1487,11 @@ export class OrderService {
           timeGuimail: timeLabel,
           ChoGuiMail: false,
           GuiLaimail: false,
-          TrangThaiDon: STATUS_DON.PROCESSING,
+          TrangThaiDon: huyToanBo ? STATUS_DON.CANCEL : STATUS_DON.PROCESSING,
           FileDonhang: orderApp.orderFile || "",
         },
         y
       );
-      const { DetailRepository } = await import(
-        "@/repositories/detail.repository"
-      );
-      const details = await DetailRepository.findMany({ year: y, orderId });
       let ctUpdated = 0;
       for (const ct of details) {
         const st = String(ct.status || "").toUpperCase();
@@ -1487,9 +1543,13 @@ export class OrderService {
             NCC: tenNcc,
             Email: "",
             "Lần gửi": lanGuiNext,
-            "Ghi chú": markOnly
-              ? "APP — markSent (xử lý ngoài hệ thống)"
-              : "APP — cập nhật Sheet, hướng dẫn mở app NCC",
+            "Ghi chú": huyToanBo
+              ? "Hủy toàn bộ"
+              : xeHuyCount
+                ? "Hủy một phần"
+                : markOnly
+                  ? "APP — markSent (xử lý ngoài hệ thống)"
+                  : "APP — cập nhật Sheet, hướng dẫn mở app NCC",
             "Link PDF": orderApp.orderFile || "",
           },
           y
@@ -2177,6 +2237,14 @@ export class OrderService {
       lyDo: `Tách ${chuaNhan.length} xe chưa nhận (dayDiff=${dayDiff})`,
       year: y,
     });
+
+    // V21 _tachDonPartial_: autoUpdateOrderStatus_(new) + (old) → TrangThaiDon / TongSoChitiet / ChitietHuy
+    await syncOrderStatusByOrderId(newMaDon, y).catch((e) =>
+      console.warn("[resetOrder partial] sync new", e)
+    );
+    await syncOrderStatusByOrderId(orderId, y).catch((e) =>
+      console.warn("[resetOrder partial] sync old", e)
+    );
 
 
     // V21: sau reset → _xuLyDonHangNoLock_(newMaDon) gửi ngay (Email/Zalo)
