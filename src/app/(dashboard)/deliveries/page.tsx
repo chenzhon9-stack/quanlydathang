@@ -25,9 +25,17 @@ import {
   type ColumnState,
   loadColumnState,
   resolveColumns,
+  saveColumnState,
+  defaultState,
 } from "@/lib/column-prefs";
-import { DELIVERY_COLUMN_DEFS } from "@/lib/column-definitions";
-import { downloadExcelHtml } from "@/lib/export-excel";
+import {
+  DELIVERY_COLUMN_DEFS,
+  DEFAULT_DELIVERY_EXPORT_KEYS,
+} from "@/lib/column-definitions";
+import {
+  DELIVERY_EXPORT_COLS,
+  downloadDeliveriesXlsx,
+} from "@/lib/delivery-export";
 import {
   DeliveryEditorModal,
   summaryFromDelivery,
@@ -188,6 +196,7 @@ export default function DeliveriesPage() {
       });
       if (fromDate) qs.set("fromDate", fromDate);
       if (toDate) qs.set("toDate", toDate);
+      if (colState.visible.donGia) qs.set("withPrice", "1");
       const res = await fetch(`/api/v1/deliveries?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -208,11 +217,81 @@ export default function DeliveriesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, fromDate, toDate]);
+  }, [pageSize, fromDate, toDate, colState.visible.donGia]);
 
   useEffect(() => {
     load(1);
   }, [load]);
+
+  const [exporting, setExporting] = useState(false);
+
+  /** Xuất Excel — V21 exportDeliveriesXlsx: gọi API export (toàn bộ khoảng ngày), lọc chip + từ khóa phía client */
+  async function exportXlsx() {
+    const keys = visibleCols
+      .map((c) => c.key)
+      .filter((k) => !!DELIVERY_EXPORT_COLS[k]);
+    if (!keys.length) {
+      alert("Bạn chưa chọn cột nào để xuất Excel.");
+      return;
+    }
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    setExporting(true);
+    try {
+      const qs = new URLSearchParams();
+      if (fromDate) qs.set("fromDate", fromDate);
+      if (toDate) qs.set("toDate", toDate);
+      const res = await fetch(`/api/v1/deliveries/export?${qs}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!json.success) {
+        alert("Lỗi khi xuất dữ liệu: " + (json.error?.message || "không rõ"));
+        return;
+      }
+      const all: Delivery[] = json.data?.items || [];
+      const list = all.filter((d) => {
+        if (!matchStatusFilter(d.detailStatus, statuses)) return false;
+        if (!String(search || "").trim()) return true;
+        const hay = keys
+          .map((k) => {
+            const v = DELIVERY_EXPORT_COLS[k].get(d);
+            return v == null ? "" : String(v);
+          })
+          .join(" ");
+        return matchSearch(hay, search);
+      });
+      await downloadDeliveriesXlsx(keys, list);
+    } catch (e) {
+      alert("Lỗi tạo file Excel: " + ((e as Error)?.message || e));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  /** Nút "Bộ cột xuất" — nạp preset export thành view hiện tại (V21 applyDeliveryExportPreset) */
+  function applyExportPreset() {
+    const keys = DEFAULT_DELIVERY_EXPORT_KEYS.filter((k) =>
+      DELIVERY_COLUMNS.some((c) => c.key === k)
+    );
+    const base = defaultState(DELIVERY_COLUMNS);
+    const visible: Record<string, boolean> = {};
+    for (const c of DELIVERY_COLUMNS) visible[c.key] = keys.includes(c.key);
+    const order = [
+      ...keys,
+      ...base.order.filter((k) => !keys.includes(k)),
+    ];
+    const st: ColumnState = { visible, order };
+    saveColumnState("delivery", st);
+    setColState(st);
+  }
+
+  /** Nút "Mặc định xem" (V21 resetDeliveryViewToDefault) */
+  function resetViewDefault() {
+    const st = defaultState(DELIVERY_COLUMNS);
+    saveColumnState("delivery", st);
+    setColState(st);
+  }
 
   const filtered = useMemo(() => {
         return items.filter((d) => {
@@ -402,26 +481,26 @@ export default function DeliveriesPage() {
             Tải lại
           </button>
           <button
-            onClick={() => {
-              downloadExcelHtml(
-                `GiaoHang_${new Date().toISOString().slice(0, 10)}.xls`,
-                "GiaoHang",
-                ["Mã GH", "CT", "Ngày đặt", "Xe", "KH", "SL KH", "Thực giao", "Ngày giao"],
-                filtered.map((d) => [
-                  d.deliveryId,
-                  d.detailId,
-                  d.orderDate || "",
-                  d.vehiclePlate || "",
-                  d.customerName || d.customerId,
-                  d.plannedQty,
-                  d.actualQty ?? "",
-                  d.deliveryDate || "",
-                ])
-              );
-            }}
-            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-700 text-white"
+            type="button"
+            onClick={applyExportPreset}
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
           >
-            Xuất Excel
+            Bộ cột xuất
+          </button>
+          <button
+            type="button"
+            onClick={resetViewDefault}
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white border border-slate-300"
+          >
+            Mặc định xem
+          </button>
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={exportXlsx}
+            className="px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-700 text-white disabled:opacity-60"
+          >
+            {exporting ? "Đang xuất…" : "Xuất Excel"}
           </button>
           <button
             type="button"
@@ -847,6 +926,42 @@ export default function DeliveriesPage() {
                               return (
                                 <td key={c.key} className="px-3 py-2.5 text-xs text-slate-600">
                                   {d.deliveryDate ? fmtDateVN(d.deliveryDate) : "—"}
+                                </td>
+                              );
+                            if (
+                              c.key === "khoXuat" ||
+                              c.key === "htvtCode" ||
+                              c.key === "carrierId" ||
+                              c.key === "carrierName" ||
+                              c.key === "isDuyenHa" ||
+                              c.key === "regionId" ||
+                              c.key === "region" ||
+                              c.key === "supplierId" ||
+                              c.key === "htvt"
+                            ) {
+                              const ex = DELIVERY_EXPORT_COLS[c.key];
+                              const v = ex ? ex.get(d) : "";
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-xs text-slate-600">
+                                  {v == null || v === "" ? "—" : String(v)}
+                                </td>
+                              );
+                            }
+                            if (c.key === "ton")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right tabular-nums">
+                                  {Math.max(
+                                    0,
+                                    (Number(d.plannedQty) || 0) - (Number(d.actualQty) || 0)
+                                  ).toFixed(2)}
+                                </td>
+                              );
+                            if (c.key === "donGia")
+                              return (
+                                <td key={c.key} className="px-3 py-2.5 text-right tabular-nums text-xs text-slate-400">
+                                  {d.unitPrice == null
+                                    ? "—"
+                                    : Number(d.unitPrice).toLocaleString("vi-VN")}
                                 </td>
                               );
                             if (c.key === "actions")

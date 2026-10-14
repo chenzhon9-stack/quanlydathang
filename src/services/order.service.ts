@@ -452,27 +452,11 @@ export class OrderService {
       }
     }
 
-    // 2) Soft-delete GH + hủy CT
+    // 2) Hủy CT — V21 _cancelOrderCore_ KHÔNG soft-delete GH (xe Hủy vẫn hiện ở tab Giao hàng/Excel)
     let cancelledCt = 0;
-    let deletedGh = 0;
+    const deletedGh = 0;
     const now = formatDateTimeVN();
     for (const d of activeDetails) {
-      const ghs = await DeliveryRepository.findMany({
-        year: y,
-        detailId: d.detailId,
-        includeDeleted: false,
-      });
-      for (const g of ghs) {
-        const r = await updateSheetRowByKey(
-          SHEETS.GH,
-          "ID_Giaohang",
-          g.deliveryId,
-          { Deleted: true, DeletedAt: now, DeletedBy: user.email },
-          y
-        );
-        if (r > 0) deletedGh++;
-      }
-
       const r = await updateSheetRowByKey(
         SHEETS.CT,
         "ID_Chitiet",

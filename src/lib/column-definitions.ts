@@ -63,7 +63,34 @@ export const DELIVERY_COLUMN_DEFS: ColumnDef[] = [
   { key: "vehicleId", label: "Mã xe", defaultVisible: false, filterable: true },
   { key: "htvt", label: "Hình thức VT", defaultVisible: false, filterable: true },
   { key: "actualRecv", label: "Thực nhận", defaultVisible: false, align: "right" },
+  { key: "khoXuat", label: "Kho xuất", defaultVisible: false },
+  { key: "htvtCode", label: "Mã HTVT", defaultVisible: false },
+  { key: "carrierId", label: "Mã ĐVVT", defaultVisible: false },
+  { key: "carrierName", label: "Đơn vị VT", defaultVisible: false },
+  { key: "ton", label: "Tồn", defaultVisible: false, align: "right" },
+  { key: "donGia", label: "Đơn giá", defaultVisible: false, align: "right" },
+  { key: "isDuyenHa", label: "Duyên Hà", defaultVisible: false },
   { key: "actions", label: "Hành động", defaultVisible: true },
+];
+
+/** Bộ cột mặc định để XUẤT — parity DEFAULT_DELIVERY_EXPORT_COLUMNS V21 */
+export const DEFAULT_DELIVERY_EXPORT_KEYS = [
+  "orderDate",
+  "recvDate",
+  "plate",
+  "orderId",
+  "supplierId",
+  "productId",
+  "regionId",
+  "khoXuat",
+  "planned",
+  "customerId",
+  "htvtCode",
+  "date",
+  "actual",
+  "donGia",
+  "status",
+  "id",
 ];
 
 /** Report column meta (filterType) — đồng bộ reportColumnDefinitions V21 */

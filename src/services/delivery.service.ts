@@ -23,13 +23,15 @@ import {
   computeDetailStatus,
 } from "@/lib/business-rules";
 import { SHEETS } from "@/lib/sheets/constants";
+import { mapGiaMuaSheetRow, resolveDonGiaMua } from "@/lib/finance/giamua";
+import type { GiaMuaRow } from "@/lib/finance/giamua";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
 import { OrderRepository } from "@/repositories/order.repository";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import { newDeliveryId, isTempClientId } from "@/lib/sheets/counter";
-import {ymdDate, formatDateTimeVN, currentYearVN} from "@/lib/sheets/date";
+import {ymdDate, formatDateTimeVN, currentYearVN, defaultListDateRange} from "@/lib/sheets/date";
 import {
   markOrderResendIfSent,
   numClose,
@@ -45,6 +47,14 @@ export class DeliveryService {
       customerId?: string;
       page?: number;
       pageSize?: number;
+      /** Export: trả toàn bộ, không phân trang */
+      all?: boolean;
+      /** Export (V21 getDeliveries): thêm dòng CT Hủy xe chưa có GH active, khGiao = SoLuong CT */
+      includeCancelNoGh?: boolean;
+      /** Export: gắn đơn giá mua (V21 resolveGiaLocal_) */
+      withPrice?: boolean;
+      /** Export: ngày đặt TĂNG dần → mã xe (UI mặc định giảm dần) */
+      sortAsc?: boolean;
     },
     user: UserContext,
     scope: AccessScope
@@ -61,7 +71,15 @@ export class DeliveryService {
     }
 
     // Không lọc from/to ở repo theo Ngaygiao — UI lọc theo Ngày đặt lệnh (CT.NgayDatHang).
-    const { fromDate, toDate, ...repoFilter } = filter;
+    const {
+      fromDate,
+      toDate,
+      all: _all,
+      includeCancelNoGh,
+      withPrice,
+      sortAsc,
+      ...repoFilter
+    } = filter;
     let rows = await DeliveryRepository.findMany(repoFilter);
 
     // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
@@ -96,6 +114,28 @@ export class DeliveryService {
         vehicleId: d.vehicleId || ct?.vehicleId,
       };
     });
+
+    // V21 getDeliveries BƯỚC 9: CT Hủy xe chưa có GH active → 1 dòng, khGiao = CT.SoLuong
+    if (includeCancelNoGh && !filter.customerId) {
+      const hasGh = new Set(rows.map((d) => String(d.detailId || "").trim()));
+      for (const ct of details) {
+        const id = String(ct.detailId || "").trim();
+        if (!id || hasGh.has(id)) continue;
+        if (filter.detailId && filter.detailId !== id) continue;
+        const stU = String(ct.status || "").trim().toUpperCase();
+        if (stU !== "CANCEL" && stU !== "HỦY XE") continue;
+        rows.push({
+          deliveryId: "",
+          detailId: id,
+          orderId: ct.orderId,
+          supplierId: ct.supplierId,
+          vehicleId: ct.vehicleId,
+          customerId: "",
+          plannedQty: Number(ct.quantity) || 0,
+          actualQty: 0,
+        } as Delivery);
+      }
+    }
 
     // V21.07 multi-role: OWNER ∪ MANAGEMENT(NCC) ∪ OWN_CUSTOMER(KH ∪ ĐVVT)
     rows = await applyListScopeFilter(rows, scope, year);
@@ -137,6 +177,8 @@ export class DeliveryService {
           if (!ma) return undefined;
           return dvtMap[ma] || dvtMap[String(ma).toUpperCase()] || ma;
         })(),
+        regionId: d.regionId || ct?.regionId,
+        warehouse: d.warehouse || ct?.warehouse,
         detailStatus: status,
         actualReceived: ct?.actualReceived ?? d.actualReceived,
         receivedDate: ct?.receivedDate || d.receivedDate,
@@ -171,6 +213,40 @@ export class DeliveryService {
       });
     }
 
+    // regionName + đơn giá mua (export) — V21 resolveGiaLocal_ theo ngày nhận CT
+    {
+      const kvMap = await MasterRepository.kvNames().catch(
+        () => ({} as Record<string, string>)
+      );
+      let gm: GiaMuaRow[] = [];
+      if (withPrice) {
+        try {
+          const gmRows = await readSheetAsObjects(SHEETS.GM, {});
+          gm = gmRows
+            .map(mapGiaMuaSheetRow)
+            .filter((r): r is GiaMuaRow => !!r);
+        } catch {
+          gm = [];
+        }
+      }
+      rows = rows.map((d) => {
+        const kv = String(d.regionId || "").trim();
+        const next: Delivery = {
+          ...d,
+          regionName: kv ? kvMap[kv] || kvMap[kv.toUpperCase()] || kv : "",
+        };
+        if (withPrice) {
+          // Chưa nhận → không gán giá (null) — đúng V21
+          const rec = String(d.receivedDate || "").slice(0, 10);
+          const r = rec
+            ? resolveDonGiaMua(gm, d.supplierId || "", d.productId || "", kv, rec)
+            : null;
+          next.unitPrice = r && r.found ? r.donGia : null;
+        }
+        return next;
+      });
+    }
+
     // PDF FileDonhang theo MaDon
     try {
       const { OrderRepository } = await import("@/repositories/order.repository");
@@ -195,14 +271,35 @@ export class DeliveryService {
         `[DeliveryService] ${missingSt}/${rows.length} GH thiếu detailStatus (CT join miss)`
       );
     }
-    // Sort mới → cũ theo ngày đặt lệnh
-    rows.sort((a, b) => {
-      const da = a.orderDate || a.deliveryDate || "";
-      const db = b.orderDate || b.deliveryDate || "";
-      if (da !== db) return db.localeCompare(da);
-      return (b.deliveryId || "").localeCompare(a.deliveryId || "");
-    });
+    // UI: Sort mới → cũ theo ngày đặt lệnh. Export (V21): ngày TĂNG dần → mã xe → mã chi tiết.
+    if (sortAsc) {
+      rows.sort((a, b) => {
+        const da = String(a.orderDate || a.deliveryDate || "").slice(0, 10);
+        const db = String(b.orderDate || b.deliveryDate || "").slice(0, 10);
+        if (da !== db) return da.localeCompare(db);
+        const va = String(a.vehicleId || "").toLowerCase();
+        const vb = String(b.vehicleId || "").toLowerCase();
+        if (va !== vb) return va.localeCompare(vb);
+        return String(a.detailId || "").localeCompare(String(b.detailId || ""));
+      });
+    } else {
+      rows.sort((a, b) => {
+        const da = a.orderDate || a.deliveryDate || "";
+        const db = b.orderDate || b.deliveryDate || "";
+        if (da !== db) return db.localeCompare(da);
+        return (b.deliveryId || "").localeCompare(a.deliveryId || "");
+      });
+    }
 
+    if (filter.all) {
+      return {
+        items: rows,
+        page: 1,
+        pageSize: rows.length,
+        total: rows.length,
+        hasMore: false,
+      };
+    }
     const page = Math.max(1, filter.page ?? 1);
     const pageSize = Math.min(500, Math.max(1, filter.pageSize ?? 100));
     const total = rows.length;
@@ -217,6 +314,53 @@ export class DeliveryService {
     };
   }
 
+
+  /**
+   * Xuất Excel — V21 getDeliveries(email, {fromDate,toDate,export:true}):
+   * không phân trang, mặc định 30 ngày, GH active + CT Hủy chưa có GH, tăng dần, có đơn giá.
+   */
+  static async exportDeliveries(
+    filter: { fromDate?: string; toDate?: string },
+    user: UserContext,
+    scope: AccessScope
+  ) {
+    let from = String(filter.fromDate || "").slice(0, 10);
+    let to = String(filter.toDate || "").slice(0, 10);
+    if (!from && !to) {
+      const r = defaultListDateRange(30);
+      from = r.from;
+      to = r.to;
+    }
+    const y1 = Number((from || to).slice(0, 4)) || currentYearVN();
+    const y2 = Number((to || from).slice(0, 4)) || y1;
+    const items: Delivery[] = [];
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) {
+      const r = await DeliveryService.listDeliveries(
+        {
+          year: y,
+          fromDate: from,
+          toDate: to,
+          all: true,
+          includeCancelNoGh: true,
+          withPrice: true,
+          sortAsc: true,
+        },
+        user,
+        scope
+      );
+      items.push(...r.items);
+    }
+    items.sort((a, b) => {
+      const da = String(a.orderDate || "").slice(0, 10);
+      const db = String(b.orderDate || "").slice(0, 10);
+      if (da !== db) return da.localeCompare(db);
+      const va = String(a.vehicleId || "").toLowerCase();
+      const vb = String(b.vehicleId || "").toLowerCase();
+      if (va !== vb) return va.localeCompare(vb);
+      return String(a.detailId || "").localeCompare(String(b.detailId || ""));
+    });
+    return { items, total: items.length, from, to };
+  }
 
   /**
    * Cập nhật thực giao — V21 saveDeliveryData (1 dòng)

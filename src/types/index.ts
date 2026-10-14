@@ -160,6 +160,13 @@ export interface Delivery {
    * Email | Zalo | APP …
    */
   sendMethod?: string;
+  /** Makv từ CT.Khuvuc (enrich) */
+  regionId?: string;
+  regionName?: string;
+  /** CT.KhoXuat (enrich) */
+  warehouse?: string;
+  /** Đơn giá mua theo ngày nhận (chỉ export); null = chưa nhận / chưa có giá */
+  unitPrice?: number | null;
 }
 
 export interface ProductionPlan {

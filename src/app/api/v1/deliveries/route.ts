@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
       year: searchParams.get("year") ? Number(searchParams.get("year")) : 2026,
       detailId: searchParams.get("detailId") || undefined,
       customerId: searchParams.get("customerId") || undefined,
+      withPrice: searchParams.get("withPrice") === "1",
       page: searchParams.get("page") ? Number(searchParams.get("page")) : 1,
       pageSize: searchParams.get("pageSize")
         ? Number(searchParams.get("pageSize"))
