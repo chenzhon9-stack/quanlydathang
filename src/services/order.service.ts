@@ -1268,10 +1268,10 @@ export class OrderService {
       return hinhNorm || "unknown";
     })();
 
-    // ─── APP: không phụ thuộc GAS (V21 cũng không gửi mail/Zalo) ───
-    // Vercel tự ghi LanGui + mark ORDERED + báo mở APP.
-    // Gửi muộn (LanGui=0, dayDiff≥1): trả needConfirm để UI mở modal chọn
-    // send | reset | cancel | markSent (parity Email/Zalo).
+    // ─── APP: không phụ thuộc GAS (V21 không gửi mail/Zalo) ───
+    // Vercel tự ghi Sheet (LanGui, CT ORDERED, snapshot, LogGuiMail) + hướng dẫn mở APP.
+    // Late first (LanGui=0, dayDiff≥1): needConfirm → modal send|reset|cancel|markSent.
+    // V21: reset / cancel / markSent chỉ hợp lệ khi LanGui=0 (modal gửi lần đầu muộn).
     if (channelHint === "app") {
       if (!isSheetsConfigured()) {
         throw { code: "SHEETS_NOT_CONFIGURED", message: "Sheets chưa cấu hình" };
@@ -1283,6 +1283,19 @@ export class OrderService {
       if (!orderApp) {
         throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
       }
+
+      // Phạm vi — parity _canAccessOrder_
+      {
+        const scope = resolveScope(user);
+        const visible = await applyListScopeFilter([orderApp], scope, y);
+        if (!visible.length) {
+          throw {
+            code: "PERMISSION_DENIED",
+            message: "Không có quyền gửi đơn này (ngoài phạm vi).",
+          };
+        }
+      }
+
       const tenNcc =
         String(orderApp.supplierName || orderApp.supplierId || "").trim() ||
         "nhà cung cấp";
@@ -1310,7 +1323,35 @@ export class OrderService {
         };
       }
 
-      // User chọn "cancel" trên modal muộn → hủy đơn thật (V21 _handleDecisionCancel_)
+      // reset / cancel / markSent chỉ khi LanGui=0 (modal lần đầu muộn) — V21
+      if (
+        (action === "reset" || action === "cancel" || action === "markSent") &&
+        lanGuiCur > 0
+      ) {
+        throw {
+          code: "INVALID_ACTION",
+          message:
+            `Hành động "${action}" chỉ dùng khi gửi lần đầu muộn (LanGui=0). ` +
+            `Đơn ${orderId} đã gửi ${lanGuiCur} lần — dùng Gửi lại / Hủy / Reset trên danh sách.`,
+        };
+      }
+
+      // reset → resetOrder (đơn mới + gửi APP hướng dẫn)
+      if (action === "reset") {
+        const resetRes = await this.resetOrder(orderId, user, y);
+        return {
+          ...resetRes,
+          via: "app" as const,
+          channel: "app" as const,
+          hinhThucGui,
+          needConfirm: false as const,
+          message:
+            resetRes.message ||
+            `Đã reset đơn ${orderId} → ${resetRes.newMaDon || ""} (APP).`,
+        };
+      }
+
+      // cancel trên modal muộn → hủy đơn thật (không mail/Zalo vì APP)
       if (action === "cancel") {
         const cancelled = await this.cancelOrder(orderId, user, y);
         return {
@@ -1326,8 +1367,7 @@ export class OrderService {
         };
       }
 
-      // markSent: ghi nhận đã gửi ngoài hệ thống, tăng LanGui, không bắt buộc mở app
-      // send (hoặc rỗng khi không muộn): cập nhật Sheet + hướng dẫn APP
+      // markSent | send | "" : cập nhật Sheet + (markSent không bắt mở app)
       const markOnly = action === "markSent";
       const lanGuiNext = lanGuiCur + 1;
       const timeLabel = formatDateTimeVN(new Date());
@@ -1368,6 +1408,49 @@ export class OrderService {
           ctUpdated++;
         }
       }
+
+      // Snapshot + LogGuiMail — parity finalizeOrderSent (APP không có PDF)
+      try {
+        await appendSheetRow(
+          SHEETS.SNAPSHOT,
+          {
+            MaDon: orderId,
+            LanGui: lanGuiNext,
+            SnapshotJSON: JSON.stringify({
+              maDon: orderId,
+              lanGui: lanGuiNext,
+              channel: "app",
+              sendAction: action || "send",
+              at: new Date().toISOString(),
+              by: user.email,
+            }),
+            ThoiGianLuu: timeLabel,
+          },
+          y
+        );
+      } catch (e) {
+        console.warn("[sendOrder APP] snapshot skip", e);
+      }
+      try {
+        await appendSheetRow(
+          SHEETS.LOG_GUI_MAIL,
+          {
+            "Thời gian": timeLabel,
+            MaDon: orderId,
+            NCC: tenNcc,
+            Email: "",
+            "Lần gửi": lanGuiNext,
+            "Ghi chú": markOnly
+              ? "APP — markSent (xử lý ngoài hệ thống)"
+              : "APP — cập nhật Sheet, hướng dẫn mở app NCC",
+            "Link PDF": orderApp.orderFile || "",
+          },
+          y
+        );
+      } catch (e) {
+        console.warn("[sendOrder APP] LogGuiMail skip", e);
+      }
+
       await writeAudit({
         email: user.email,
         role: user.role,
