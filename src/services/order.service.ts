@@ -1,4 +1,4 @@
-import { postGasWebhook, rememberGasIdempotency } from "@/lib/gas-webhook";
+import { postGasWebhook, rememberGasIdempotency, gasWebhookUrl } from "@/lib/gas-webhook";
 import {
   todayYmdVN,
   currentYearVN,
@@ -43,6 +43,86 @@ export interface OrderListResult {
 /**
  * OrderService — STEP 5 + AccessScope MANAGEMENT (V21 Quanly `;`)
  */
+
+/** Kênh gửi NCC từ DM_NCC.HinhThucGui */
+async function resolveNccChannel(supplierId: string): Promise<{
+  hinhThucGui: string;
+  channel: "email" | "zalo" | "app" | "unknown";
+}> {
+  let hinhThucGui = "";
+  try {
+    const rows = await MasterRepository.list("NCC");
+    const id = String(supplierId || "").trim().toUpperCase();
+    const ncc = rows.find(
+      (r) =>
+        String(r.MaNCC || r.id || "")
+          .trim()
+          .toUpperCase() === id
+    );
+    if (ncc) {
+      hinhThucGui = String(
+        (ncc as { HinhThucGui?: string }).HinhThucGui ||
+          (ncc as { hinhThucGui?: string }).hinhThucGui ||
+          ""
+      ).trim();
+    }
+  } catch {
+    /* ignore */
+  }
+  const n = hinhThucGui
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "");
+  let channel: "email" | "zalo" | "app" | "unknown" = "unknown";
+  if (n.includes("zalo")) channel = "zalo";
+  else if (n.includes("app") || n.includes("ungdung")) channel = "app";
+  else if (n.includes("email") || n.includes("mail") || n === "") channel = "email";
+  return { hinhThucGui, channel };
+}
+
+/**
+ * Gọi GAS sendOrderFromWebhook (PDF/mail/Zalo / cancel notify).
+ * Không tăng LanGui phía Vercel — GAS xử lý.
+ */
+async function gasSendOrderFromWebhook(
+  maDon: string,
+  email: string,
+  sendAction: string | null
+): Promise<{ ok: boolean; body: Record<string, unknown>; message: string }> {
+  const url = gasWebhookUrl();
+  if (!url) {
+    return {
+      ok: false,
+      body: {},
+      message: "Chưa cấu hình GAS_SEND_ORDER_URL",
+    };
+  }
+  try {
+    const gasRes = await postGasWebhook(
+      {
+        action: "sendOrderFromWebhook",
+        maDon,
+        email,
+        sendAction: sendAction || null,
+      },
+      { timeoutMs: 55_000 }
+    );
+    const body = gasRes.body || {};
+    const ok = body.success === true && !body._gasHtml;
+    const message = String(
+      body.message || body.error || (ok ? "OK" : `GAS HTTP ${gasRes.status}`)
+    );
+    return { ok, body, message };
+  } catch (e) {
+    return {
+      ok: false,
+      body: {},
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 export class OrderService {
   static async listOrders(
     filter: OrderListFilter,
@@ -384,26 +464,88 @@ export class OrderService {
       if (r > 0) cancelledCt++;
     }
 
+    // V21 _cancelOrderCore_: wasEverSent + !isExpired → báo NCC (GuiLaimail + xuLyDonHang)
+    const wasEverSent =
+      (Number(order.sendCount) || 0) > 0 ||
+      !!String(order.orderFile || "").trim();
+    const isDha = isDuyenHaNcc(order.supplierId);
+    const dayDiff = businessDayDiff(
+      String(order.orderDateTime || order.orderDate || ""),
+      isDha
+    );
+    // V21 _lateThresholdDays_(isDha) — hủy quá hạn không báo NCC
+    const lateThreshold = isDha ? 1 : 1;
+    const isExpired = dayDiff !== null && dayDiff >= lateThreshold;
+    const shouldNotifyNcc = wasEverSent && !isExpired;
+
     const row = await updateSheetRowByKey(
       SHEETS.DH,
       "MaDon",
       orderId,
-      { TrangThaiDon: STATUS_DON.CANCEL },
+      {
+        TrangThaiDon: STATUS_DON.CANCEL,
+        TongSoChitiet: cancelledCt,
+        ChitietHuy: cancelledCt,
+        GuiLaimail: shouldNotifyNcc,
+        ChoGuiMail: false,
+      },
       y
     );
     if (row < 0)
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
 
+    let notifiedNcc = false;
+    let notifyNote = "";
+    if (shouldNotifyNcc) {
+      const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
+      if (channel === "app") {
+        notifyNote = `Hình thức APP (${hinhThucGui || "APP"}) — không gửi mail/Zalo hủy cho NCC.`;
+      } else if (gasWebhookUrl()) {
+        // GAS sendAction=cancel → _handleDecisionCancel_ / thông báo hủy
+        const gas = await gasSendOrderFromWebhook(
+          orderId,
+          user.email,
+          "cancel"
+        );
+        notifiedNcc = gas.ok;
+        notifyNote = gas.ok
+          ? `Đã báo NCC hủy đơn (${channel}).`
+          : `Hủy trên Sheet OK; báo NCC thất bại: ${gas.message}`;
+      } else {
+        notifyNote =
+          "Đã bật GuiLaimail — chưa cấu hình GAS_SEND_ORDER_URL nên chưa gửi thông báo NCC.";
+      }
+    } else if (!wasEverSent) {
+      notifyNote = "Hủy trước khi gửi NCC — không thông báo NCC.";
+    } else if (isExpired) {
+      notifyNote = `Hủy quá hạn (${dayDiff} ngày) — chỉ cập nhật nội bộ, không báo NCC.`;
+    }
+
+    const auditAction = !wasEverSent
+      ? "CANCEL_ORDER_BEFORE_SEND"
+      : isExpired
+        ? "CANCEL_ORDER_EXPIRED_NO_NOTIFY"
+        : notifiedNcc
+          ? "CANCEL_ORDER_NOTIFIED"
+          : "CANCEL_ORDER";
+
     await writeAudit({
       email: user.email,
       role: user.role,
-      action: "CANCEL_ORDER",
+      action: auditAction,
       maDon: orderId,
       targetId: orderId,
-      newValue: { cancelledCt, deletedGh },
-      lyDo: `Hủy đơn: ${cancelledCt} CT, soft-delete ${deletedGh} GH`,
+      newValue: { cancelledCt, deletedGh, shouldNotifyNcc, notifiedNcc },
+      lyDo:
+        `Hủy đơn: ${cancelledCt} CT, soft-delete ${deletedGh} GH. ${notifyNote}`.trim(),
       year: y,
     });
+
+    try {
+      invalidateSheetCache([SHEETS.DH, SHEETS.CT, SHEETS.GH], y);
+    } catch {
+      /* ignore */
+    }
 
     return {
       orderId,
@@ -411,6 +553,12 @@ export class OrderService {
       row,
       cancelledCt,
       deletedGh,
+      wasEverSent,
+      isExpired,
+      dayDiff,
+      shouldNotifyNcc,
+      notifiedNcc,
+      message: `Đã hủy đơn ${orderId}. ${notifyNote}`.trim(),
     };
   }
 
@@ -1049,7 +1197,7 @@ export class OrderService {
    * Gửi đơn NCC — Strangler V21.
    *
    * Có GAS_SEND_ORDER_URL:
-   *   → Uỷ quyền toàn bộ cho GAS `sendOrderEmail` (PDF + mail/Zalo + cập nhật Sheet).
+   *   → Uỷ quyền GAS `sendOrderFromWebhook` → sendOrderEmail nội bộ (PDF + mail/Zalo + Sheet).
    *   Không ghi Sheet phía Vercel (tránh tăng LanGui 2 lần).
    *
    * Không có GAS:
@@ -1162,8 +1310,9 @@ export class OrderService {
         };
       }
 
-      // User chọn "cancel" trên modal muộn
+      // User chọn "cancel" trên modal muộn → hủy đơn thật (V21 _handleDecisionCancel_)
       if (action === "cancel") {
+        const cancelled = await this.cancelOrder(orderId, user, y);
         return {
           orderId,
           via: "app" as const,
@@ -1171,7 +1320,10 @@ export class OrderService {
           channel: "app",
           hinhThucGui,
           cancelled: true,
-          message: "Đã hủy thao tác gửi đơn (APP).",
+          ...cancelled,
+          message:
+            cancelled.message ||
+            `Đã hủy đơn ${orderId} (APP — không gửi mail/Zalo).`,
         };
       }
 
@@ -1252,9 +1404,10 @@ export class OrderService {
       };
     }
 
-    // ─── Nhánh 1: GAS sendOrderEmail (Email / Zalo) ───
+    // ─── Nhánh 1: GAS sendOrderFromWebhook → sendOrderEmail() nội bộ (Email / Zalo) ───
+    // V21.07+ doPost DEPRECATED sendOrderEmail/sendOrder; webhook dùng tên mới.
     if (gasUrl) {
-      // V21 sendOrderEmail(maDon, email, action|null)
+      // GAS: sendOrderFromWebhook → _WEBHOOK_ACTOR_ + sendOrderEmail(maDon, email, action|null)
       // action: null | send | reset | cancel | markSent
       // Shared postGasWebhook: redirect + HTML detect + timeout + idempotency (P0)
       const GAS_TIMEOUT_MS = 55_000;
@@ -1449,8 +1602,10 @@ export class OrderService {
         const hint =
           /unauthorized/i.test(errMsg)
             ? " — Kiểm tra WEBHOOK_SECRET (GAS) khớp WEBHOOK_SECRET/GAS_WEBHOOK_SECRET (Vercel)."
-            : /unknown action/i.test(errMsg)
-              ? " — doPost chưa nhận action sendOrderEmail (deploy Web App mới)."
+            : /ngừng hỗ trợ|không được hỗ trợ|deprecated|sendOrderEmail/i.test(errMsg)
+              ? " — GAS đã bỏ sendOrderEmail; Vercel phải gọi sendOrderFromWebhook (deploy Vercel + doPost V21.08)."
+              : /unknown action/i.test(errMsg)
+              ? " — doPost chưa có action sendOrderFromWebhook (Deploy New version Web App)."
               : gasBody._gasHtml
                 ? " — GAS trả HTML; kiểm tra LanGui trên Sheet trước khi gửi lại."
                 : "";
@@ -1621,7 +1776,7 @@ export class OrderService {
       needConfirm: false,
       notifiedNcc: false,
       message:
-        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL để uỷ quyền GAS sendOrderEmail.",
+        "Đã cập nhật trạng thái trên Sheet. Chưa gửi mail/PDF — cấu hình GAS_SEND_ORDER_URL để uỷ quyền GAS sendOrderFromWebhook.",
     };
   }
 
@@ -1640,14 +1795,16 @@ export class OrderService {
     user: UserContext,
     year?: number
   ) {
+    // V21 cancelOrder/reset: admin|purchase — không MANAGER
     const role = String(user.role || "").toUpperCase();
     if (
-      !["ADMIN", "PURCHASE", "MANAGER"].includes(role) &&
+      !["ADMIN", "PURCHASE"].includes(role) &&
+      !hasPermission(user, "ORDER_CANCEL") &&
       !hasPermission(user, "*")
     ) {
       throw {
         code: "PERMISSION_DENIED",
-        message: "Chỉ admin/purchase/manager được reset đơn",
+        message: "Chỉ admin/purchase được reset đơn",
       };
     }
     if (!isSheetsConfigured()) {
@@ -1663,6 +1820,17 @@ export class OrderService {
     }
     if (String(order.status).toUpperCase() === "CANCEL") {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
+    }
+    // Phạm vi — parity _canAccessOrder_
+    {
+      const scope = resolveScope(user);
+      const visible = await applyListScopeFilter([order], scope, y);
+      if (!visible.length) {
+        throw {
+          code: "PERMISSION_DENIED",
+          message: "Đơn ngoài phạm vi quản lý — không được reset.",
+        };
+      }
     }
 
     // 1) Thời gian — parity canResetOrder (chưa gửi ≥1 ngày; đã gửi DHA 1 / khác 2)
@@ -1788,6 +1956,30 @@ export class OrderService {
         lyDo: `Reset toàn bộ đơn (dayDiff=${dayDiff}, threshold=${thresholdDays}, LanGui=${sendCount})`,
         year: y,
       });
+
+    // V21: sau reset → _xuLyDonHangNoLock_(newMaDon) gửi ngay (Email/Zalo)
+    let sentToNcc = false;
+    let sendNote = "";
+    {
+      const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
+      if (channel === "app") {
+        sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — mở app NCC để đặt đơn mới ${newMaDon}.`;
+      } else if (gasWebhookUrl()) {
+        const gas = await gasSendOrderFromWebhook(
+          newMaDon,
+          user.email,
+          "send"
+        );
+        sentToNcc = gas.ok;
+        sendNote = gas.ok
+          ? `Đã gửi đơn mới ${newMaDon} cho NCC (${channel}).`
+          : `Đã tạo ${newMaDon}; gửi NCC thất bại: ${gas.message}`;
+      } else {
+        sendNote =
+          "Đã tạo đơn mới (ChoGuiMail=true) — chưa cấu hình GAS_SEND_ORDER_URL nên chưa gửi NCC.";
+      }
+    }
+
       return {
         mode: "full" as const,
         oldMaDon: orderId,
@@ -1795,7 +1987,8 @@ export class OrderService {
         movedDetails: details.length,
         dayDiff,
         threshold: thresholdDays,
-        message: `Đã reset đơn: ${orderId} → ${newMaDon}`,
+        sentToNcc,
+        message: `Đã reset đơn: ${orderId} → ${newMaDon}. ${sendNote}`.trim(),
       };
     }
 
@@ -1856,6 +2049,30 @@ export class OrderService {
       year: y,
     });
 
+
+    // V21: sau reset → _xuLyDonHangNoLock_(newMaDon) gửi ngay (Email/Zalo)
+    let sentToNcc = false;
+    let sendNote = "";
+    {
+      const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
+      if (channel === "app") {
+        sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — mở app NCC để đặt đơn mới ${newMaDon}.`;
+      } else if (gasWebhookUrl()) {
+        const gas = await gasSendOrderFromWebhook(
+          newMaDon,
+          user.email,
+          "send"
+        );
+        sentToNcc = gas.ok;
+        sendNote = gas.ok
+          ? `Đã gửi đơn mới ${newMaDon} cho NCC (${channel}).`
+          : `Đã tạo ${newMaDon}; gửi NCC thất bại: ${gas.message}`;
+      } else {
+        sendNote =
+          "Đã tạo đơn mới (ChoGuiMail=true) — chưa cấu hình GAS_SEND_ORDER_URL nên chưa gửi NCC.";
+      }
+    }
+
     return {
       mode: "partial" as const,
       oldMaDon: orderId,
@@ -1864,7 +2081,8 @@ export class OrderService {
       keptDetails: daNhanHoacHuy.length,
       dayDiff,
       threshold: thresholdDays,
-      message: `Đã tách đơn: ${chuaNhan.length} xe → ${newMaDon} (giữ ${orderId})`,
+      sentToNcc,
+      message: `Đã tách đơn: ${chuaNhan.length} xe → ${newMaDon} (giữ ${orderId}). ${sendNote}`.trim(),
     };
   }
 
