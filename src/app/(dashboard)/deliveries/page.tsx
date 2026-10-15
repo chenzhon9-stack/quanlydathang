@@ -51,7 +51,7 @@ function fmtDateVN(ymd: string) {
 }
 
 
-const DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
+const ALL_DELIVERY_COLUMNS = DELIVERY_COLUMN_DEFS;
 
 /** Chuẩn hóa trạng thái CT (EN/VN) */
 function normCtStatus(raw: string): string {
@@ -172,6 +172,17 @@ export default function DeliveriesPage() {
   } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const deliveryUser = readClientUser();
+  // Đơn giá mua: chỉ ADMIN thấy (cột + dữ liệu); role khác ẩn hoàn toàn
+  const isAdminUser =
+    String(deliveryUser.role || "").toUpperCase() === "ADMIN" ||
+    (deliveryUser.permissions || []).includes("*");
+  const DELIVERY_COLUMNS = useMemo(
+    () =>
+      isAdminUser
+        ? ALL_DELIVERY_COLUMNS
+        : ALL_DELIVERY_COLUMNS.filter((c) => c.key !== "donGia"),
+    [isAdminUser]
+  );
   const canUpdateDelivery = clientHasAny(deliveryUser, [...ACTION.deliveryUpdate]);
   const [colOpen, setColOpen] = useState(false);
   const [colState, setColState] = useState<ColumnState>(() =>
@@ -196,7 +207,7 @@ export default function DeliveriesPage() {
       });
       if (fromDate) qs.set("fromDate", fromDate);
       if (toDate) qs.set("toDate", toDate);
-      if (colState.visible.donGia) qs.set("withPrice", "1");
+      if (isAdminUser && colState.visible.donGia) qs.set("withPrice", "1");
       const res = await fetch(`/api/v1/deliveries?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -217,7 +228,7 @@ export default function DeliveriesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, fromDate, toDate, colState.visible.donGia]);
+  }, [pageSize, fromDate, toDate, colState.visible.donGia, isAdminUser]);
 
   useEffect(() => {
     load(1);

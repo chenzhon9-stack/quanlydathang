@@ -1,6 +1,6 @@
 import { writeAudit } from "@/lib/sheets/audit";
 import type { AccessScope, Delivery, UserContext } from "@/types";
-import { hasPermission, resolveScope } from "@/lib/auth";
+import { hasPermission, resolveScope, isAdminRole } from "@/lib/auth";
 import {
   resolveAllowedSupplierIds,
   resolveAllowedCustomerIds,
@@ -76,10 +76,12 @@ export class DeliveryService {
       toDate,
       all: _all,
       includeCancelNoGh,
-      withPrice,
+      withPrice: withPriceReq,
       sortAsc,
       ...repoFilter
     } = filter;
+    // Đơn giá mua: CHỈ admin — role khác bị bỏ qua dù client gửi withPrice
+    const withPrice = !!withPriceReq && isAdminRole(user);
     let rows = await DeliveryRepository.findMany(repoFilter);
 
     // Enrich trước để có orderId / orderDate từ CT (GH không có MaDon)
