@@ -25,6 +25,18 @@ export default function LoginPage() {
   const [forgotBusy, setForgotBusy] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
 
+  // Đăng ký (chờ admin duyệt)
+  const [regOpen, setRegOpen] = useState(false);
+  const [regEmail, setRegEmail] = useState("");
+  const [regHoTen, setRegHoTen] = useState("");
+  const [regPhone, setRegPhone] = useState("");
+  const [regDept, setRegDept] = useState("");
+  const [regPass, setRegPass] = useState("");
+  const [regPass2, setRegPass2] = useState("");
+  const [regBusy, setRegBusy] = useState(false);
+  const [regErr, setRegErr] = useState("");
+  const [regMsg, setRegMsg] = useState("");
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
@@ -171,6 +183,50 @@ export default function LoginPage() {
     }
   }
 
+
+  async function submitRegister(e: React.FormEvent) {
+    e.preventDefault();
+    setRegBusy(true);
+    setRegErr("");
+    setRegMsg("");
+    try {
+      const res = await fetch("/api/v1/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: regEmail.trim(),
+          password: regPass,
+          confirmPassword: regPass2,
+          hoTen: regHoTen.trim(),
+          dienThoai: regPhone.trim(),
+          phongBan: regDept.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setRegErr(json.error?.message || "Đăng ký thất bại");
+        return;
+      }
+      setRegMsg(
+        json.meta?.message ||
+          json.data?.message ||
+          "Đăng ký thành công. Chờ admin duyệt."
+      );
+      setEmail(regEmail.trim());
+      setPassword("");
+      try {
+        localStorage.setItem(REMEMBER_EMAIL_KEY, regEmail.trim());
+      } catch {
+        /* ignore */
+      }
+      setTimeout(() => setRegOpen(false), 2200);
+    } catch {
+      setRegErr("Không kết nối được máy chủ");
+    } finally {
+      setRegBusy(false);
+    }
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
       <div className="w-full max-w-sm bg-slate-800/90 rounded-2xl shadow-xl border border-slate-700 p-6">
@@ -240,14 +296,20 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-4 flex gap-2 justify-center">
-          <button
+                    <button
             type="button"
-            onClick={() =>
-              alert(
-                "Đăng ký tài khoản: dùng luồng V21 (OTP email) — sẽ bổ sung UI đăng ký đầy đủ. Liên hệ admin để được duyệt."
-              )
-            }
-            className="px-3 py-1.5 text-xs rounded-lg bg-slate-700 text-slate-200 border border-slate-600 hover:bg-slate-600"
+            onClick={() => {
+              setRegEmail(email.trim());
+              setRegHoTen("");
+              setRegPhone("");
+              setRegDept("");
+              setRegPass("");
+              setRegPass2("");
+              setRegErr("");
+              setRegMsg("");
+              setRegOpen(true);
+            }}
+            className="flex-1 py-2 text-xs rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700"
           >
             Đăng ký tài khoản mới
           </button>
@@ -347,6 +409,119 @@ export default function LoginPage() {
             >
               {forgotBusy ? "Đang xử lý…" : "ĐỔI MẬT KHẨU"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {regOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-slate-800 border border-slate-600 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-semibold text-sky-300 mb-1">
+              Đăng ký tài khoản
+            </h2>
+            <p className="text-xs text-slate-400 mb-4">
+              Tài khoản mới ở trạng thái <b>Chờ duyệt</b>. Admin phê duyệt xong
+              bạn mới đăng nhập được.
+            </p>
+            <form onSubmit={submitRegister} className="space-y-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  placeholder="email@example.com"
+                  autoComplete="username"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Họ tên *</label>
+                <input
+                  type="text"
+                  required
+                  value={regHoTen}
+                  onChange={(e) => setRegHoTen(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  placeholder="Nguyễn Văn A"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Điện thoại</label>
+                  <input
+                    type="text"
+                    value={regPhone}
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Phòng ban</label>
+                  <input
+                    type="text"
+                    value={regDept}
+                    onChange={(e) => setRegDept(e.target.value)}
+                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Mật khẩu *</label>
+                <input
+                  type="password"
+                  required
+                  value={regPass}
+                  onChange={(e) => setRegPass(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  autoComplete="new-password"
+                />
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  ≥ 8 ký tự, có chữ và số
+                </p>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Xác nhận mật khẩu *
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={regPass2}
+                  onChange={(e) => setRegPass2(e.target.value)}
+                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
+                  autoComplete="new-password"
+                />
+              </div>
+              {regErr && (
+                <p className="text-sm text-red-400 bg-red-950/40 rounded-lg px-3 py-2">
+                  {regErr}
+                </p>
+              )}
+              {regMsg && (
+                <p className="text-sm text-emerald-400 bg-emerald-950/30 rounded-lg px-3 py-2">
+                  {regMsg}
+                </p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={regBusy}
+                  onClick={() => setRegOpen(false)}
+                  className="flex-1 py-2 text-sm rounded-lg border border-slate-600 text-slate-300"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="submit"
+                  disabled={regBusy}
+                  className="flex-1 py-2 text-sm rounded-lg bg-sky-600 text-white font-medium disabled:opacity-50"
+                >
+                  {regBusy ? "Đang gửi…" : "Đăng ký"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -111,15 +111,77 @@ export default function AdminUsersPage() {
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return users;
-    return users.filter(
-      (u) =>
-        u.email.toLowerCase().includes(s) ||
-        (u.hoTen || "").toLowerCase().includes(s) ||
-        (u.role || "").toLowerCase().includes(s) ||
-        (u.quanly || "").toLowerCase().includes(s)
-    );
+    let list = users;
+    if (s) {
+      list = users.filter(
+        (u) =>
+          u.email.toLowerCase().includes(s) ||
+          (u.hoTen || "").toLowerCase().includes(s) ||
+          (u.role || "").toLowerCase().includes(s) ||
+          (u.roles || []).some((r) => String(r).toLowerCase().includes(s)) ||
+          (u.quanly || "").toLowerCase().includes(s) ||
+          (u.trangThai || "").toLowerCase().includes(s)
+      );
+    }
+    return [...list].sort((a, b) => {
+      const ap = String(a.trangThai || "") === "Pending" ? 0 : 1;
+      const bp = String(b.trangThai || "") === "Pending" ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return String(a.email).localeCompare(String(b.email));
+    });
   }, [users, q]);
+
+  const pendingCount = useMemo(
+    () => users.filter((u) => String(u.trangThai || "") === "Pending").length,
+    [users]
+  );
+
+  async function setUserStatus(u: UserRow, action: "approve" | "reject") {
+    const ok = window.confirm(
+      action === "approve"
+        ? `Duyệt tài khoản ${u.email}?\nUser sẽ đăng nhập được (role mặc định VIEWER nếu chưa gán).`
+        : `Từ chối tài khoản ${u.email}?`
+    );
+    if (!ok) return;
+    setSaving(true);
+    setMsg("");
+    setMsgOk(false);
+    try {
+      const body =
+        action === "approve"
+          ? {
+              active: true,
+              trangThai: "Approved",
+              roles:
+                u.roles && u.roles.length
+                  ? u.roles
+                  : [u.role || "VIEWER"],
+            }
+          : { active: false, trangThai: "Rejected" };
+      const res = await fetch(`/api/v1/users/${encodeURIComponent(u.email)}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setMsg(json.error?.message || "Không cập nhật được");
+        return;
+      }
+      setMsgOk(true);
+      setMsg(
+        action === "approve" ? `Đã duyệt ${u.email}` : `Đã từ chối ${u.email}`
+      );
+      await loadUsers();
+    } catch {
+      setMsg("Lỗi kết nối");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   function openEdit(u: UserRow) {
     setEdit(u);
@@ -261,6 +323,12 @@ export default function AdminUsersPage() {
       {/* USERS */}
       {tab === "users" && (
         <>
+          {pendingCount > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Có <b>{pendingCount}</b> tài khoản đang <b>chờ duyệt</b> (đăng ký mới).
+            </div>
+          )}
+
           <div className="flex gap-2 items-center">
             <input
               value={q}
@@ -289,7 +357,12 @@ export default function AdminUsersPage() {
                 </thead>
                 <tbody>
                   {filtered.map((u) => (
-                    <tr key={u.email} className="border-t border-slate-100 hover:bg-slate-50">
+                    <tr
+                      key={u.email}
+                      className={`border-t border-slate-100 hover:bg-slate-50 ${
+                        String(u.trangThai) === "Pending" ? "bg-amber-50/80" : ""
+                      }`}
+                    >
                       <td className="px-3 py-2 text-blue-700 text-xs">{u.email}</td>
                       <td className="px-3 py-2 font-medium">{u.hoTen}</td>
                       <td className="px-3 py-2">
@@ -310,7 +383,21 @@ export default function AdminUsersPage() {
                       <td className="px-3 py-2 text-slate-600 text-xs max-w-[140px] truncate" title={u.quanly}>
                         {u.quanly || "—"}
                       </td>
-                      <td className="px-3 py-2 text-xs">{u.trangThai || "—"}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <span
+                          className={
+                            String(u.trangThai) === "Pending"
+                              ? "inline-flex px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium"
+                              : String(u.trangThai) === "Rejected"
+                                ? "inline-flex px-2 py-0.5 rounded-full bg-red-100 text-red-700"
+                                : String(u.trangThai) === "Locked"
+                                  ? "inline-flex px-2 py-0.5 rounded-full bg-slate-200 text-slate-600"
+                                  : "inline-flex px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700"
+                          }
+                        >
+                          {u.trangThai || "—"}
+                        </span>
+                      </td>
                       <td className="px-3 py-2">
                         <span
                           className={`text-xs font-medium ${
@@ -321,13 +408,35 @@ export default function AdminUsersPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(u)}
-                          className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-100"
-                        >
-                          Sửa
-                        </button>
+                        <div className="flex flex-wrap gap-1">
+                          {String(u.trangThai) === "Pending" && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => setUserStatus(u, "approve")}
+                                className="text-xs px-2 py-1 rounded border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                              >
+                                Duyệt
+                              </button>
+                              <button
+                                type="button"
+                                disabled={saving}
+                                onClick={() => setUserStatus(u, "reject")}
+                                className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              >
+                                Từ chối
+                              </button>
+                            </>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => openEdit(u)}
+                            className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-100"
+                          >
+                            Sửa
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

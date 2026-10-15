@@ -90,6 +90,14 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       }
     }
     if (body.trangThai !== undefined) patch.TrangThai = String(body.trangThai);
+    if (String(patch.TrangThai || body.trangThai) === "Approved") {
+      patch.ApprovedAt = new Date().toISOString();
+      patch.ApprovedBy = gate.user!.email;
+      if (body.active === undefined) patch.HoatDong = true;
+    }
+    if (String(patch.TrangThai || "") === "Rejected") {
+      patch.HoatDong = false;
+    }
 
     if (!Object.keys(patch).length) {
       return jsonResponse(
