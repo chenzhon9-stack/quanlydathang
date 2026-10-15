@@ -22,8 +22,29 @@ export default function DashboardLayout({
   useEffect(() => {
     const token = localStorage.getItem("token");
     const u = localStorage.getItem("user");
+
+    const goLogin = (expired: boolean) => {
+      try {
+        if (u) {
+          const parsed = JSON.parse(u) as ClientUser;
+          const em = String(parsed?.email || "").trim();
+          if (em) localStorage.setItem("vh_login_email", em);
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        if (expired) sessionStorage.setItem("vh_session_expired", "1");
+      } catch {
+        /* ignore */
+      }
+      router.push(expired ? "/?expired=1" : "/");
+    };
+
     if (!token || !u) {
-      router.push("/");
+      goLogin(false);
       return;
     }
     let cancelled = false;
@@ -34,10 +55,10 @@ export default function DashboardLayout({
         router.replace(firstAllowedPath(parsed));
       }
     } catch {
-      router.push("/");
+      goLogin(false);
       return;
     }
-    // Session verify (V21 refreshUserSession): khóa / đổi MK → 401 → logout
+    // Session verify: hết hạn / khóa / đổi MK → 401 → login (giữ email)
     (async () => {
       try {
         const res = await fetch("/api/v1/auth/me", {
@@ -45,9 +66,7 @@ export default function DashboardLayout({
         });
         if (cancelled) return;
         if (res.status === 401) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          router.push("/");
+          goLogin(true);
           return;
         }
         const json = await res.json().catch(() => null);
@@ -66,6 +85,16 @@ export default function DashboardLayout({
   }, [router, pathname]);
 
   function logout() {
+    try {
+      const u = localStorage.getItem("user");
+      if (u) {
+        const parsed = JSON.parse(u) as ClientUser;
+        const em = String(parsed?.email || "").trim();
+        if (em) localStorage.setItem("vh_login_email", em);
+      }
+    } catch {
+      /* ignore */
+    }
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     router.push("/");

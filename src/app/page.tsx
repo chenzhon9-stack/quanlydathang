@@ -29,6 +29,31 @@ export default function LoginPage() {
     try {
       const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
       if (saved) setEmail(saved);
+      // Hết phiên / revoke → hiện thông báo, focus ô mật khẩu
+      const q =
+        typeof window !== "undefined"
+          ? new URLSearchParams(window.location.search)
+          : null;
+      const expiredFlag =
+        (q && q.get("expired") === "1") ||
+        sessionStorage.getItem("vh_session_expired") === "1";
+      if (expiredFlag) {
+        setError("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+        try {
+          sessionStorage.removeItem("vh_session_expired");
+        } catch {
+          /* ignore */
+        }
+        // Xóa query ?expired=1 khỏi URL cho sạch
+        if (q && q.get("expired") === "1" && typeof window !== "undefined") {
+          window.history.replaceState({}, "", "/");
+        }
+        // Focus mật khẩu sau khi email đã điền
+        setTimeout(() => {
+          const el = document.getElementById("login-password") as HTMLInputElement | null;
+          el?.focus();
+        }, 50);
+      }
     } catch {
       /* ignore */
     }
