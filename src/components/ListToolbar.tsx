@@ -21,6 +21,12 @@ type Props = {
   onFromDate?: (v: string) => void;
   onToDate?: (v: string) => void;
   dateLabel?: string;
+  /**
+   * Chọn trường ngày để lọc (tab Giao hàng):
+   * order = ngày đặt lệnh, delivery = ngày giao (Ngaygiao).
+   */
+  dateField?: "order" | "delivery";
+  onDateField?: (v: "order" | "delivery") => void;
   /** Phân trang client/server */
   pageSize?: number;
   onPageSize?: (n: number) => void;
@@ -42,6 +48,8 @@ export function ListToolbar({
   onFromDate,
   onToDate,
   dateLabel = "Theo ngày",
+  dateField,
+  onDateField,
   pageSize,
   onPageSize,
   pageSizeOptions = [50, 100, 200],
@@ -49,6 +57,13 @@ export function ListToolbar({
   const allOn =
     selectedStatuses.length === 0 || selectedStatuses.includes("ALL");
   const showDate = typeof onFromDate === "function";
+  const showDateField = typeof onDateField === "function";
+  const resolvedDateLabel =
+    showDateField && dateField
+      ? dateField === "delivery"
+        ? "Ngày giao"
+        : "Ngày đặt"
+      : dateLabel;
   const showPageSize = typeof onPageSize === "function" && pageSize != null;
 
   return (
@@ -67,9 +82,28 @@ export function ListToolbar({
 
         {showDate && (
           <>
+            {showDateField && (
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
+                  Lọc theo
+                </label>
+                <select
+                  value={dateField || "order"}
+                  onChange={(e) =>
+                    onDateField?.(
+                      e.target.value === "delivery" ? "delivery" : "order"
+                    )
+                  }
+                  className="px-2.5 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
+                >
+                  <option value="order">Ngày đặt</option>
+                  <option value="delivery">Ngày giao</option>
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-[10px] font-bold text-slate-500 block mb-0.5">
-                {dateLabel} từ
+                {resolvedDateLabel} từ
               </label>
               <input
                 type="date"

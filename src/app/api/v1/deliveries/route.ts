@@ -12,9 +12,13 @@ export async function GET(req: NextRequest) {
       return jsonResponse(error("AUTH_REQUIRED", "Chưa đăng nhập"), 401);
 
     const { searchParams } = new URL(req.url);
+    const dateFieldRaw = (searchParams.get("dateField") || "order").toLowerCase();
     const filter = {
       fromDate: searchParams.get("fromDate") || undefined,
       toDate: searchParams.get("toDate") || undefined,
+      dateField: (dateFieldRaw === "delivery" ? "delivery" : "order") as
+        | "order"
+        | "delivery",
       year: searchParams.get("year") ? Number(searchParams.get("year")) : 2026,
       detailId: searchParams.get("detailId") || undefined,
       customerId: searchParams.get("customerId") || undefined,

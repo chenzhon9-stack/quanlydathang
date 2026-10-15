@@ -166,6 +166,8 @@ export default function DeliveriesPage() {
   const dateRange0 = defaultListDateRange(90);
   const [fromDate, setFromDate] = useState(dateRange0.from);
   const [toDate, setToDate] = useState(dateRange0.to);
+  /** order = ngày đặt lệnh (mặc định); delivery = ngày giao */
+  const [dateField, setDateField] = useState<"order" | "delivery">("order");
   const [modalTarget, setModalTarget] = useState<{
     delivery: Delivery;
     mode: DeliveryModalMode;
@@ -207,6 +209,7 @@ export default function DeliveriesPage() {
       });
       if (fromDate) qs.set("fromDate", fromDate);
       if (toDate) qs.set("toDate", toDate);
+      qs.set("dateField", dateField);
       if (isAdminUser && colState.visible.donGia) qs.set("withPrice", "1");
       const res = await fetch(`/api/v1/deliveries?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -228,7 +231,7 @@ export default function DeliveriesPage() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, fromDate, toDate, colState.visible.donGia, isAdminUser]);
+  }, [pageSize, fromDate, toDate, dateField, colState.visible.donGia, isAdminUser]);
 
   useEffect(() => {
     load(1);
@@ -252,6 +255,7 @@ export default function DeliveriesPage() {
       const qs = new URLSearchParams();
       if (fromDate) qs.set("fromDate", fromDate);
       if (toDate) qs.set("toDate", toDate);
+      qs.set("dateField", dateField);
       const res = await fetch(`/api/v1/deliveries/export?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -459,19 +463,22 @@ export default function DeliveriesPage() {
     return rows;
   }, [filteredCols, sortKey, sortDir]);
 
-  /** Gom theo ngày đặt lệnh (V21) — fallback ngày giao; dùng filteredCols + sort */
+  /** Gom theo trường ngày đang chọn (đặt / giao); fallback trường còn lại */
   const displayGroups = useMemo(() => {
     if (!groupByDate) return [{ key: "all", items: sortedFiltered }];
     const byDate: Record<string, Delivery[]> = {};
     for (const d of sortedFiltered) {
-      const key = d.orderDate || d.deliveryDate || "—";
+      const key =
+        dateField === "delivery"
+          ? d.deliveryDate || d.orderDate || "—"
+          : d.orderDate || d.deliveryDate || "—";
       if (!byDate[key]) byDate[key] = [];
       byDate[key].push(d);
     }
     return Object.keys(byDate)
       .sort((a, b) => b.localeCompare(a))
       .map((k) => ({ key: k, items: byDate[k] }));
-  }, [sortedFiltered, groupByDate]);
+  }, [sortedFiltered, groupByDate, dateField]);
 
 
   return (
@@ -481,7 +488,8 @@ export default function DeliveriesPage() {
         <div>
           <h2 className="text-xl font-bold text-slate-800">Giao hàng</h2>
           <p className="text-xs text-slate-500">
-            {total} lượt · gom theo ngày đặt lệnh
+            {total} lượt · lọc/gom theo{" "}
+            {dateField === "delivery" ? "ngày giao" : "ngày đặt lệnh"}
           </p>
         </div>
         <div className="flex gap-2">
@@ -546,7 +554,9 @@ export default function DeliveriesPage() {
         toDate={toDate}
         onFromDate={setFromDate}
         onToDate={setToDate}
-        dateLabel="Ngày đặt"
+        dateLabel={dateField === "delivery" ? "Ngày giao" : "Ngày đặt"}
+        dateField={dateField}
+        onDateField={setDateField}
         pageSize={pageSize}
         onPageSize={(n) => {
           setPageSize(n);

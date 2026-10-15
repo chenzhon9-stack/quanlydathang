@@ -19,10 +19,12 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = new URL(req.url);
     const scope = resolveScope(user);
+    const dateFieldRaw = (searchParams.get("dateField") || "order").toLowerCase();
     const result = await DeliveryService.exportDeliveries(
       {
         fromDate: searchParams.get("fromDate") || undefined,
         toDate: searchParams.get("toDate") || undefined,
+        dateField: dateFieldRaw === "delivery" ? "delivery" : "order",
       },
       user,
       scope

@@ -43,6 +43,12 @@ export class DeliveryService {
       year?: number;
       fromDate?: string;
       toDate?: string;
+      /**
+       * Trường ngày dùng để lọc from/to:
+       * - order (mặc định): ngày đặt lệnh (CT.NgayDatHang)
+       * - delivery: ngày giao (GH.Ngaygiao / deliveryDate)
+       */
+      dateField?: "order" | "delivery";
       detailId?: string;
       customerId?: string;
       page?: number;
@@ -70,16 +76,19 @@ export class DeliveryService {
       };
     }
 
-    // Không lọc from/to ở repo theo Ngaygiao — UI lọc theo Ngày đặt lệnh (CT.NgayDatHang).
+    // Lọc from/to theo dateField (order = ngày đặt; delivery = ngày giao).
     const {
       fromDate,
       toDate,
+      dateField: dateFieldRaw,
       all: _all,
       includeCancelNoGh,
       withPrice: withPriceReq,
       sortAsc,
       ...repoFilter
     } = filter;
+    const dateField: "order" | "delivery" =
+      dateFieldRaw === "delivery" ? "delivery" : "order";
     // Đơn giá mua: CHỈ admin — role khác bị bỏ qua dù client gửi withPrice
     const withPrice = !!withPriceReq && isAdminRole(user);
     let rows = await DeliveryRepository.findMany(repoFilter);
@@ -201,16 +210,19 @@ export class DeliveryService {
       return true;
     });
 
-    // Lọc khoảng ngày đặt lệnh (yyyy-MM-dd), inclusive
+    // Lọc khoảng ngày (yyyy-MM-dd), inclusive — theo dateField
     const from = (fromDate || "").slice(0, 10);
     const to = (toDate || "").slice(0, 10);
     if (from || to) {
       rows = rows.filter((d) => {
-        const od = String(d.orderDate || "").slice(0, 10);
-        // Không có ngày đặt → không vào khoảng (tránh lẫn dữ liệu lệch mục tiêu)
-        if (!od || od.length < 10) return false;
-        if (from && od < from) return false;
-        if (to && od > to) return false;
+        const raw =
+          dateField === "delivery"
+            ? String(d.deliveryDate || "").slice(0, 10)
+            : String(d.orderDate || "").slice(0, 10);
+        // Không có ngày tương ứng → không vào khoảng (tránh lẫn dữ liệu lệch mục tiêu)
+        if (!raw || raw.length < 10) return false;
+        if (from && raw < from) return false;
+        if (to && raw > to) return false;
         return true;
       });
     }
@@ -322,12 +334,18 @@ export class DeliveryService {
    * không phân trang, mặc định 30 ngày, GH active + CT Hủy chưa có GH, tăng dần, có đơn giá.
    */
   static async exportDeliveries(
-    filter: { fromDate?: string; toDate?: string },
+    filter: {
+      fromDate?: string;
+      toDate?: string;
+      dateField?: "order" | "delivery";
+    },
     user: UserContext,
     scope: AccessScope
   ) {
     let from = String(filter.fromDate || "").slice(0, 10);
     let to = String(filter.toDate || "").slice(0, 10);
+    const dateField: "order" | "delivery" =
+      filter.dateField === "delivery" ? "delivery" : "order";
     if (!from && !to) {
       const r = defaultListDateRange(30);
       from = r.from;
@@ -342,6 +360,7 @@ export class DeliveryService {
           year: y,
           fromDate: from,
           toDate: to,
+          dateField,
           all: true,
           includeCancelNoGh: true,
           withPrice: true,
@@ -353,15 +372,19 @@ export class DeliveryService {
       items.push(...r.items);
     }
     items.sort((a, b) => {
-      const da = String(a.orderDate || "").slice(0, 10);
-      const db = String(b.orderDate || "").slice(0, 10);
+      const da = String(
+        dateField === "delivery" ? a.deliveryDate || a.orderDate : a.orderDate || a.deliveryDate || ""
+      ).slice(0, 10);
+      const db = String(
+        dateField === "delivery" ? b.deliveryDate || b.orderDate : b.orderDate || b.deliveryDate || ""
+      ).slice(0, 10);
       if (da !== db) return da.localeCompare(db);
       const va = String(a.vehicleId || "").toLowerCase();
       const vb = String(b.vehicleId || "").toLowerCase();
       if (va !== vb) return va.localeCompare(vb);
       return String(a.detailId || "").localeCompare(String(b.detailId || ""));
     });
-    return { items, total: items.length, from, to };
+    return { items, total: items.length, from, to, dateField };
   }
 
   /**
