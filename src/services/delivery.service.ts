@@ -709,12 +709,16 @@ export class DeliveryService {
     let tyleChiahet = 0;
     let tenHH = detailId;
     let orderIdForAudit = "";
+    /** Ngày đặt CT — dùng cấp mã GH (không dùng ngày lưu / ngày giao) */
+    let orderDateForId = "";
     let oldSoLuong = 0;
     let oldStatus: string = "";
     let thucNhan = 0;
     try {
       const ct = await DetailRepository.findById(detailId, y);
       orderIdForAudit = ct?.orderId || "";
+      orderDateForId =
+        ymdDate(ct?.orderDate) || String(ct?.orderDate || "").slice(0, 10) || "";
       oldSoLuong = Number(ct?.quantity) || 0;
       oldStatus = String(ct?.status || "");
       thucNhan = Number(ct?.actualReceived) || 0;
@@ -795,11 +799,14 @@ export class DeliveryService {
         keepIds.add(r.deliveryId);
         updated++;
       } else {
-        // Cấp mã GH chuẩn từ System_Counter (parity V21)
-        const idGh = await newDeliveryId(ymdDate(new Date()) || undefined, {
-          email: user.email,
-          year: y,
-        });
+        // Cấp mã GH theo ngày đặt CT (không theo ngày lưu / ngày giao)
+        const idGh = await newDeliveryId(
+          orderDateForId || ymdDate(new Date()) || undefined,
+          {
+            email: user.email,
+            year: y,
+          }
+        );
         await appendSheetRow(
           SHEETS.GH,
           {
@@ -1263,7 +1270,13 @@ export class DeliveryService {
       } else {
         // chỉ tạo mới nếu có KHgiao hoặc TG
         if (!(khGiao > 0 || thucGiao > 0)) continue;
-        const idGh = await newDeliveryId(ymdDate(new Date()) || undefined, {
+        // Cấp mã GH theo ngày đặt CT (không theo ngày giao / ngày lưu)
+        const orderDateKey =
+          ymdDate(ct.orderDate) ||
+          String(ct.orderDate || "").slice(0, 10) ||
+          ymdDate(new Date()) ||
+          undefined;
+        const idGh = await newDeliveryId(orderDateKey, {
           email: user.email,
           year: y,
         });
