@@ -36,6 +36,8 @@ export default function LoginPage() {
   const [regBusy, setRegBusy] = useState(false);
   const [regErr, setRegErr] = useState("");
   const [regMsg, setRegMsg] = useState("");
+  const [regStep, setRegStep] = useState<"form" | "otp">("form");
+  const [regOtp, setRegOtp] = useState("");
 
   useEffect(() => {
     try {
@@ -204,13 +206,45 @@ export default function LoginPage() {
       });
       const json = await res.json();
       if (!json.success) {
-        setRegErr(json.error?.message || "Đăng ký thất bại");
+        setRegErr(json.error?.message || "Không gửi được OTP");
+        return;
+      }
+      setRegStep("otp");
+      setRegOtp("");
+      setRegMsg(
+        json.meta?.message ||
+          json.data?.message ||
+          "Mã OTP đã được gửi đến email của bạn."
+      );
+    } catch {
+      setRegErr("Không kết nối được máy chủ");
+    } finally {
+      setRegBusy(false);
+    }
+  }
+
+  async function submitRegisterOtp(e: React.FormEvent) {
+    e.preventDefault();
+    setRegBusy(true);
+    setRegErr("");
+    setRegMsg("");
+    try {
+      const res = await fetch("/api/v1/auth/register/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: regEmail.trim(),
+          otp: regOtp.trim(),
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setRegErr(json.error?.message || "Xác thực OTP thất bại");
         return;
       }
       setRegMsg(
         json.meta?.message ||
-          json.data?.message ||
-          "Đăng ký thành công. Chờ admin duyệt."
+          "Đăng ký thành công. Chờ admin duyệt trước khi đăng nhập."
       );
       setEmail(regEmail.trim());
       setPassword("");
@@ -219,7 +253,33 @@ export default function LoginPage() {
       } catch {
         /* ignore */
       }
-      setTimeout(() => setRegOpen(false), 2200);
+      setTimeout(() => {
+        setRegOpen(false);
+        setRegStep("form");
+      }, 2200);
+    } catch {
+      setRegErr("Không kết nối được máy chủ");
+    } finally {
+      setRegBusy(false);
+    }
+  }
+
+  async function resendRegisterOtp() {
+    setRegBusy(true);
+    setRegErr("");
+    setRegMsg("");
+    try {
+      const res = await fetch("/api/v1/auth/register/resend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: regEmail.trim() }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setRegErr(json.error?.message || "Không gửi lại được OTP");
+        return;
+      }
+      setRegMsg(json.meta?.message || "Đã gửi lại mã OTP.");
     } catch {
       setRegErr("Không kết nối được máy chủ");
     } finally {
@@ -305,6 +365,8 @@ export default function LoginPage() {
               setRegDept("");
               setRegPass("");
               setRegPass2("");
+              setRegOtp("");
+              setRegStep("form");
               setRegErr("");
               setRegMsg("");
               setRegOpen(true);
@@ -415,113 +477,204 @@ export default function LoginPage() {
 
       {regOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-slate-800 border border-slate-600 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold text-sky-300 mb-1">
-              Đăng ký tài khoản
-            </h2>
-            <p className="text-xs text-slate-400 mb-4">
-              Tài khoản mới ở trạng thái <b>Chờ duyệt</b>. Admin phê duyệt xong
-              bạn mới đăng nhập được.
-            </p>
-            <form onSubmit={submitRegister} className="space-y-3">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Email *</label>
-                <input
-                  type="email"
-                  required
-                  value={regEmail}
-                  onChange={(e) => setRegEmail(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  placeholder="email@example.com"
-                  autoComplete="username"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Họ tên *</label>
-                <input
-                  type="text"
-                  required
-                  value={regHoTen}
-                  onChange={(e) => setRegHoTen(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  placeholder="Nguyễn Văn A"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Điện thoại</label>
-                  <input
-                    type="text"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Phòng ban</label>
-                  <input
-                    type="text"
-                    value={regDept}
-                    onChange={(e) => setRegDept(e.target.value)}
-                    className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Mật khẩu *</label>
-                <input
-                  type="password"
-                  required
-                  value={regPass}
-                  onChange={(e) => setRegPass(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  autoComplete="new-password"
-                />
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  ≥ 8 ký tự, có chữ và số
+          <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto text-slate-800">
+            <div className="flex items-start justify-between mb-3">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Đăng ký tài khoản
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegOpen(false);
+                  setRegStep("form");
+                }}
+                className="text-slate-400 hover:text-slate-700 text-xl leading-none px-1"
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
+
+            {regStep === "form" ? (
+              <>
+                <p className="text-xs text-slate-500 mb-4">
+                  Sau khi gửi form, hệ thống gửi <b>mã OTP</b> tới email. Chỉ khi
+                  xác thực OTP đúng mới tạo tài khoản (chờ admin duyệt).
                 </p>
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  Xác nhận mật khẩu *
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={regPass2}
-                  onChange={(e) => setRegPass2(e.target.value)}
-                  className="w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-white"
-                  autoComplete="new-password"
-                />
-              </div>
-              {regErr && (
-                <p className="text-sm text-red-400 bg-red-950/40 rounded-lg px-3 py-2">
-                  {regErr}
+                <form onSubmit={submitRegister} className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">
+                      Email *
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={regEmail}
+                      onChange={(e) => setRegEmail(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="email@example.com"
+                      autoComplete="username"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">
+                      Họ tên *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={regHoTen}
+                      onChange={(e) => setRegHoTen(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      placeholder="Nguyễn Văn A"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">
+                        Điện thoại
+                      </label>
+                      <input
+                        type="text"
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1">
+                        Phòng ban
+                      </label>
+                      <input
+                        type="text"
+                        value={regDept}
+                        onChange={(e) => setRegDept(e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">
+                      Mật khẩu *
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={regPass}
+                      onChange={(e) => setRegPass(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      autoComplete="new-password"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      ≥ 8 ký tự, có chữ và số
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">
+                      Xác nhận mật khẩu *
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={regPass2}
+                      onChange={(e) => setRegPass2(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  {regErr && (
+                    <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                      {regErr}
+                    </p>
+                  )}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="button"
+                      disabled={regBusy}
+                      onClick={() => setRegOpen(false)}
+                      className="flex-1 py-2 text-sm rounded-lg border border-slate-300 text-slate-700"
+                    >
+                      Đóng
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={regBusy}
+                      className="flex-1 py-2.5 text-sm rounded-lg bg-sky-500 text-white font-semibold disabled:opacity-50"
+                    >
+                      {regBusy ? "Đang gửi OTP…" : "Gửi mã OTP"}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-slate-600 mb-4 border-b border-slate-100 pb-3">
+                  Mã xác thực đã được gửi đến email của bạn. Vui lòng nhập mã để
+                  hoàn tất đăng ký.
                 </p>
-              )}
-              {regMsg && (
-                <p className="text-sm text-emerald-400 bg-emerald-950/30 rounded-lg px-3 py-2">
-                  {regMsg}
-                </p>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  type="button"
-                  disabled={regBusy}
-                  onClick={() => setRegOpen(false)}
-                  className="flex-1 py-2 text-sm rounded-lg border border-slate-600 text-slate-300"
-                >
-                  Đóng
-                </button>
-                <button
-                  type="submit"
-                  disabled={regBusy}
-                  className="flex-1 py-2 text-sm rounded-lg bg-sky-600 text-white font-medium disabled:opacity-50"
-                >
-                  {regBusy ? "Đang gửi…" : "Đăng ký"}
-                </button>
-              </div>
-            </form>
+                <form onSubmit={submitRegisterOtp} className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-slate-600 mb-1">
+                      Mã OTP (6 chữ số)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      required
+                      value={regOtp}
+                      onChange={(e) =>
+                        setRegOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
+                      }
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm tracking-widest"
+                      placeholder="Nhập mã OTP"
+                      autoFocus
+                    />
+                  </div>
+                  {regErr && (
+                    <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">
+                      {regErr}
+                    </p>
+                  )}
+                  {regMsg && (
+                    <p className="text-sm text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">
+                      {regMsg}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={regBusy || regOtp.trim().length < 6}
+                    className="w-full py-2.5 text-sm rounded-lg bg-sky-500 text-white font-semibold disabled:opacity-50"
+                  >
+                    {regBusy ? "Đang xác thực…" : "XÁC THỰC VÀ TẠO TÀI KHOẢN"}
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={regBusy}
+                      onClick={resendRegisterOtp}
+                      className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
+                    >
+                      Gửi lại mã
+                    </button>
+                    <button
+                      type="button"
+                      disabled={regBusy}
+                      onClick={() => {
+                        setRegStep("form");
+                        setRegOtp("");
+                        setRegErr("");
+                        setRegMsg("");
+                      }}
+                      className="px-3 py-1.5 text-xs text-slate-500 hover:underline"
+                    >
+                      ← Sửa thông tin
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

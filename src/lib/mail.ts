@@ -118,24 +118,31 @@ export async function sendOtpEmail(
   otp: string,
   purpose = "reset_password"
 ): Promise<SendMailResult> {
-  const title =
-    purpose === "change_password"
-      ? "Mã OTP đổi mật khẩu"
-      : "Mã OTP đặt lại mật khẩu";
+  const p = String(purpose || "reset_password");
+  let title = "Mã OTP đặt lại mật khẩu";
+  let intro = "Mã OTP đặt lại mật khẩu của bạn là:";
+  if (p === "change_password") {
+    title = "Mã OTP đổi mật khẩu";
+    intro = "Mã OTP đổi mật khẩu của bạn là:";
+  } else if (p === "register") {
+    title = "Xác thực email đăng ký tài khoản";
+    intro =
+      "Chào mừng bạn đăng ký Viết Hải — Quản lý vận tải. Mã xác thực đăng ký của bạn là:";
+  }
   const html = `
   <div style="font-family:Arial,sans-serif;font-size:14px;color:#222;line-height:1.5">
     <p>Xin chào,</p>
-    <p>Mã OTP <strong>${title}</strong> của bạn là:</p>
+    <p>${intro}</p>
     <p style="font-size:28px;letter-spacing:6px;font-weight:bold;color:#1d4ed8">${otp}</p>
-    <p>Mã có hiệu lực <strong>15 phút</strong>. Không chia sẻ mã này cho người khác.</p>
+    <p>Mã có hiệu lực <strong>15 phút</strong>. Nhập mã này để hoàn tất đăng ký / đổi mật khẩu.</p>
     <p style="color:#64748b;font-size:12px">Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>
     <hr style="border:none;border-top:1px solid #e2e8f0"/>
     <p style="color:#94a3b8;font-size:12px">Viết Hải — Quản lý vận tải</p>
   </div>`;
   return sendMail({
     to: email,
-    subject: `[Viết Hải] ${title}: ${otp}`,
-    text: `${title}: ${otp}\nHiệu lực 15 phút. Không chia sẻ mã này.`,
+    subject: `[Viết Hải] ${title}`,
+    text: `${title}\nMã: ${otp}\nHiệu lực 15 phút. Không chia sẻ mã này.`,
     html,
   });
 }

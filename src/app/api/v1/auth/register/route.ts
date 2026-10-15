@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { success, error, jsonResponse } from "@/lib/api";
-import { registerUser } from "@/services/register.service";
+import { requestRegisterOtp } from "@/services/register.service";
 
-/** POST { email, password, confirmPassword, hoTen, dienThoai?, phongBan? } — public */
+/** POST — bước 1: gửi OTP đăng ký (chưa tạo User) */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const r = await registerUser({
+    const r = await requestRegisterOtp({
       email: String(body.email || ""),
       password: String(body.password || ""),
       confirmPassword: String(body.confirmPassword || body.password2 || ""),
@@ -16,14 +16,15 @@ export async function POST(req: NextRequest) {
     });
     if (!r.success) {
       return jsonResponse(
-        error("REGISTER_FAILED", r.error || "Đăng ký thất bại"),
+        error("REGISTER_OTP_FAILED", r.error || "Không gửi được OTP"),
         400
       );
     }
     return jsonResponse(
-      success({ email: String(body.email || "").trim().toLowerCase() }, {
-        message: r.message,
-      })
+      success(
+        { email: String(body.email || "").trim().toLowerCase(), step: "otp" },
+        { message: r.message }
+      )
     );
   } catch (e) {
     console.error("[auth/register]", e);
