@@ -138,6 +138,9 @@ export interface Delivery {
   transportTypeName?: string;
   productId?: string;
   productName?: string;
+  /** Makv từ CT (enrich) — dùng resolve đơn giá */
+  regionId?: string;
+  regionName?: string;
   note?: string;
   deleted?: boolean;
   /** Trạng thái CT (enrich) */
@@ -146,6 +149,11 @@ export interface Delivery {
   /** Ngày nhận từ CT — khóa ngày giao */
   receivedDate?: string;
   isDuyenHa?: boolean;
+  /**
+   * Đơn giá mua resolve từ DM_GiaMua (enrich list khi withPrice).
+   * null = chưa nhận / không có giá — hiển thị "—".
+   */
+  unitPrice?: number | null;
   /**
    * Hình thức gửi đơn NCC (DM_NCC.HinhThucGui) — enrich list, chỉ hiển thị.
    * Email | Zalo | APP …
