@@ -5,6 +5,11 @@ import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
+import {
+  defaultPlanKhFromPhanLoai,
+  isAcghangBufferKh,
+  phanLoaiFromMasterRaw,
+} from "@/lib/default-plan-kh";
 import type { Order } from "@/types";
 
 type DeliveryRow = {
@@ -280,20 +285,31 @@ export function AddDetailModal({ order, onClose, onAdded }: Props) {
                     value={d.productId}
                     displayName={d.productName}
                     supplierId={order.supplierId}
-                    onChange={(id, name, raw) =>
+                    onChange={(id, name, raw) => {
+                      const defKh = defaultPlanKhFromPhanLoai(
+                        phanLoaiFromMasterRaw(raw)
+                      );
                       setDetails((rows) =>
-                        rows.map((x, i) =>
-                          i === di
-                            ? {
-                                ...x,
-                                productId: id,
-                                productName: name,
-                                tyleChiahet: parseTyleChiahet(raw),
-                              }
-                            : x
-                        )
-                      )
-                    }
+                        rows.map((x, i) => {
+                          if (i !== di) return x;
+                          return {
+                            ...x,
+                            productId: id,
+                            productName: name,
+                            tyleChiahet: parseTyleChiahet(raw),
+                            deliveries: x.deliveries.map((g, gi) =>
+                              gi === 0 && isAcghangBufferKh(g.customerId)
+                                ? {
+                                    ...g,
+                                    customerId: defKh.id,
+                                    customerName: defKh.name,
+                                  }
+                                : g
+                            ),
+                          };
+                        })
+                      );
+                    }}
                   />
                   <MasterPicker
                     type="KV"

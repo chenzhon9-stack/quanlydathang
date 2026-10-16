@@ -36,6 +36,10 @@ import {
   markOrderResendIfSent,
   numClose,
 } from "@/lib/order-resend";
+import {
+  defaultPlanKhFromPhanLoai,
+  isAcghangBufferKh,
+} from "@/lib/default-plan-kh";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -1001,6 +1005,7 @@ export class DeliveryService {
     // HH meta
     let tyleChiahet = 0;
     let tyleHaohut = 0;
+    let phanLoaiHH = "";
     let tenHH = ct.productName || ct.productId || "";
     try {
       const hhRows = await readSheetAsObjects(SHEETS.HH, {});
@@ -1011,6 +1016,7 @@ export class DeliveryService {
       if (hh) {
         tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
         tyleHaohut = Number(hh.TyleHaohut || hh.TyleHaoHut || 0) || 0;
+        phanLoaiHH = String(hh.PhanLoaiHH || hh.PhanLoai || hh.phanLoai || "");
         tenHH = String(hh.TenHangHoa || tenHH);
       }
     } catch {
@@ -1165,9 +1171,16 @@ export class DeliveryService {
       const pullFromPending = (amount: number): number => {
         let remaining = amount;
         let pulled = 0;
-        // 1. acghang
-        const acg = list.find((x) => x.customerId === "acghang");
-        if (acg && remaining > 0.0001) {
+        // 1. buffer acghang / acghangB / acghangR (ưu tiên khớp phân loại HH)
+        const preferId = defaultPlanKhFromPhanLoai(phanLoaiHH).id.toLowerCase();
+        const buffers = list.filter((x) => isAcghangBufferKh(x.customerId));
+        buffers.sort((a, b) => {
+          const aa = String(a.customerId || "").toLowerCase() === preferId ? 0 : 1;
+          const bb = String(b.customerId || "").toLowerCase() === preferId ? 0 : 1;
+          return aa - bb;
+        });
+        for (const acg of buffers) {
+          if (remaining <= 0.0001) break;
           const avail = acg.plannedQty;
           if (avail > 0) {
             const take = Math.min(avail, remaining);
@@ -1178,12 +1191,12 @@ export class DeliveryService {
             remaining -= actuallyTaken;
           }
         }
-        // 2. pending khác (TG=0)
+        // 2. pending khác (TG=0, không phải buffer)
         if (remaining > 0.0001) {
           for (const p of list) {
             if (remaining <= 0.0001) break;
             if (p.actualQty > 0) continue;
-            if (p.customerId === "acghang") continue;
+            if (isAcghangBufferKh(p.customerId)) continue;
             const avail = p.plannedQty;
             if (avail <= 0) continue;
             const take = Math.min(avail, remaining);
@@ -1199,22 +1212,28 @@ export class DeliveryService {
 
       const pushToPending = (amount: number) => {
         if (amount <= 0.0001) return;
-        const acg = list.find((x) => x.customerId === "acghang");
+        const prefer = defaultPlanKhFromPhanLoai(phanLoaiHH);
+        const acg =
+          list.find(
+            (x) =>
+              String(x.customerId || "").toLowerCase() ===
+              prefer.id.toLowerCase()
+          ) || list.find((x) => isAcghangBufferKh(x.customerId));
         if (acg) {
           acg.plannedQty = roundStep(acg.plannedQty + amount);
           return;
         }
         const pending = list.filter(
-          (item) => item.actualQty === 0 && item.customerId !== "acghang"
+          (item) => item.actualQty === 0 && !isAcghangBufferKh(item.customerId)
         );
         if (pending.length > 0) {
           pending[0].plannedQty = roundStep(pending[0].plannedQty + amount);
           return;
         }
-        // Tạo dòng acghang ảo
+        // Tạo dòng buffer theo phân loại HH (Bao→B, Rời→R)
         list.push({
           deliveryId: `NEW-acg-${Date.now()}`,
-          customerId: "acghang",
+          customerId: prefer.id,
           customerDetail: "",
           plannedQty: roundStep(amount),
           actualQty: 0,

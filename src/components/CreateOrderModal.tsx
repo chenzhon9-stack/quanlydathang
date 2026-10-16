@@ -5,6 +5,11 @@ import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
+import {
+  defaultPlanKhFromPhanLoai,
+  isAcghangBufferKh,
+  phanLoaiFromMasterRaw,
+} from "@/lib/default-plan-kh";
 
 /** datetime-local value from Date (local) */
 function toDatetimeLocalValue(d = new Date()): string {
@@ -46,7 +51,7 @@ type DetailRow = {
   deliveries: DeliveryRow[];
 };
 
-/** Mã KH mặc định dòng kế hoạch đầu (V21: acghang) */
+/** Fallback khi chưa chọn HH — sau khi chọn HH sẽ map Bao→acghangB / Rời→acghangR */
 const DEFAULT_PLAN_KH_ID = "acghang";
 const DEFAULT_PLAN_KH_NAME = "acghang";
 
@@ -607,17 +612,29 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
                       }
                       disabled={!supplierId}
                       onChange={(id, name, raw) => {
+                        const defKh = defaultPlanKhFromPhanLoai(
+                          phanLoaiFromMasterRaw(raw)
+                        );
                         setDetails((rows) =>
-                          rows.map((x, i) =>
-                            i === di
-                              ? {
-                                  ...x,
-                                  productId: id,
-                                  productName: name,
-                                  tyleChiahet: parseTyleChiahet(raw),
-                                }
-                              : x
-                          )
+                          rows.map((x, i) => {
+                            if (i !== di) return x;
+                            return {
+                              ...x,
+                              productId: id,
+                              productName: name,
+                              tyleChiahet: parseTyleChiahet(raw),
+                              // Chỉ ghi đè dòng KH buffer (acghang / B / R / trống)
+                              deliveries: x.deliveries.map((g, gi) =>
+                                gi === 0 && isAcghangBufferKh(g.customerId)
+                                  ? {
+                                      ...g,
+                                      customerId: defKh.id,
+                                      customerName: defKh.name,
+                                    }
+                                  : g
+                              ),
+                            };
+                          })
                         );
                       }}
                     />
