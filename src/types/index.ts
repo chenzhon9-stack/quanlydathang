@@ -115,6 +115,11 @@ export interface OrderDetail {
   orderFile?: string;
 }
 
+/**
+ * Dòng giao hàng (GH) + các field enrich từ CT / master / giá mua.
+ * Chỉ deliveryId/detailId/customerId/plannedQty là cột GH gốc;
+ * còn lại optional — gán lúc list (DeliveryService) hoặc export.
+ */
 export interface Delivery {
   deliveryId: string;
   detailId: string;
@@ -129,18 +134,23 @@ export interface Delivery {
   plannedQty: number;
   actualQty?: number;
   deliveryDate?: string;
-  /** Ngày đặt lệnh (từ DonHang_Chitiet) — dùng gom nhóm V21 */
+  /** Ngày đặt lệnh (từ DonHang_Chitiet / DH) — gom nhóm V21 */
   orderDate?: string;
   vehicleId?: string;
   vehiclePlate?: string;
-  /** Hình thức vận tải từ CT (enrich) — chỉ hiển thị, không ghi Sheet */
+  /** Hình thức vận tải từ CT (enrich) */
   transportTypeId?: string;
   transportTypeName?: string;
+  /** MaDVT — từ CT_VT hoặc map xe (enrich list / export) */
+  carrierId?: string;
+  carrierName?: string;
   productId?: string;
   productName?: string;
-  /** Makv từ CT (enrich) — dùng resolve đơn giá */
+  /** Makv từ CT (enrich) — resolve đơn giá */
   regionId?: string;
   regionName?: string;
+  /** Kho xuất từ CT (enrich) */
+  warehouse?: string;
   note?: string;
   deleted?: boolean;
   /** Trạng thái CT (enrich) */
