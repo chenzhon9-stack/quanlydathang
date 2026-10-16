@@ -56,3 +56,17 @@ export function isAcghangBufferKh(
 export function preferredBufferKhId(phanLoai: unknown): string {
   return defaultPlanKhFromPhanLoai(phanLoai).id;
 }
+
+/**
+ * Khi lưu Sheet: nếu MaKh đúng "acghang" (chưa B/R) → map theo PhanLoaiHH.
+ * Không đổi acghangB/acghangR hay KH thật khác.
+ */
+export function resolveAcghangOnSave(
+  customerId: string | null | undefined,
+  phanLoai: unknown
+): string {
+  const k = String(customerId ?? "").trim();
+  if (k.toLowerCase() !== "acghang") return k;
+  return defaultPlanKhFromPhanLoai(phanLoai).id;
+}
+

@@ -39,6 +39,7 @@ import {
 import {
   defaultPlanKhFromPhanLoai,
   isAcghangBufferKh,
+  resolveAcghangOnSave,
 } from "@/lib/default-plan-kh";
 
 export class DeliveryService {
@@ -612,7 +613,19 @@ export class DeliveryService {
       Ngaygiao: ngay,
     };
     if (payload.note !== undefined) patch.Ghichu = payload.note;
-    if (payload.customerId) patch.MaKh = payload.customerId;
+    if (payload.customerId) {
+      // acghang → B/R theo HH của CT (nếu đã load meta); fallback giữ nguyên
+      let pl = "";
+      try {
+        const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+        const pid = String(ct.productId || "").trim().toUpperCase();
+        const hh = hhRows.find(
+          (r) => String(r.MaHH || r.MaHh || "").trim().toUpperCase() === pid
+        );
+        if (hh) pl = String(hh.PhanLoaiHH || hh.PhanLoai || "");
+      } catch { /* optional */ }
+      patch.MaKh = resolveAcghangOnSave(payload.customerId, pl);
+    }
     if (payload.customerDetail !== undefined) patch.ChitietKh = payload.customerDetail;
 
     const row = await updateSheetRowByKey(
@@ -711,6 +724,7 @@ export class DeliveryService {
     const y = year ?? currentYearVN();
     // TyleChiahet từ HH của chi tiết — parity V21 saveDeliveryData plan
     let tyleChiahet = 0;
+    let phanLoaiHH = "";
     let tenHH = detailId;
     let orderIdForAudit = "";
     /** Ngày đặt CT — dùng cấp mã GH (không dùng ngày lưu / ngày giao) */
@@ -733,6 +747,7 @@ export class DeliveryService {
         );
         if (hh) {
           tyleChiahet = Number(hh.TyleChiahet || hh.TyleChiaHet || 0) || 0;
+          phanLoaiHH = String(hh.PhanLoaiHH || hh.PhanLoai || hh.phanLoai || "");
           tenHH = String(hh.TenHangHoa || ct.productId);
         }
       }
@@ -773,7 +788,10 @@ export class DeliveryService {
         if (row > 0) deleted++;
         continue;
       }
-      const maKh = String(r.customerId || "").trim();
+      const maKh = resolveAcghangOnSave(
+        String(r.customerId || "").trim(),
+        phanLoaiHH
+      );
       const khg = qty3(Number(r.plannedQty) || 0);
       if (!maKh) {
         throw { code: "VALIDATION_ERROR", message: "Thiếu mã khách hàng" };
@@ -1268,6 +1286,7 @@ export class DeliveryService {
       const khGiao = item.plannedQty;
       const ngay =
         thucGiao > 0 ? item.deliveryDate || todayYmdVN() : "";
+      const maKhResolved = resolveAcghangOnSave(item.customerId, phanLoaiHH);
 
       if (!item.isNew && existingById.has(item.deliveryId)) {
         await updateSheetRowByKey(
@@ -1275,7 +1294,7 @@ export class DeliveryService {
           "ID_Giaohang",
           item.deliveryId,
           {
-            MaKh: item.customerId,
+            MaKh: maKhResolved,
             ChitietKh: item.customerDetail || "",
             KHgiao: khGiao,
             ThucGiao: thucGiao,
@@ -1304,7 +1323,7 @@ export class DeliveryService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: detailId,
-            MaKh: item.customerId,
+            MaKh: maKhResolved,
             ChitietKh: item.customerDetail || "",
             KHgiao: khGiao,
             ThucGiao: thucGiao,

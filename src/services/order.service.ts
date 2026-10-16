@@ -22,6 +22,7 @@ import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
 import { canResetOrder, isDuyenHaNcc, businessDayDiff, lateThresholdDays } from "@/lib/order-reset";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
+import { resolveAcghangOnSave } from "@/lib/default-plan-kh";
 
 export interface OrderListFilter {
   year?: number;
@@ -809,6 +810,23 @@ export class OrderService {
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
+    // PhanLoaiHH theo MaHH — resolve acghang → B/R khi ghi GH
+    let hhPhanLoaiByProduct: Record<string, string> = {};
+    try {
+      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+      for (const r of hhRows) {
+        const mid = String(r.MaHH || (r as { MaHh?: string }).MaHh || "")
+          .trim()
+          .toUpperCase();
+        if (!mid) continue;
+        hhPhanLoaiByProduct[mid] = String(
+          r.PhanLoaiHH || r.PhanLoai || (r as { phanLoai?: string }).phanLoai || ""
+        );
+      }
+    } catch {
+      hhPhanLoaiByProduct = {};
+    }
+
     const deliveryIds = await nextCounterCodes("GH", ngayDat, {
       count: totalGh,
       email: user.email,
@@ -899,7 +917,10 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: dl.customerId,
+            MaKh: resolveAcghangOnSave(
+              dl.customerId,
+              hhPhanLoaiByProduct[String(d.productId || "").trim().toUpperCase()] || ""
+            ),
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,
@@ -1157,6 +1178,23 @@ export class OrderService {
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
+    // PhanLoaiHH theo MaHH — resolve acghang → B/R khi ghi GH
+    let hhPhanLoaiByProduct: Record<string, string> = {};
+    try {
+      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
+      for (const r of hhRows) {
+        const mid = String(r.MaHH || (r as { MaHh?: string }).MaHh || "")
+          .trim()
+          .toUpperCase();
+        if (!mid) continue;
+        hhPhanLoaiByProduct[mid] = String(
+          r.PhanLoaiHH || r.PhanLoai || (r as { phanLoai?: string }).phanLoai || ""
+        );
+      }
+    } catch {
+      hhPhanLoaiByProduct = {};
+    }
+
     const deliveryIds = await nextCounterCodes("GH", ngayDat, {
       count: totalGh,
       email: user.email,
@@ -1210,7 +1248,10 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: dl.customerId,
+            MaKh: resolveAcghangOnSave(
+              dl.customerId,
+              hhPhanLoaiByProduct[String(d.productId || "").trim().toUpperCase()] || ""
+            ),
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,
