@@ -89,8 +89,6 @@ export interface OrderDetail {
   supplierId: string;
   supplierName?: string;
   vehicleId: string;
-  /** MaDVT từ DM_Xe — scope ĐVVT */
-  dvtId?: string;
   vehiclePlate?: string;
   productId: string;
   productName?: string;
@@ -106,9 +104,8 @@ export interface OrderDetail {
   actualDelivered?: number;
   transportTypeId?: string;
   transportTypeName?: string;
-  /** MaDVT từ DM_Xe */
+  /** MaDVT từ DonHang_VanTai (CT_VT) — thuê ngoài */
   carrierId?: string;
-  /** TenDVT — ghi chú Thuê ngoài */
   carrierName?: string;
   isDuyenHa?: boolean;
   phanLoai?: PhanLoaiHH;
@@ -135,16 +132,10 @@ export interface Delivery {
   /** Ngày đặt lệnh (từ DonHang_Chitiet) — dùng gom nhóm V21 */
   orderDate?: string;
   vehicleId?: string;
-  /** MaDVT — scope Sale/View theo ĐVVT */
-  dvtId?: string;
   vehiclePlate?: string;
   /** Hình thức vận tải từ CT (enrich) — chỉ hiển thị, không ghi Sheet */
   transportTypeId?: string;
   transportTypeName?: string;
-  /** MaDVT từ DM_Xe */
-  carrierId?: string;
-  /** TenDVT — ghi chú Thuê ngoài dưới biển số */
-  carrierName?: string;
   productId?: string;
   productName?: string;
   note?: string;
@@ -160,13 +151,6 @@ export interface Delivery {
    * Email | Zalo | APP …
    */
   sendMethod?: string;
-  /** Makv từ CT.Khuvuc (enrich) */
-  regionId?: string;
-  regionName?: string;
-  /** CT.KhoXuat (enrich) */
-  warehouse?: string;
-  /** Đơn giá mua theo ngày nhận (chỉ export); null = chưa nhận / chưa có giá */
-  unitPrice?: number | null;
 }
 
 export interface ProductionPlan {

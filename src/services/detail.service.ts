@@ -24,7 +24,6 @@ import {
   isHangBao,
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
-import { reallocatePlanOnReceive } from "@/lib/plan-reallocate";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import {
   diffDetailMasterFields,
@@ -58,18 +57,31 @@ export class DetailService {
     // V21.07 multi-role scope union
     rows = await applyListScopeFilter(rows, scope, filter.year);
 
-    const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta, dvtMap, xeDvt] = await Promise.all([
-      MasterRepository.nccNames(),
-      MasterRepository.hhNames(),
-      MasterRepository.xeNames(),
-      MasterRepository.kvNames(),
-      MasterRepository.htvtNames(),
-      MasterRepository.hhMeta(),
-      MasterRepository.dvtNames().catch(() => ({} as Record<string, string>)),
-      MasterRepository.xeDvtMap().catch(() => ({} as Record<string, string>)),
-    ]);
+    const [nccMap, hhMap, xeMap, kvMap, htvtMap, hhMeta, dvtMap, ctVtRows] =
+      await Promise.all([
+        MasterRepository.nccNames(),
+        MasterRepository.hhNames(),
+        MasterRepository.xeNames(),
+        MasterRepository.kvNames(),
+        MasterRepository.htvtNames(),
+        MasterRepository.hhMeta(),
+        MasterRepository.dvtNames().catch(() => ({} as Record<string, string>)),
+        readSheetAsObjects(SHEETS.CT_VT, {
+          year: filter.year ?? currentYearVN(),
+        }).catch(() => [] as Record<string, string>[]),
+      ]);
+    const carrierByCt = new Map<string, string>();
+    for (const r of ctVtRows) {
+      const id = String(r.ID_Chitiet || r.id_chitiet || "").trim();
+      const maDvt = String(r.MaDVT || r.maDVT || "").trim();
+      if (id && maDvt) carrierByCt.set(id, maDvt);
+    }
     rows = rows.map((d) => {
-      const meta = hhMeta[d.productId] || hhMeta[String(d.productId || "").toUpperCase()];
+      const meta =
+        hhMeta[d.productId] ||
+        hhMeta[String(d.productId || "").toUpperCase()];
+      const carrierId =
+        d.carrierId || carrierByCt.get(String(d.detailId || "").trim()) || "";
       return {
         ...d,
         supplierName:
@@ -83,17 +95,10 @@ export class DetailService {
           d.transportTypeName ||
           htvtMap[d.transportTypeId || ""] ||
           d.transportTypeId,
-        carrierId: (() => {
-          const vid = String(d.vehicleId || "").trim();
-          if (!vid) return undefined;
-          return xeDvt[vid] || xeDvt[vid.toUpperCase()] || undefined;
-        })(),
-        carrierName: (() => {
-          const vid = String(d.vehicleId || "").trim();
-          const ma = vid ? xeDvt[vid] || xeDvt[vid.toUpperCase()] || "" : "";
-          if (!ma) return undefined;
-          return dvtMap[ma] || dvtMap[String(ma).toUpperCase()] || ma;
-        })(),
+        carrierId: carrierId || undefined,
+        carrierName: carrierId
+          ? dvtMap[carrierId] || carrierId
+          : d.carrierName,
         // Enrich từ DM_HangHoa — FE khóa Bao + validate chia hết
         phanLoai: (meta?.phanLoai as typeof d.phanLoai) || d.phanLoai,
         tyleChiahet:
@@ -281,52 +286,59 @@ export class DetailService {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
     }
 
-    // Phân bổ lại KHgiao — V21 _phanBoLaiKeHoachGiao_: khách thật × tỷ lệ, khách đệm (acghang/B/R) nhận phần dư
+    // Phân bổ lại KHgiao nếu lệch SoLuong (tỷ lệ; làm tròn qty3)
     let redistributed = 0;
     const planQty = qty3(Number(ct.quantity) || 0);
-    try {
-      const { DeliveryRepository } = await import(
-        "@/repositories/delivery.repository"
-      );
-      const ghs = await DeliveryRepository.findMany({
-        year: y,
-        detailId,
-        includeDeleted: false,
-      });
-      const active = ghs.filter((g) => !g.deleted);
-      const plan = reallocatePlanOnReceive(
-        active.map((g) => ({
-          id: g.deliveryId,
-          customerId: String(g.customerId || ""),
-          planned: Number(g.plannedQty) || 0,
-        })),
-        qty,
-        tyleChiahet
-      );
-      if (plan && plan.size > 0) {
-        for (const [deliveryId, newKh] of plan) {
+    if (planQty > 0 && Math.abs(qty - planQty) > 0.0001) {
+      try {
+        const { DeliveryRepository } = await import(
+          "@/repositories/delivery.repository"
+        );
+        const ghs = await DeliveryRepository.findMany({
+          year: y,
+          detailId,
+          includeDeleted: false,
+        });
+        const active = ghs.filter((g) => !g.deleted);
+        const sumPlan = active.reduce((s, g) => s + (Number(g.plannedQty) || 0), 0);
+        if (active.length && sumPlan > 0) {
+          let allocated = 0;
+          for (let i = 0; i < active.length; i++) {
+            const g = active[i];
+            let newKh: number;
+            if (i === active.length - 1) {
+              newKh = qty3(qty - allocated);
+              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
+            } else {
+              const ratio = (Number(g.plannedQty) || 0) / sumPlan;
+              newKh = qty3(qty * ratio);
+              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
+              allocated = qty3(allocated + newKh);
+            }
+            if (newKh < 0) newKh = 0;
+            if (Math.abs(newKh - (Number(g.plannedQty) || 0)) > 0.0001) {
+              await updateSheetRowByKey(
+                SHEETS.GH,
+                "ID_Giaohang",
+                g.deliveryId,
+                { KHgiao: newKh },
+                y
+              );
+              redistributed++;
+            }
+          }
+          // Đồng bộ SoLuong CT = tổng KHgiao sau phân bổ (≈ ThucNhan)
           await updateSheetRowByKey(
-            SHEETS.GH,
-            "ID_Giaohang",
-            deliveryId,
-            { KHgiao: newKh },
+            SHEETS.CT,
+            "ID_Chitiet",
+            detailId,
+            { SoLuong: qty },
             y
           );
-          redistributed++;
         }
+      } catch (e) {
+        console.error("[receiveDetail] redistribute GH", e);
       }
-      // Đồng bộ SoLuong CT = thực nhận khi lệch SoLuong đặt (giữ hành vi cũ)
-      if (planQty > 0 && Math.abs(qty - planQty) > 0.0001 && active.length) {
-        await updateSheetRowByKey(
-          SHEETS.CT,
-          "ID_Chitiet",
-          detailId,
-          { SoLuong: qty },
-          y
-        );
-      }
-    } catch (e) {
-      console.error("[receiveDetail] redistribute GH", e);
     }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
@@ -543,8 +555,9 @@ export class DetailService {
 
 
   /**
-   * Sửa hàng / khu vực / ghi chú / xe — V21 saveEditDetail + _updateDetailAndMarkResend_
+   * Sửa hàng / KV / ghi chú / xe / HTVT / ĐVT — V21 updateDetailEdit + _updateDetailAndMarkResend_
    * Đơn đã gửi + đổi field quan trọng → GuiLaimail=true (gửi lại NCC).
+   * THUE_NGOAI → upsert DonHang_VanTai (CT_VT); không thuê → xóa MaDVT trên CT_VT nếu có.
    */
   static async updateDetail(
     detailId: string,
@@ -554,6 +567,9 @@ export class DetailService {
       note?: string;
       vehicleId?: string;
       quantity?: number;
+      transportTypeId?: string;
+      transportTypeName?: string;
+      carrierId?: string;
     },
     user: UserContext,
     year?: number
@@ -573,6 +589,22 @@ export class DetailService {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
     }
 
+    // CT_VT hiện tại (MaDVT) — để so sánh đổi ĐVT
+    let oldCarrierId = String(oldCt.carrierId || "").trim();
+    if (!oldCarrierId) {
+      try {
+        const vtRows = await readSheetAsObjects(SHEETS.CT_VT, { year: y });
+        const vt = vtRows.find(
+          (r) =>
+            String(r.ID_Chitiet || r.id_chitiet || "").trim() ===
+            String(detailId).trim()
+        );
+        if (vt) oldCarrierId = String(vt.MaDVT || vt.maDVT || "").trim();
+      } catch {
+        /* ignore */
+      }
+    }
+
     const patch: Record<string, string | number | boolean> = {
       TimeChange: formatDateTimeVN(),
       User: user.email,
@@ -581,7 +613,12 @@ export class DetailService {
     if (payload.regionId !== undefined) patch.Khuvuc = payload.regionId;
     if (payload.note !== undefined) patch.GhiChu = payload.note;
     if (payload.vehicleId !== undefined) patch.MaXe = payload.vehicleId;
-    if (payload.quantity !== undefined) patch.SoLuong = qty3(Number(payload.quantity) || 0);
+    if (payload.quantity !== undefined)
+      patch.SoLuong = qty3(Number(payload.quantity) || 0);
+    if (payload.transportTypeId !== undefined)
+      patch.MaHTVT = payload.transportTypeId;
+    if (payload.transportTypeName !== undefined)
+      patch.TenHTVT = payload.transportTypeName;
 
     const changed = diffDetailMasterFields(
       {
@@ -590,6 +627,8 @@ export class DetailService {
         regionId: oldCt.regionId,
         note: oldCt.note,
         quantity: oldCt.quantity,
+        transportTypeId: oldCt.transportTypeId,
+        carrierId: oldCarrierId,
       },
       {
         vehicleId: payload.vehicleId,
@@ -598,6 +637,8 @@ export class DetailService {
         note: payload.note,
         quantity: payload.quantity,
         hasQuantity: payload.quantity !== undefined,
+        transportTypeId: payload.transportTypeId,
+        carrierId: payload.carrierId,
       }
     );
 
@@ -608,7 +649,69 @@ export class DetailService {
       patch,
       y
     );
-    if (row < 0) throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    if (row < 0)
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+
+    // DonHang_VanTai (CT_VT) — parity GAS updateDetailEdit
+    const nextHtvt = String(
+      payload.transportTypeId ?? oldCt.transportTypeId ?? ""
+    ).toUpperCase();
+    const nextVehicle = String(payload.vehicleId ?? oldCt.vehicleId ?? "").trim();
+    const nextCarrier =
+      payload.carrierId !== undefined
+        ? String(payload.carrierId || "").trim()
+        : oldCarrierId;
+    const isThue =
+      nextHtvt === "THUE_NGOAI" || nextHtvt.includes("THUE");
+    try {
+      const { appendSheetRow } = await import("@/lib/sheets/dal");
+      if (isThue && nextCarrier) {
+        const updated = await updateSheetRowByKey(
+          SHEETS.CT_VT,
+          "ID_Chitiet",
+          detailId,
+          {
+            MaXe: nextVehicle,
+            MaDVT: nextCarrier,
+            UpdatedAt: formatDateTimeVN(),
+            UpdatedBy: user.email,
+          },
+          y
+        );
+        if (updated < 0) {
+          await appendSheetRow(
+            SHEETS.CT_VT,
+            {
+              ID_Chitiet: detailId,
+              MaXe: nextVehicle,
+              MaDVT: nextCarrier,
+              UpdatedAt: formatDateTimeVN(),
+              UpdatedBy: user.email,
+            },
+            y
+          ).catch(() => undefined);
+        }
+      } else if (
+        payload.transportTypeId !== undefined ||
+        payload.carrierId !== undefined
+      ) {
+        // Không thuê / bỏ ĐVT → clear MaDVT trên CT_VT nếu còn dòng
+        await updateSheetRowByKey(
+          SHEETS.CT_VT,
+          "ID_Chitiet",
+          detailId,
+          {
+            MaXe: nextVehicle,
+            MaDVT: "",
+            UpdatedAt: formatDateTimeVN(),
+            UpdatedBy: user.email,
+          },
+          y
+        ).catch(() => -1);
+      }
+    } catch (e) {
+      console.warn("[DetailService.updateDetail] CT_VT sync failed", e);
+    }
 
     let resendMarked = false;
     let changedFields: string[] = [];
@@ -630,6 +733,8 @@ export class DetailService {
           Khuvuc: oldCt.regionId,
           GhiChu: oldCt.note,
           SoLuong: oldCt.quantity,
+          MaHTVT: oldCt.transportTypeId,
+          MaDVT: oldCarrierId,
         },
         newValue: {
           MaXe: payload.vehicleId ?? oldCt.vehicleId,
@@ -640,6 +745,8 @@ export class DetailService {
             payload.quantity !== undefined
               ? qty3(Number(payload.quantity) || 0)
               : oldCt.quantity,
+          MaHTVT: payload.transportTypeId ?? oldCt.transportTypeId,
+          MaDVT: payload.carrierId !== undefined ? nextCarrier : oldCarrierId,
         },
         year: y,
       });

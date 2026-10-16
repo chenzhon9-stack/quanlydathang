@@ -103,6 +103,8 @@ export function diffDetailMasterFields(
     regionId?: string;
     note?: string;
     quantity?: number;
+    transportTypeId?: string;
+    carrierId?: string;
   },
   newData: {
     vehicleId?: string;
@@ -111,6 +113,8 @@ export function diffDetailMasterFields(
     note?: string;
     quantity?: number;
     hasQuantity?: boolean;
+    transportTypeId?: string;
+    carrierId?: string;
   }
 ): string[] {
   const changed: string[] = [];
@@ -134,6 +138,18 @@ export function diffDetailMasterFields(
   }
   if (newData.note !== undefined && textDiff(oldCt.note, newData.note)) {
     changed.push("Ghi chú");
+  }
+  if (
+    newData.transportTypeId !== undefined &&
+    textDiff(oldCt.transportTypeId, newData.transportTypeId)
+  ) {
+    changed.push("Hình thức VT");
+  }
+  if (
+    newData.carrierId !== undefined &&
+    textDiff(oldCt.carrierId, newData.carrierId)
+  ) {
+    changed.push("Đơn vị VT");
   }
   if (
     (newData.hasQuantity || newData.quantity !== undefined) &&

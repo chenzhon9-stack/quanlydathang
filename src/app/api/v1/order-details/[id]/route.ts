@@ -5,7 +5,7 @@ import { success, error, jsonResponse } from "@/lib/api";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** PATCH /api/v1/order-details/:id — Sửa hàng / KV / ghi chú */
+/** PATCH /api/v1/order-details/:id — Sửa xe / HTVT / ĐVT / hàng / KV / ghi chú (parity V21 updateDetailEdit) */
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   try {
     const token =
@@ -20,9 +20,13 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const result = await DetailService.updateDetail(
       decodeURIComponent(id),
       {
+        vehicleId: body.vehicleId ?? body.maXe,
         productId: body.productId ?? body.maHH,
-        regionId: body.regionId ?? body.khuvuc,
+        regionId: body.regionId ?? body.khuvuc ?? body.Makv,
         note: body.note ?? body.ghiChu,
+        transportTypeId: body.transportTypeId ?? body.maHTVT,
+        transportTypeName: body.transportTypeName ?? body.tenHTVT,
+        carrierId: body.carrierId ?? body.maDVT,
       },
       user,
       year

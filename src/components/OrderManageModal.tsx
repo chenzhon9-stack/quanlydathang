@@ -5,11 +5,6 @@ import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
-import {
-  defaultPlanKhFromPhanLoai,
-  isAcghangBufferKh,
-  phanLoaiFromMasterRaw,
-} from "@/lib/default-plan-kh";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
 type GhRow = {
@@ -179,11 +174,22 @@ export function OrderManageModal({
             detailId: d.detailId,
             isNew: false,
             status: String(d.status || ""),
-            transportTypeId: (d as { transportTypeId?: string }).transportTypeId || "",
-            transportTypeName: (d as { transportTypeName?: string }).transportTypeName || "",
-            canChonDvt: false,
-            carrierId: "",
-            carrierName: "",
+            transportTypeId:
+              (d as { transportTypeId?: string }).transportTypeId || "",
+            transportTypeName:
+              (d as { transportTypeName?: string }).transportTypeName || "",
+            canChonDvt:
+              String(
+                (d as { transportTypeId?: string }).transportTypeId || ""
+              )
+                .toUpperCase()
+                .includes("THUE") || false,
+            carrierId:
+              (d as { carrierId?: string }).carrierId || "",
+            carrierName:
+              (d as { carrierName?: string }).carrierName ||
+              (d as { carrierId?: string }).carrierId ||
+              "",
             vehicleId: d.vehicleId || "",
             vehicleName: d.vehiclePlate || d.vehicleId || "",
             productId: d.productId || "",
@@ -313,7 +319,8 @@ export function OrderManageModal({
         setErr("Chọn hình thức vận tải cho mỗi xe");
         return;
       }
-      if (needsDvt(b.transportTypeId, b.canChonDvt) && !b.carrierId && b.isNew) {
+      // Parity GAS: THUE_NGOAI bắt buộc ĐVT cho cả xe mới và xe cũ khi còn sửa được
+      if (needsDvt(b.transportTypeId, b.canChonDvt) && !b.carrierId) {
         setErr("Thuê ngoài — chọn đơn vị vận tải");
         return;
       }
@@ -399,6 +406,10 @@ export function OrderManageModal({
               productId: b.productId,
               regionId: b.regionId,
               note: b.note,
+              // Parity GAS updateDetailEdit / saveOrderManager
+              transportTypeId: b.transportTypeId || "",
+              transportTypeName: b.transportTypeName || "",
+              carrierId: b.carrierId || "",
             }),
           }
         );
@@ -614,8 +625,9 @@ export function OrderManageModal({
           {!loading &&
             blocks.map((b, bi) => {
               const needCarrier = needsDvt(b.transportTypeId, b.canChonDvt);
+              // Parity GAS: chưa chọn HTVT / (THUE mà chưa ĐVT) → khóa chọn xe
               const xeDisabled =
-                !b.transportTypeId || (needCarrier && !b.carrierId && b.isNew);
+                !b.transportTypeId || (needCarrier && !b.carrierId);
               const khSum = b.deliveries.reduce(
                 (s, g) => s + parseDecimalVN(g.plannedQty),
                 0
@@ -813,31 +825,20 @@ export function OrderManageModal({
                         displayName={b.productName}
                         supplierId={order?.supplierId}
                         disabled={!editable || lockedRecv}
-                        onChange={(id, name, raw) => {
-                          const defKh = defaultPlanKhFromPhanLoai(
-                            phanLoaiFromMasterRaw(raw)
-                          );
+                        onChange={(id, name, raw) =>
                           setBlocks((rows) =>
-                            rows.map((x, i) => {
-                              if (i !== bi) return x;
-                              return {
-                                ...x,
-                                productId: id,
-                                productName: name,
-                                tyleChiahet: parseTyleChiahet(raw),
-                                deliveries: x.deliveries.map((g, gi) =>
-                                  gi === 0 && isAcghangBufferKh(g.customerId)
-                                    ? {
-                                        ...g,
-                                        customerId: defKh.id,
-                                        customerName: defKh.name,
-                                      }
-                                    : g
-                                ),
-                              };
-                            })
-                          );
-                        }}
+                            rows.map((x, i) =>
+                              i === bi
+                                ? {
+                                    ...x,
+                                    productId: id,
+                                    productName: name,
+                                    tyleChiahet: parseTyleChiahet(raw),
+                                  }
+                                : x
+                            )
+                          )
+                        }
                       />
                     </div>
                     <div>
