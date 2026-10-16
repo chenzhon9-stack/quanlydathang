@@ -39,6 +39,7 @@ import {
 import {
   defaultPlanKhFromPhanLoai,
   isAcghangBufferKh,
+  isAcghangId,
   resolveAcghangOnSave,
 } from "@/lib/default-plan-kh";
 
@@ -1077,10 +1078,33 @@ export class DeliveryService {
       throw { code: "VALIDATION_ERROR", message: "Phải có ít nhất 1 dòng giao hàng." };
     }
 
+    // Khách ảo: LoaiKhach=VIRTUAL (DM_KhachHang) hoặc khách đệm acghang/acghangB/acghangR
+    const virtualKh = new Set<string>();
+    try {
+      const khRows = await readSheetAsObjects(SHEETS.KH, {});
+      for (const r of khRows) {
+        if (String(r.LoaiKhach || "").trim().toUpperCase() === "VIRTUAL") {
+          virtualKh.add(String(r.MaKh || r.MaKH || "").trim().toLowerCase());
+        }
+      }
+    } catch {
+      /* optional */
+    }
+
     // Validate từng dòng TG > 0
     for (const item of list) {
       if (!item.customerId) {
         throw { code: "VALIDATION_ERROR", message: "Dòng giao hàng thiếu khách hàng." };
+      }
+      if (
+        item.actualQty > 0 &&
+        (isAcghangId(item.customerId) ||
+          virtualKh.has(item.customerId.trim().toLowerCase()))
+      ) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Không được giao hàng thực tế cho khách ảo.",
+        };
       }
       if (item.actualQty > 0) {
         const dateCheck = validateDeliveryDate({

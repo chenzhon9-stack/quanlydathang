@@ -70,3 +70,8 @@ export function resolveAcghangOnSave(
   return defaultPlanKhFromPhanLoai(phanLoai).id;
 }
 
+/** Khách đệm theo ĐÚNG mã (không coi mã trống là đệm) — dùng cho nghiệp vụ phân bổ / chặn giao thực tế. */
+export function isAcghangId(customerId: string | null | undefined): boolean {
+  const k = String(customerId ?? "").trim().toLowerCase();
+  return k === "acghang" || k === "acghangb" || k === "acghangr";
+}
