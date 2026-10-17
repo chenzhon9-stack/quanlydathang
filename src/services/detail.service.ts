@@ -24,6 +24,7 @@ import {
   isHangBao,
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
+import { reallocatePlanOnReceive } from "@/lib/plan-reallocate";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import {
   diffDetailMasterFields,
@@ -286,59 +287,52 @@ export class DetailService {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
     }
 
-    // Phân bổ lại KHgiao nếu lệch SoLuong (tỷ lệ; làm tròn qty3)
+    // Phân bổ lại KHgiao — V21 _phanBoLaiKeHoachGiao_: khách thật × tỷ lệ, khách đệm (acghang/B/R) nhận phần dư
     let redistributed = 0;
     const planQty = qty3(Number(ct.quantity) || 0);
-    if (planQty > 0 && Math.abs(qty - planQty) > 0.0001) {
-      try {
-        const { DeliveryRepository } = await import(
-          "@/repositories/delivery.repository"
-        );
-        const ghs = await DeliveryRepository.findMany({
-          year: y,
-          detailId,
-          includeDeleted: false,
-        });
-        const active = ghs.filter((g) => !g.deleted);
-        const sumPlan = active.reduce((s, g) => s + (Number(g.plannedQty) || 0), 0);
-        if (active.length && sumPlan > 0) {
-          let allocated = 0;
-          for (let i = 0; i < active.length; i++) {
-            const g = active[i];
-            let newKh: number;
-            if (i === active.length - 1) {
-              newKh = qty3(qty - allocated);
-              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
-            } else {
-              const ratio = (Number(g.plannedQty) || 0) / sumPlan;
-              newKh = qty3(qty * ratio);
-              if (tyleChiahet > 0) newKh = roundToStep(newKh, tyleChiahet);
-              allocated = qty3(allocated + newKh);
-            }
-            if (newKh < 0) newKh = 0;
-            if (Math.abs(newKh - (Number(g.plannedQty) || 0)) > 0.0001) {
-              await updateSheetRowByKey(
-                SHEETS.GH,
-                "ID_Giaohang",
-                g.deliveryId,
-                { KHgiao: newKh },
-                y
-              );
-              redistributed++;
-            }
-          }
-          // Đồng bộ SoLuong CT = tổng KHgiao sau phân bổ (≈ ThucNhan)
+    try {
+      const { DeliveryRepository } = await import(
+        "@/repositories/delivery.repository"
+      );
+      const ghs = await DeliveryRepository.findMany({
+        year: y,
+        detailId,
+        includeDeleted: false,
+      });
+      const active = ghs.filter((g) => !g.deleted);
+      const plan = reallocatePlanOnReceive(
+        active.map((g) => ({
+          id: g.deliveryId,
+          customerId: String(g.customerId || ""),
+          planned: Number(g.plannedQty) || 0,
+        })),
+        qty,
+        tyleChiahet
+      );
+      if (plan && plan.size > 0) {
+        for (const [deliveryId, newKh] of plan) {
           await updateSheetRowByKey(
-            SHEETS.CT,
-            "ID_Chitiet",
-            detailId,
-            { SoLuong: qty },
+            SHEETS.GH,
+            "ID_Giaohang",
+            deliveryId,
+            { KHgiao: newKh },
             y
           );
+          redistributed++;
         }
-      } catch (e) {
-        console.error("[receiveDetail] redistribute GH", e);
       }
+      // Đồng bộ SoLuong CT = thực nhận khi lệch SoLuong đặt
+      if (planQty > 0 && Math.abs(qty - planQty) > 0.0001 && active.length) {
+        await updateSheetRowByKey(
+          SHEETS.CT,
+          "ID_Chitiet",
+          detailId,
+          { SoLuong: qty },
+          y
+        );
+      }
+    } catch (e) {
+      console.error("[receiveDetail] redistribute GH", e);
     }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);
