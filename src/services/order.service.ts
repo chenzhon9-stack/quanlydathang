@@ -22,7 +22,6 @@ import { appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import { STATUS_DON, STATUS_CT } from "@/lib/status";
 import { canResetOrder, isDuyenHaNcc, businessDayDiff, lateThresholdDays } from "@/lib/order-reset";
 import { syncOrderStatusByOrderId } from "@/lib/sync-order-status";
-import { resolveAcghangOnSave } from "@/lib/default-plan-kh";
 
 export interface OrderListFilter {
   year?: number;
@@ -453,11 +452,27 @@ export class OrderService {
       }
     }
 
-    // 2) Hủy CT — V21 _cancelOrderCore_ KHÔNG soft-delete GH (xe Hủy vẫn hiện ở tab Giao hàng/Excel)
+    // 2) Soft-delete GH + hủy CT
     let cancelledCt = 0;
-    const deletedGh = 0;
+    let deletedGh = 0;
     const now = formatDateTimeVN();
     for (const d of activeDetails) {
+      const ghs = await DeliveryRepository.findMany({
+        year: y,
+        detailId: d.detailId,
+        includeDeleted: false,
+      });
+      for (const g of ghs) {
+        const r = await updateSheetRowByKey(
+          SHEETS.GH,
+          "ID_Giaohang",
+          g.deliveryId,
+          { Deleted: true, DeletedAt: now, DeletedBy: user.email },
+          y
+        );
+        if (r > 0) deletedGh++;
+      }
+
       const r = await updateSheetRowByKey(
         SHEETS.CT,
         "ID_Chitiet",
@@ -527,59 +542,7 @@ export class OrderService {
     let notifyFailed = false;
     let notifyNote = "";
     if (channel === "app" && wasEverSent && !isExpired) {
-      // V21: cancelOrder → xuLyDonHang_ → finalize: LanGui+1, timeGuimail, snapshot, LogGuiMail (APP không gửi mail/Zalo)
-      try {
-        const lanGuiNext = (Number(order.sendCount) || 0) + 1;
-        const timeLabel = formatDateTimeVN(new Date());
-        await updateSheetRowByKey(
-          SHEETS.DH,
-          "MaDon",
-          orderId,
-          { LanGui: lanGuiNext, timeGuimail: timeLabel, ChoGuiMail: false, GuiLaimail: false },
-          y
-        );
-        try {
-          await appendSheetRow(
-            SHEETS.SNAPSHOT,
-            {
-              MaDon: orderId,
-              LanGui: lanGuiNext,
-              SnapshotJSON: JSON.stringify({
-                maDon: orderId,
-                lanGui: lanGuiNext,
-                channel: "app",
-                sendAction: "cancel",
-                at: new Date().toISOString(),
-                by: user.email,
-              }),
-              ThoiGianLuu: timeLabel,
-            },
-            y
-          );
-        } catch (e) {
-          console.warn("[cancelOrder APP] snapshot skip", e);
-        }
-        try {
-          await appendSheetRow(
-            SHEETS.LOG_GUI_MAIL,
-            {
-              "Thời gian": timeLabel,
-              MaDon: orderId,
-              NCC: order.supplierName || order.supplierId || "",
-              Email: "",
-              "Lần gửi": lanGuiNext,
-              "Ghi chú": "Hủy toàn bộ",
-              "Link PDF": order.orderFile || "",
-            },
-            y
-          );
-        } catch (e) {
-          console.warn("[cancelOrder APP] LogGuiMail skip", e);
-        }
-      } catch (e) {
-        console.warn("[cancelOrder APP] finalize skip", e);
-      }
-      notifyNote = `Hình thức APP (${hinhThucGui || "APP"}) — không gửi mail/Zalo hủy cho NCC (đã ghi nhận lần gửi hủy).`;
+      notifyNote = `Hình thức APP (${hinhThucGui || "APP"}) — không gửi mail/Zalo hủy cho NCC.`;
     } else if (shouldNotifyNcc) {
       if (gasWebhookUrl()) {
         const gas = await gasSendOrderFromWebhook(
@@ -810,23 +773,6 @@ export class OrderService {
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
-    // PhanLoaiHH theo MaHH — resolve acghang → B/R khi ghi GH
-    let hhPhanLoaiByProduct: Record<string, string> = {};
-    try {
-      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
-      for (const r of hhRows) {
-        const mid = String(r.MaHH || (r as { MaHh?: string }).MaHh || "")
-          .trim()
-          .toUpperCase();
-        if (!mid) continue;
-        hhPhanLoaiByProduct[mid] = String(
-          r.PhanLoaiHH || r.PhanLoai || (r as { phanLoai?: string }).phanLoai || ""
-        );
-      }
-    } catch {
-      hhPhanLoaiByProduct = {};
-    }
-
     const deliveryIds = await nextCounterCodes("GH", ngayDat, {
       count: totalGh,
       email: user.email,
@@ -917,10 +863,7 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: resolveAcghangOnSave(
-              dl.customerId,
-              hhPhanLoaiByProduct[String(d.productId || "").trim().toUpperCase()] || ""
-            ),
+            MaKh: dl.customerId,
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,
@@ -1178,23 +1121,6 @@ export class OrderService {
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
-    // PhanLoaiHH theo MaHH — resolve acghang → B/R khi ghi GH
-    let hhPhanLoaiByProduct: Record<string, string> = {};
-    try {
-      const hhRows = await readSheetAsObjects(SHEETS.HH, {});
-      for (const r of hhRows) {
-        const mid = String(r.MaHH || (r as { MaHh?: string }).MaHh || "")
-          .trim()
-          .toUpperCase();
-        if (!mid) continue;
-        hhPhanLoaiByProduct[mid] = String(
-          r.PhanLoaiHH || r.PhanLoai || (r as { phanLoai?: string }).phanLoai || ""
-        );
-      }
-    } catch {
-      hhPhanLoaiByProduct = {};
-    }
-
     const deliveryIds = await nextCounterCodes("GH", ngayDat, {
       count: totalGh,
       email: user.email,
@@ -1248,10 +1174,7 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: resolveAcghangOnSave(
-              dl.customerId,
-              hhPhanLoaiByProduct[String(d.productId || "").trim().toUpperCase()] || ""
-            ),
+            MaKh: dl.customerId,
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,
@@ -1425,10 +1348,7 @@ export class OrderService {
         "nhà cung cấp";
       const lanGuiCur = Number(orderApp.sendCount) || 0;
       const isDha = isDuyenHaNcc(orderApp.supplierId);
-      const dayDiff = businessDayDiff(
-        String(orderApp.orderDateTime || orderApp.orderDate || ""),
-        isDha
-      );
+      const dayDiff = businessDayDiff(orderApp.orderDate, isDha);
       const lateFirst =
         lanGuiCur === 0 && dayDiff !== null && dayDiff >= 1;
 
@@ -2167,9 +2087,12 @@ export class OrderService {
       };
     }
 
+    // Parity GAS resetOrder: now = _nowHcm_(); NgayDatHang + MaDon từ cùng mốc có giờ
+    // (không dùng todayYmdVN → Sheet serial 00:00:00 làm lệch mã đơn / business day / gửi)
     const now = new Date();
-    const clock = resolveMaDonClock(order.supplierId, now);
-    let newMaDon = generateMaDon(order.supplierId, clock);
+    const newNgayDatHang = formatDateTimeVN(now); // yyyy-MM-dd HH:mm:ss (Asia/Ho_Chi_Minh)
+    const clock = resolveMaDonClock(order.supplierId, newNgayDatHang);
+    let newMaDon = generateMaDon(order.supplierId, newNgayDatHang);
     const existing = new Set(orders.map((o) => String(o.orderId)));
     for (let i = 0; i < 30 && existing.has(newMaDon); i++) {
       const d = new Date(clock.getTime() + (i + 1) * 1000);
@@ -2182,8 +2105,7 @@ export class OrderService {
       };
     }
 
-    const timeLabel = formatDateTimeVN(new Date());
-    const newNgay = todayYmdVN();
+    const timeLabel = newNgayDatHang;
 
     if (daNhanHoacHuy.length === 0) {
       await updateSheetRowByKey(
@@ -2192,7 +2114,7 @@ export class OrderService {
         orderId,
         {
           MaDon: newMaDon,
-          NgayDatHang: newNgay,
+          NgayDatHang: newNgayDatHang,
           LanGui: 0,
           TrangThaiDon: STATUS_DON.NEW,
           ChoGuiMail: true,
@@ -2211,7 +2133,7 @@ export class OrderService {
           ct.detailId,
           {
             MaDon: newMaDon,
-            NgayDatHang: newNgay,
+            NgayDatHang: newNgayDatHang,
             TrangThaiXe: STATUS_CT.NEW,
             TimeChange: timeLabel,
           },
@@ -2236,15 +2158,7 @@ export class OrderService {
     {
       const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
       if (channel === "app") {
-        // V21: _xuLyDonHangNoLock_ với APP không gửi gì nhưng vẫn chốt LanGui=1 + CT Đã đặt + snapshot + log
-        try {
-          await OrderService.sendOrder(newMaDon, user, y, "send");
-          sentToNcc = true;
-          sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — đơn mới ${newMaDon} đã chốt gửi (Lần 1), mở app NCC để đặt hàng.`;
-        } catch (e) {
-          const m = e instanceof Error ? e.message : String((e as { message?: string })?.message || e);
-          sendNote = `Đã tạo ${newMaDon}; chốt gửi APP thất bại: ${m} — bấm Gửi trên danh sách đơn.`;
-        }
+        sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — mở app NCC để đặt đơn mới ${newMaDon}.`;
       } else if (gasWebhookUrl()) {
         const gas = await gasSendOrderFromWebhook(
           newMaDon,
@@ -2273,12 +2187,12 @@ export class OrderService {
       };
     }
 
-    // Partial
+    // Partial — cùng newNgayDatHang (full datetime lúc reset)
     await appendSheetRow(
       SHEETS.DH,
       {
         MaDon: newMaDon,
-        NgayDatHang: newNgay,
+        NgayDatHang: newNgayDatHang,
         MaNCC: order.supplierId,
         LanGui: 0,
         TrangThaiDon: STATUS_DON.NEW,
@@ -2299,7 +2213,7 @@ export class OrderService {
         ct.detailId,
         {
           MaDon: newMaDon,
-          NgayDatHang: newNgay,
+          NgayDatHang: newNgayDatHang,
           TrangThaiXe: STATUS_CT.NEW,
           TimeChange: timeLabel,
         },
@@ -2318,6 +2232,8 @@ export class OrderService {
       {
         TongSoChitiet: daNhanHoacHuy.length,
         ChitietHuy: keptHuy,
+        ChoGuiMail: false,
+        GuiLaimail: false,
       },
       y
     );
@@ -2349,15 +2265,7 @@ export class OrderService {
     {
       const { channel, hinhThucGui } = await resolveNccChannel(order.supplierId);
       if (channel === "app") {
-        // V21: _xuLyDonHangNoLock_ với APP không gửi gì nhưng vẫn chốt LanGui=1 + CT Đã đặt + snapshot + log
-        try {
-          await OrderService.sendOrder(newMaDon, user, y, "send");
-          sentToNcc = true;
-          sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — đơn mới ${newMaDon} đã chốt gửi (Lần 1), mở app NCC để đặt hàng.`;
-        } catch (e) {
-          const m = e instanceof Error ? e.message : String((e as { message?: string })?.message || e);
-          sendNote = `Đã tạo ${newMaDon}; chốt gửi APP thất bại: ${m} — bấm Gửi trên danh sách đơn.`;
-        }
+        sendNote = `Hình thức APP (${hinhThucGui || "APP"}) — mở app NCC để đặt đơn mới ${newMaDon}.`;
       } else if (gasWebhookUrl()) {
         const gas = await gasSendOrderFromWebhook(
           newMaDon,
