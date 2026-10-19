@@ -17,7 +17,33 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params;
     const body = await req.json().catch(() => ({}));
     const year = body.year ? Number(body.year) : new Date().getFullYear();
-    const rows = Array.isArray(body.rows) ? body.rows : [];
+    // OrderManageModal gửi `deliveries`; DeliveryEditorModal gửi `rows`
+    const rawRows = Array.isArray(body.rows)
+      ? body.rows
+      : Array.isArray(body.deliveries)
+        ? body.deliveries
+        : [];
+    const rows = rawRows.map(
+      (r: {
+        deliveryId?: string;
+        idGh?: string;
+        customerId?: string;
+        maKh?: string;
+        customerDetail?: string;
+        chitietKh?: string;
+        plannedQty?: number;
+        khGiao?: number;
+        note?: string;
+        _delete?: boolean;
+      }) => ({
+        deliveryId: r.deliveryId || r.idGh,
+        customerId: r.customerId || r.maKh || "",
+        customerDetail: r.customerDetail ?? r.chitietKh ?? "",
+        plannedQty: Number(r.plannedQty ?? r.khGiao) || 0,
+        note: r.note,
+        _delete: r._delete,
+      })
+    );
     const result = await DeliveryService.savePlan(
       decodeURIComponent(id),
       rows,

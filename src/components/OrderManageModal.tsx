@@ -5,11 +5,6 @@ import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
-import {
-  defaultPlanKhFromPhanLoai,
-  isAcghangBufferKh,
-  phanLoaiFromMasterRaw,
-} from "@/lib/default-plan-kh";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
 type GhRow = {
@@ -423,6 +418,13 @@ export function OrderManageModal({
           throw new Error(jp.error?.message || "Lỗi cập nhật chi tiết");
         }
 
+        // API plan đọc `rows` (DeliveryEditorModal); giữ alias deliveries để tương thích
+        const planRows = b.deliveries.map((g) => ({
+          deliveryId: g.isNew || !g.idGh ? undefined : g.idGh,
+          customerId: g.customerId,
+          customerDetail: g.customerDetail || "",
+          plannedQty: parseDecimalVN(g.plannedQty),
+        }));
         const resPlan = await fetch(
           `/api/v1/order-details/${encodeURIComponent(b.detailId)}/plan`,
           {
@@ -430,12 +432,8 @@ export function OrderManageModal({
             headers,
             body: JSON.stringify({
               year,
-              deliveries: b.deliveries.map((g) => ({
-                deliveryId: g.isNew ? undefined : g.idGh,
-                customerId: g.customerId,
-                customerDetail: g.customerDetail || "",
-                plannedQty: parseDecimalVN(g.plannedQty),
-              })),
+              rows: planRows,
+              deliveries: planRows,
             }),
           }
         );
@@ -830,32 +828,20 @@ export function OrderManageModal({
                         displayName={b.productName}
                         supplierId={order?.supplierId}
                         disabled={!editable || lockedRecv}
-                        onChange={(id, name, raw) => {
-                          // KH mặc định theo PhanLoaiHH: Bao→acghangB, Rời→acghangR
-                          const defKh = defaultPlanKhFromPhanLoai(
-                            phanLoaiFromMasterRaw(raw)
-                          );
+                        onChange={(id, name, raw) =>
                           setBlocks((rows) =>
-                            rows.map((x, i) => {
-                              if (i !== bi) return x;
-                              return {
-                                ...x,
-                                productId: id,
-                                productName: name,
-                                tyleChiahet: parseTyleChiahet(raw),
-                                deliveries: x.deliveries.map((g, gi) =>
-                                  gi === 0 && isAcghangBufferKh(g.customerId)
-                                    ? {
-                                        ...g,
-                                        customerId: defKh.id,
-                                        customerName: defKh.name,
-                                      }
-                                    : g
-                                ),
-                              };
-                            })
-                          );
-                        }}
+                            rows.map((x, i) =>
+                              i === bi
+                                ? {
+                                    ...x,
+                                    productId: id,
+                                    productName: name,
+                                    tyleChiahet: parseTyleChiahet(raw),
+                                  }
+                                : x
+                            )
+                          )
+                        }
                       />
                     </div>
                     <div>
