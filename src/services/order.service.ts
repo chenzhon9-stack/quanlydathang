@@ -687,8 +687,8 @@ export class OrderService {
 
     const { ymdDate } = await import("@/lib/sheets/date");
     const { generateUniqueMaDon } = await import("@/lib/sheets/ma-don");
-    const { nextCounterCodes } = await import("@/lib/sheets/counter");
-    const { appendSheetRow, readSheetAsObjects } = await import(
+    const { nextCounterCodesMulti } = await import("@/lib/sheets/counter");
+    const { appendSheetRows, readSheetAsObjects, prefetchSheetHeaders } = await import(
       "@/lib/sheets/dal"
     );
     const { qty3, validateStep } = await import("@/lib/business-rules");
@@ -772,43 +772,29 @@ export class OrderService {
     const isDuyenHa =
       ["dha", "btay"].includes(maNcc.toLowerCase());
 
-    const detailIds = await nextCounterCodes("CT", ngayDat, {
-      count: details.length,
-      email: user.email,
-      year: y,
-    });
     const totalGh = details.reduce(
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
-    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
-      count: totalGh,
-      email: user.email,
-      year: y,
-    });
+    // Nạp header các sheet sẽ ghi bằng 1 lời gọi; cấp CT + GH trong 1 lần khóa counter
+    await prefetchSheetHeaders(
+      [SHEETS.DH, SHEETS.CT, SHEETS.CT_VT, SHEETS.GH, SHEETS.AUDIT, SHEETS.COUNTER],
+      y
+    ).catch(() => undefined);
+    const [detailIds, deliveryIds] = await nextCounterCodesMulti(
+      [
+        { type: "CT", dateValue: ngayDat, count: details.length },
+        { type: "GH", dateValue: ngayDat, count: totalGh },
+      ],
+      { email: user.email, year: y }
+    );
 
     const now = formatDateTimeVN();
     let ghIndex = 0;
-
-    // DonHang
-    await appendSheetRow(
-      SHEETS.DH,
-      {
-        MaDon: maDon,
-        NgayDatHang: ngayDat,
-        MaNCC: maNcc,
-        LanGui: 0,
-        TrangThaiDon: STATUS_DON.NEW,
-        TongSoChitiet: details.length,
-        ChitietHuy: 0,
-        FileDonhang: "",
-        ChoGuiMail: false,
-        timeGuimail: "",
-        GuiLaimail: false,
-        User: user.email,
-      },
-      y
-    );
+    type Row = Record<string, string | number | boolean>;
+    const ctRows: Row[] = [];
+    const vtRows: Row[] = [];
+    const ghRows: Row[] = [];
 
     for (let idx = 0; idx < details.length; idx++) {
       const d = details[idx];
@@ -820,44 +806,36 @@ export class OrderService {
         )
       );
 
-      await appendSheetRow(
-        SHEETS.CT,
-        {
-          ID_Chitiet: idCt,
-          NgayDatHang: ngayDat,
-          MaDon: maDon,
-          MaNCC: maNcc,
-          MaXe: d.vehicleId,
-          MaHH: d.productId,
-          SoLuong: khTotal,
-          Khuvuc: d.regionId,
-          KhoXuat: "",
-          GhiChu: d.note || "",
-          TrangThaiXe: STATUS_CT.NEW,
-          TimeChange: now,
-          NgayNhanHang: "",
-          ThucNhan: 0,
-          User: user.email,
-          MaHTVT: d.transportTypeId || "",
-          TenHTVT: d.transportTypeName || "",
-          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
-        },
-        y
-      );
+      ctRows.push({
+        ID_Chitiet: idCt,
+        NgayDatHang: ngayDat,
+        MaDon: maDon,
+        MaNCC: maNcc,
+        MaXe: d.vehicleId,
+        MaHH: d.productId,
+        SoLuong: khTotal,
+        Khuvuc: d.regionId,
+        KhoXuat: "",
+        GhiChu: d.note || "",
+        TrangThaiXe: STATUS_CT.NEW,
+        TimeChange: now,
+        NgayNhanHang: "",
+        ThucNhan: 0,
+        User: user.email,
+        MaHTVT: d.transportTypeId || "",
+        TenHTVT: d.transportTypeName || "",
+        IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
+      });
 
-      // DonHang_VanTai nếu thuê ngoài (lỗi ghi → báo lỗi, không nuốt)
+      // DonHang_VanTai nếu thuê ngoài
       if (isThueNgoaiHtvt(d.transportTypeId) && d.carrierId) {
-        await appendSheetRow(
-          SHEETS.CT_VT,
-          {
-            ID_Chitiet: idCt,
-            MaXe: d.vehicleId,
-            MaDVT: d.carrierId,
-            UpdatedAt: now,
-            UpdatedBy: user.email,
-          },
-          y
-        );
+        vtRows.push({
+          ID_Chitiet: idCt,
+          MaXe: d.vehicleId,
+          MaDVT: d.carrierId,
+          UpdatedAt: now,
+          UpdatedBy: user.email,
+        });
       }
 
       const phanLoaiCt = String(
@@ -866,26 +844,46 @@ export class OrderService {
           ""
       );
       for (const dl of d.deliveries || []) {
-        const idGh = deliveryIds[ghIndex++];
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: idCt,
-            MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
-            ChitietKh: dl.customerDetail || "",
-            KHgiao: qty3(Number(dl.plannedQty) || 0),
-            ThucGiao: 0,
-            Ngaygiao: "",
-            Ghichu: "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
+        ghRows.push({
+          ID_Giaohang: deliveryIds[ghIndex++],
+          ID_Chitiet: idCt,
+          MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
+          ChitietKh: dl.customerDetail || "",
+          KHgiao: qty3(Number(dl.plannedQty) || 0),
+          ThucGiao: 0,
+          Ngaygiao: "",
+          Ghichu: "",
+          Deleted: false,
+          DeletedAt: "",
+          DeletedBy: "",
+        });
       }
     }
+
+    // Ghi theo lô: DH → CT → CT_VT → GH (mỗi bảng 1 lời gọi append)
+    await appendSheetRows(
+      SHEETS.DH,
+      [
+        {
+          MaDon: maDon,
+          NgayDatHang: ngayDat,
+          MaNCC: maNcc,
+          LanGui: 0,
+          TrangThaiDon: STATUS_DON.NEW,
+          TongSoChitiet: details.length,
+          ChitietHuy: 0,
+          FileDonhang: "",
+          ChoGuiMail: false,
+          timeGuimail: "",
+          GuiLaimail: false,
+          User: user.email,
+        },
+      ],
+      y
+    );
+    await appendSheetRows(SHEETS.CT, ctRows, y);
+    if (vtRows.length) await appendSheetRows(SHEETS.CT_VT, vtRows, y);
+    await appendSheetRows(SHEETS.GH, ghRows, y);
 
     try {
       const { writeAudit } = await import("@/lib/sheets/audit");
@@ -1036,8 +1034,8 @@ export class OrderService {
     const { ymdDate, formatDateTimeVN, parseLocalDate } = await import(
       "@/lib/sheets/date"
     );
-    const { nextCounterCodes } = await import("@/lib/sheets/counter");
-    const { appendSheetRow, readSheetAsObjects } = await import(
+    const { nextCounterCodesMulti } = await import("@/lib/sheets/counter");
+    const { appendSheetRows, readSheetAsObjects, prefetchSheetHeaders } = await import(
       "@/lib/sheets/dal"
     );
     const { qty3, validateStep } = await import("@/lib/business-rules");
@@ -1134,24 +1132,29 @@ export class OrderService {
       }
     }
 
-    const detailIds = await nextCounterCodes("CT", ngayDat, {
-      count: details.length,
-      email: user.email,
-      year: y,
-    });
     const totalGh = details.reduce(
       (s, d) => s + (d.deliveries?.length || 0),
       0
     );
-    const deliveryIds = await nextCounterCodes("GH", ngayDat, {
-      count: totalGh,
-      email: user.email,
-      year: y,
-    });
+    await prefetchSheetHeaders(
+      [SHEETS.CT, SHEETS.CT_VT, SHEETS.GH, SHEETS.AUDIT, SHEETS.COUNTER],
+      y
+    ).catch(() => undefined);
+    const [detailIds, deliveryIds] = await nextCounterCodesMulti(
+      [
+        { type: "CT", dateValue: ngayDat, count: details.length },
+        { type: "GH", dateValue: ngayDat, count: totalGh },
+      ],
+      { email: user.email, year: y }
+    );
 
     const now = formatDateTimeVN();
     let ghIndex = 0;
     const createdCt: string[] = [];
+    type Row = Record<string, string | number | boolean>;
+    const ctRows: Row[] = [];
+    const vtRows: Row[] = [];
+    const ghRows: Row[] = [];
 
     for (let idx = 0; idx < details.length; idx++) {
       const d = details[idx];
@@ -1163,45 +1166,37 @@ export class OrderService {
         )
       );
 
-      await appendSheetRow(
-        SHEETS.CT,
-        {
-          ID_Chitiet: idCt,
-          NgayDatHang: ngayDatHangCt,
-          MaDon: orderId,
-          MaNCC: maNcc,
-          MaXe: d.vehicleId,
-          MaHH: d.productId,
-          SoLuong: khTotal,
-          Khuvuc: d.regionId,
-          KhoXuat: "",
-          GhiChu: d.note || "",
-          TrangThaiXe: STATUS_CT.NEW,
-          TimeChange: now,
-          NgayNhanHang: "",
-          ThucNhan: 0,
-          User: user.email,
-          MaHTVT: d.transportTypeId || "",
-          TenHTVT: d.transportTypeName || "",
-          IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
-        },
-        y
-      );
+      ctRows.push({
+        ID_Chitiet: idCt,
+        NgayDatHang: ngayDatHangCt,
+        MaDon: orderId,
+        MaNCC: maNcc,
+        MaXe: d.vehicleId,
+        MaHH: d.productId,
+        SoLuong: khTotal,
+        Khuvuc: d.regionId,
+        KhoXuat: "",
+        GhiChu: d.note || "",
+        TrangThaiXe: STATUS_CT.NEW,
+        TimeChange: now,
+        NgayNhanHang: "",
+        ThucNhan: 0,
+        User: user.email,
+        MaHTVT: d.transportTypeId || "",
+        TenHTVT: d.transportTypeName || "",
+        IsDuyenHa: isDuyenHa ? "TRUE" : "FALSE",
+      });
       createdCt.push(idCt);
 
       // DonHang_VanTai nếu thuê ngoài (parity createOrder / GAS)
       if (isThueNgoaiHtvt(d.transportTypeId) && d.carrierId) {
-        await appendSheetRow(
-          SHEETS.CT_VT,
-          {
-            ID_Chitiet: idCt,
-            MaXe: d.vehicleId,
-            MaDVT: d.carrierId,
-            UpdatedAt: now,
-            UpdatedBy: user.email,
-          },
-          y
-        );
+        vtRows.push({
+          ID_Chitiet: idCt,
+          MaXe: d.vehicleId,
+          MaDVT: d.carrierId,
+          UpdatedAt: now,
+          UpdatedBy: user.email,
+        });
       }
 
       const phanLoaiCt = String(
@@ -1210,26 +1205,26 @@ export class OrderService {
           ""
       );
       for (const dl of d.deliveries || []) {
-        const idGh = deliveryIds[ghIndex++];
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: idCt,
-            MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
-            ChitietKh: dl.customerDetail || "",
-            KHgiao: qty3(Number(dl.plannedQty) || 0),
-            ThucGiao: 0,
-            Ngaygiao: "",
-            Ghichu: "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
+        ghRows.push({
+          ID_Giaohang: deliveryIds[ghIndex++],
+          ID_Chitiet: idCt,
+          MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
+          ChitietKh: dl.customerDetail || "",
+          KHgiao: qty3(Number(dl.plannedQty) || 0),
+          ThucGiao: 0,
+          Ngaygiao: "",
+          Ghichu: "",
+          Deleted: false,
+          DeletedAt: "",
+          DeletedBy: "",
+        });
       }
     }
+
+    // Ghi theo lô: CT → CT_VT → GH
+    await appendSheetRows(SHEETS.CT, ctRows, y);
+    if (vtRows.length) await appendSheetRows(SHEETS.CT_VT, vtRows, y);
+    await appendSheetRows(SHEETS.GH, ghRows, y);
 
     // Cập nhật TongSoChitiet
     const newTong = active.length + details.length;

@@ -12,7 +12,12 @@ import {
 import { DeliveryRepository } from "@/repositories/delivery.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
-import { updateSheetRowByKey, appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
+import {
+  updateSheetRowByKey,
+  updateSheetRowsByKey,
+  appendSheetRows,
+  readSheetAsObjects,
+} from "@/lib/sheets/dal";
 import {
   qty3,
   validateStep,
@@ -29,7 +34,7 @@ import { todayYmdVN, STATUS_CT } from "@/lib/status";
 import { DetailRepository } from "@/repositories/detail.repository";
 import { OrderRepository } from "@/repositories/order.repository";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
-import { newDeliveryId, isTempClientId } from "@/lib/sheets/counter";
+import { nextCounterCodes, isTempClientId } from "@/lib/sheets/counter";
 import {ymdDate, formatDateTimeVN, currentYearVN, defaultListDateRange} from "@/lib/sheets/date";
 import {
   markOrderResendIfSent,
@@ -831,20 +836,21 @@ export class DeliveryService {
 
     const now = new Date();
 
+    type GhOp = { key: string; patch: Record<string, string | number | boolean> };
+    const updateOps: GhOp[] = [];
+    const deleteKeys: string[] = [];
+    const createDefs: Array<{
+      maKh: string;
+      customerDetail: string;
+      khg: number;
+      note: string;
+    }> = [];
+    const nowStr = formatDateTimeVN(now);
+
+    // Pass 1: kiểm tra + phân loại toàn bộ (chưa ghi gì — lỗi không để lại dữ liệu dở dang)
     for (const r of rows) {
       if (r._delete && r.deliveryId) {
-        const row = await updateSheetRowByKey(
-          SHEETS.GH,
-          "ID_Giaohang",
-          r.deliveryId,
-          {
-            Deleted: true,
-            DeletedAt: formatDateTimeVN(now),
-            DeletedBy: user.email,
-          },
-          y
-        );
-        if (row > 0) deleted++;
+        deleteKeys.push(r.deliveryId);
         continue;
       }
       const maKh = resolveAcghangOnSave(
@@ -865,11 +871,9 @@ export class DeliveryService {
         };
       }
       if (r.deliveryId && !isTempClientId(r.deliveryId) && existingIds.has(r.deliveryId)) {
-        await updateSheetRowByKey(
-          SHEETS.GH,
-          "ID_Giaohang",
-          r.deliveryId,
-          {
+        updateOps.push({
+          key: r.deliveryId,
+          patch: {
             MaKh: maKh,
             ChitietKh: r.customerDetail || "",
             KHgiao: khg,
@@ -877,77 +881,84 @@ export class DeliveryService {
             Ngaygiao: "",
             Ghichu: r.note || "",
           },
-          y
-        );
+        });
         keepIds.add(r.deliveryId);
         updated++;
       } else {
-        // Cấp mã GH theo ngày đặt CT (không theo ngày lưu / ngày giao)
-        const idGh = await newDeliveryId(
-          orderDateForId || ymdDate(new Date()) || undefined,
-          {
-            email: user.email,
-            year: y,
-          }
-        );
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: detailId,
-            MaKh: maKh,
-            ChitietKh: r.customerDetail || "",
-            KHgiao: khg,
-            ThucGiao: 0,
-            Ngaygiao: "",
-            Ghichu: r.note || "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
-        keepIds.add(idGh);
-        created++;
+        createDefs.push({
+          maKh,
+          customerDetail: r.customerDetail || "",
+          khg,
+          note: r.note || "",
+        });
       }
     }
 
-    // Soft-delete existing not in keepIds (khi client gửi full list)
+    // GH hiện có không còn trong danh sách gửi lên → xóa mềm (khi client gửi full list)
     for (const e of existing) {
       // Sales-only: không xóa GH của khách ngoài nhóm quản lý
       if (allowedKhPlan && !customerAllowed(e.customerId, allowedKhPlan)) continue;
       if (!keepIds.has(e.deliveryId) && !rows.some((r) => r._delete && r.deliveryId === e.deliveryId)) {
-        // only auto-delete if client sent at least one keep row or empty intentional
-        // Skip auto-delete if rows empty? safer: auto-delete orphans when full replace
         if (rows.length > 0 && !rows.some((r) => r.deliveryId === e.deliveryId || r._delete)) {
-          const row = await updateSheetRowByKey(
-            SHEETS.GH,
-            "ID_Giaohang",
-            e.deliveryId,
-            {
-              Deleted: true,
-              DeletedAt: formatDateTimeVN(now),
-              DeletedBy: user.email,
-            },
-            y
-          );
-          if (row > 0) deleted++;
+          deleteKeys.push(e.deliveryId);
         }
       }
     }
 
-    // Sync SoLuong CT
-    const after = await DeliveryRepository.findMany({
-      year: y,
-      detailId,
-      includeDeleted: false,
-    });
-    const sumKh = qty3(after.reduce((s, g) => s + (Number(g.plannedQty) || 0), 0));
+    // Pass 2: ghi theo lô — mã GH cấp 1 lần cho mọi dòng mới
+    const newIds = createDefs.length
+      ? await nextCounterCodes(
+          "GH",
+          orderDateForId || ymdDate(new Date()) || undefined,
+          { count: createDefs.length, email: user.email, year: y }
+        )
+      : [];
+    const delPatch = { Deleted: true, DeletedAt: nowStr, DeletedBy: user.email };
+    const ops: GhOp[] = [
+      ...updateOps,
+      ...deleteKeys.map((k) => ({ key: k, patch: delPatch })),
+    ];
+    const resMap = ops.length
+      ? await updateSheetRowsByKey(SHEETS.GH, "ID_Giaohang", ops, y)
+      : new Map<string, number>();
+    deleted = deleteKeys.filter((k) => (resMap.get(String(k).trim()) ?? -1) > 0).length;
+    if (createDefs.length) {
+      await appendSheetRows(
+        SHEETS.GH,
+        createDefs.map((c, i) => ({
+          ID_Giaohang: newIds[i],
+          ID_Chitiet: detailId,
+          MaKh: c.maKh,
+          ChitietKh: c.customerDetail,
+          KHgiao: c.khg,
+          ThucGiao: 0,
+          Ngaygiao: "",
+          Ghichu: c.note,
+          Deleted: false,
+          DeletedAt: "",
+          DeletedBy: "",
+        })),
+        y
+      );
+    }
+    created = createDefs.length;
+
+    // Sync SoLuong CT — tính trong bộ nhớ (không đọc lại cả sheet GH)
+    const khAfter = new Map<string, number>(
+      existing.map((e) => [e.deliveryId, Number(e.plannedQty) || 0])
+    );
+    for (const op of updateOps) khAfter.set(op.key, Number(op.patch.KHgiao) || 0);
+    for (const k of deleteKeys) khAfter.delete(k);
+    const sumKh = qty3(
+      [...khAfter.values()].reduce((s, v) => s + v, 0) +
+        createDefs.reduce((s, c) => s + c.khg, 0)
+    );
+    const finalRowCount = khAfter.size + createDefs.length;
     await updateSheetRowByKey(
       SHEETS.CT,
       "ID_Chitiet",
       detailId,
-      { SoLuong: sumKh, TimeChange: formatDateTimeVN(now), User: user.email },
+      { SoLuong: sumKh, TimeChange: nowStr, User: user.email },
       y
     );
 
@@ -1002,7 +1013,7 @@ export class DeliveryService {
       created,
       updated,
       deleted,
-      rows: after.length,
+      rows: finalRowCount,
       resendMarked,
       changedFields,
     };
@@ -1265,9 +1276,10 @@ export class DeliveryService {
       isAdmin,
     });
 
-    // Ghi sheet
-    let updated = 0;
-    let created = 0;
+    // Ghi sheet — theo lô (1 batchUpdate cho mọi dòng sửa/xóa + 1 append cho mọi dòng mới)
+    type GhOp = { key: string; patch: Record<string, string | number | boolean> };
+    const updateOps: GhOp[] = [];
+    const createDefs: Array<Record<string, string | number | boolean>> = [];
     for (const item of list) {
       const thucGiao = item.actualQty;
       const khGiao = item.plannedQty;
@@ -1276,11 +1288,9 @@ export class DeliveryService {
       const maKhResolved = resolveAcghangOnSave(item.customerId, phanLoaiHH);
 
       if (!item.isNew && existingById.has(item.deliveryId)) {
-        await updateSheetRowByKey(
-          SHEETS.GH,
-          "ID_Giaohang",
-          item.deliveryId,
-          {
+        updateOps.push({
+          key: item.deliveryId,
+          patch: {
             MaKh: maKhResolved,
             ChitietKh: item.customerDetail || "",
             KHgiao: khGiao,
@@ -1289,64 +1299,72 @@ export class DeliveryService {
             Ghichu: item.note || "",
             Deleted: false,
           },
-          y
-        );
-        updated++;
+        });
       } else {
         // chỉ tạo mới nếu có KHgiao hoặc TG
         if (!(khGiao > 0 || thucGiao > 0)) continue;
-        // Cấp mã GH theo ngày đặt CT (không theo ngày giao / ngày lưu)
-        const orderDateKey =
-          ymdDate(ct.orderDate) ||
-          String(ct.orderDate || "").slice(0, 10) ||
-          ymdDate(new Date()) ||
-          undefined;
-        const idGh = await newDeliveryId(orderDateKey, {
-          email: user.email,
-          year: y,
+        createDefs.push({
+          ID_Chitiet: detailId,
+          MaKh: maKhResolved,
+          ChitietKh: item.customerDetail || "",
+          KHgiao: khGiao,
+          ThucGiao: thucGiao,
+          Ngaygiao: ngay,
+          Ghichu: item.note || "",
+          Deleted: false,
+          DeletedAt: "",
+          DeletedBy: "",
         });
-        await appendSheetRow(
-          SHEETS.GH,
-          {
-            ID_Giaohang: idGh,
-            ID_Chitiet: detailId,
-            MaKh: maKhResolved,
-            ChitietKh: item.customerDetail || "",
-            KHgiao: khGiao,
-            ThucGiao: thucGiao,
-            Ngaygiao: ngay,
-            Ghichu: item.note || "",
-            Deleted: false,
-            DeletedAt: "",
-            DeletedBy: "",
-          },
-          y
-        );
-        created++;
       }
     }
 
     // V21: GH đang hoạt động mà không còn trong danh sách gửi lên → xóa mềm
     // (sales-only: chỉ xóa GH của khách thuộc nhóm mình quản lý)
-    let softDeleted = 0;
-    {
-      const keptIds = new Set(
-        list.filter((x) => !x.isNew && x.deliveryId).map((x) => x.deliveryId)
-      );
-      const delNow = formatDateTimeVN();
-      for (const e of existing) {
-        if (keptIds.has(e.deliveryId)) continue;
-        if (!customerAllowed(e.customerId, allowedKhReal)) continue;
-        const r = await updateSheetRowByKey(
-          SHEETS.GH,
-          "ID_Giaohang",
-          e.deliveryId,
-          { Deleted: true, DeletedAt: delNow, DeletedBy: user.email },
-          y
-        );
-        if (r > 0) softDeleted++;
-      }
+    const keptIds = new Set(
+      list.filter((x) => !x.isNew && x.deliveryId).map((x) => x.deliveryId)
+    );
+    const delNow = formatDateTimeVN();
+    const orphanKeys: string[] = [];
+    for (const e of existing) {
+      if (keptIds.has(e.deliveryId)) continue;
+      if (!customerAllowed(e.customerId, allowedKhReal)) continue;
+      orphanKeys.push(e.deliveryId);
     }
+
+    // Cấp mã GH theo ngày đặt CT (không theo ngày giao / ngày lưu) — 1 lần cho cả lô
+    const orderDateKey =
+      ymdDate(ct.orderDate) ||
+      String(ct.orderDate || "").slice(0, 10) ||
+      ymdDate(new Date()) ||
+      undefined;
+    const newIds = createDefs.length
+      ? await nextCounterCodes("GH", orderDateKey, {
+          count: createDefs.length,
+          email: user.email,
+          year: y,
+        })
+      : [];
+
+    const delPatch = { Deleted: true, DeletedAt: delNow, DeletedBy: user.email };
+    const ghOps: GhOp[] = [
+      ...updateOps,
+      ...orphanKeys.map((k) => ({ key: k, patch: delPatch })),
+    ];
+    const resMap = ghOps.length
+      ? await updateSheetRowsByKey(SHEETS.GH, "ID_Giaohang", ghOps, y)
+      : new Map<string, number>();
+    if (createDefs.length) {
+      await appendSheetRows(
+        SHEETS.GH,
+        createDefs.map((c, i) => ({ ID_Giaohang: newIds[i], ...c })),
+        y
+      );
+    }
+    const updated = updateOps.length;
+    const created = createDefs.length;
+    const softDeleted = orphanKeys.filter(
+      (k) => (resMap.get(String(k).trim()) ?? -1) > 0
+    ).length;
 
     // Sync status CT
     // Sales-only: GH của khách ngoài nhóm quản lý không bị sửa/xóa nhưng vẫn tính vào

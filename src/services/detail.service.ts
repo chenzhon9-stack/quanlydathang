@@ -10,7 +10,7 @@ import {
 import { DetailRepository } from "@/repositories/detail.repository";
 import { OrderRepository } from "@/repositories/order.repository";
 import { MasterRepository } from "@/repositories/master.repository";
-import { updateSheetRowByKey } from "@/lib/sheets/dal";
+import { updateSheetRowByKey, updateSheetRowsByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { STATUS_CT } from "@/lib/status";
@@ -278,26 +278,11 @@ export class DetailService {
       throw { code: "VALIDATION_ERROR", message: dateCheck.error };
     }
 
-    const row = await updateSheetRowByKey(
-      SHEETS.CT,
-      "ID_Chitiet",
-      detailId,
-      {
-        ThucNhan: qty,
-        NgayNhanHang: ngay,
-        TrangThaiXe: STATUS_CT.RECEIVED,
-        TimeChange: formatDateTimeVN(),
-        User: user.email,
-      },
-      y
-    );
-    if (row < 0) {
-      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
-    }
-
     // Phân bổ lại KHgiao — V21 _phanBoLaiKeHoachGiao_: khách thật × tỷ lệ, khách đệm (acghang/B/R) nhận phần dư
-    let redistributed = 0;
+    // (tính trước, chưa ghi — để gộp ghi CT 1 lần + GH 1 lô)
     const planQty = qty3(Number(ct.quantity) || 0);
+    let plan: Map<string, number> | null = null;
+    let syncSoLuong = false;
     try {
       const { DeliveryRepository } = await import(
         "@/repositories/delivery.repository"
@@ -308,7 +293,7 @@ export class DetailService {
         includeDeleted: false,
       });
       const active = ghs.filter((g) => !g.deleted);
-      const plan = reallocatePlanOnReceive(
+      plan = reallocatePlanOnReceive(
         active.map((g) => ({
           id: g.deliveryId,
           customerId: String(g.customerId || ""),
@@ -317,30 +302,49 @@ export class DetailService {
         qty,
         tyleChiahet
       );
-      if (plan && plan.size > 0) {
-        for (const [deliveryId, newKh] of plan) {
-          await updateSheetRowByKey(
-            SHEETS.GH,
-            "ID_Giaohang",
-            deliveryId,
-            { KHgiao: newKh },
-            y
-          );
-          redistributed++;
-        }
-      }
       // Đồng bộ SoLuong CT = thực nhận khi lệch SoLuong đặt
-      if (planQty > 0 && Math.abs(qty - planQty) > 0.0001 && active.length) {
-        await updateSheetRowByKey(
-          SHEETS.CT,
-          "ID_Chitiet",
-          detailId,
-          { SoLuong: qty },
+      syncSoLuong =
+        planQty > 0 && Math.abs(qty - planQty) > 0.0001 && active.length > 0;
+    } catch (e) {
+      console.error("[receiveDetail] tính phân bổ GH", e);
+    }
+
+    // 1 lần ghi CT: nhận hàng (+ SoLuong nếu cần)
+    const row = await updateSheetRowByKey(
+      SHEETS.CT,
+      "ID_Chitiet",
+      detailId,
+      {
+        ThucNhan: qty,
+        NgayNhanHang: ngay,
+        TrangThaiXe: STATUS_CT.RECEIVED,
+        TimeChange: formatDateTimeVN(),
+        User: user.email,
+        ...(syncSoLuong ? { SoLuong: qty } : {}),
+      },
+      y
+    );
+    if (row < 0) {
+      throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+    }
+
+    // 1 lô ghi GH (thay cho mỗi GH 2 lời gọi)
+    let redistributed = 0;
+    if (plan && plan.size > 0) {
+      try {
+        await updateSheetRowsByKey(
+          SHEETS.GH,
+          "ID_Giaohang",
+          [...plan].map(([deliveryId, newKh]) => ({
+            key: deliveryId,
+            patch: { KHgiao: newKh },
+          })),
           y
         );
+        redistributed = plan.size;
+      } catch (e) {
+        console.error("[receiveDetail] redistribute GH", e);
       }
-    } catch (e) {
-      console.error("[receiveDetail] redistribute GH", e);
     }
 
     const sync = await syncOrderStatusByDetailId(detailId, y).catch(() => null);

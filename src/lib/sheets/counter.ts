@@ -7,7 +7,7 @@
  * Cơ chế chống trùng:
  * 1. Process-local lock theo key (cùng instance Vercel không song song)
  * 2. Đọc COUNTER luôn noCache (không dùng sheet-cache 45s)
- * 3. Khóa mềm trên Sheet: dòng Key=`__LOCK__{key}` + TTL, verify holder
+ * 3. Khóa "vé nối đuôi" trên Sheet (append nguyên tử, vé còn hạn đầu tiên giữ khóa) — 1 khóa cho mọi loại mã
  * 4. Retry + backoff khi không lấy được lock / ghi lỗi
  */
 
@@ -16,7 +16,9 @@ import { isSheetsConfigured } from "@/lib/sheets/client";
 import {
   readSheetAsObjects,
   updateSheetRowByKey,
-  appendSheetRow,
+  updateSheetRowsAt,
+  appendSheetRows,
+  deleteSheetRows,
 } from "@/lib/sheets/dal";
 import { counterDateKey } from "@/lib/sheets/date";
 import { randomBytes } from "crypto";
@@ -55,7 +57,19 @@ async function withProcessLock<T>(key: string, fn: () => Promise<T>): Promise<T>
 }
 
 const LOCK_PREFIX = "__LOCK__";
-const LOCK_TTL_MS = 12_000;
+/**
+ * Khóa dạng "vé nối đuôi" (ticket lock) trên System_Counter:
+ *  - Muốn cấp mã → APPEND 1 dòng vé {Key: __LOCKQ__, CurrentNo: hạn(epoch ms), UpdatedBy: token}.
+ *    Thao tác append của Sheets là nguyên tử và có thứ tự → vé đầu tiên còn hạn là người giữ khóa.
+ *  - Người chờ đọc lại sheet cho tới khi vé của mình đứng đầu.
+ *  - Ghi counter + hết hạn vé (CurrentNo=0) trong CÙNG 1 lần batchUpdate.
+ * Khác khóa "đọc → ghi → kiểm tra" cũ: không có khoảng hở giữa kiểm tra và ghi nên
+ * không thể có 2 instance cùng giữ khóa (trước đây có thể cấp trùng mã khi lưu đồng thời).
+ */
+const TICKET_KEY = `${LOCK_PREFIX}Q`;
+const TICKET_TTL_MS = 20_000;
+const TICKET_WAIT_MS = 15_000;
+const TICKET_CLEAN_THRESHOLD = 25;
 /** Unique per process — KHÔNG dùng mỗi VERCEL_REGION (mọi instance cùng region trùng nhau). */
 const HOLDER = [
   process.env.VERCEL_REGION || "local",
@@ -63,103 +77,224 @@ const HOLDER = [
   randomBytes(6).toString("hex"),
 ].join("-");
 
-function lockKeyFor(counterKey: string): string {
-  return `${LOCK_PREFIX}${counterKey}`;
-}
+const isLockKey = (k: unknown) => String(k || "").startsWith(LOCK_PREFIX);
+const isTicket = (r: Record<string, string>) => String(r.Key || "") === TICKET_KEY;
+const upper = (k: unknown) => String(k || "").trim().toUpperCase();
 
-/**
- * Khóa mềm trên sheet System_Counter.
- * Trả true nếu giữ được lock (holder khớp sau ghi).
- */
-async function tryAcquireSheetLock(
-  counterKey: string,
-  year: number | undefined
-): Promise<boolean> {
-  const lk = lockKeyFor(counterKey);
+async function takeTicket(year: number | undefined): Promise<string> {
+  const token = `${HOLDER}-${randomBytes(4).toString("hex")}`;
   const now = Date.now();
-  const rows = await readSheetAsObjects(SHEETS.COUNTER, {
-    year,
-    noCache: true,
-  });
-  const found = rows.find(
-    (r) => String(r.Key || "").trim().toUpperCase() === lk.toUpperCase()
-  );
-  // CurrentNo trên dòng LOCK = epoch ms hết hạn (số, không parse ngày Sheet)
-  const expiresAt = found ? Number(found.CurrentNo) || 0 : 0;
-  const holder = found ? String(found.UpdatedBy || "").trim() : "";
-  const expired = !found || !expiresAt || now > expiresAt;
-
-  // Đang bị instance khác giữ
-  if (!expired && holder && holder !== HOLDER) {
-    return false;
-  }
-
-  const expires = now + LOCK_TTL_MS;
-  const stamp = String(now); // epoch ms dạng chuỗi — không phụ thuộc format ngày Sheet
-  if (found) {
-    const row = await updateSheetRowByKey(
-      SHEETS.COUNTER,
-      "Key",
-      String(found.Key || lk),
+  await appendSheetRows(
+    SHEETS.COUNTER,
+    [
       {
-        CurrentNo: expires, // deadline epoch ms
-        UpdatedAt: stamp,
-        UpdatedBy: HOLDER,
+        Key: TICKET_KEY,
+        CurrentNo: now + TICKET_TTL_MS,
+        UpdatedAt: String(now),
+        UpdatedBy: token,
       },
-      year
-    );
-    if (row < 0) return false;
-  } else {
-    await appendSheetRow(
-      SHEETS.COUNTER,
-      {
-        Key: lk,
-        CurrentNo: expires,
-        UpdatedAt: stamp,
-        UpdatedBy: HOLDER,
-      },
-      year
-    );
-  }
-
-  // Verify holder + deadline còn do mình giữ
-  const check = await readSheetAsObjects(SHEETS.COUNTER, {
-    year,
-    noCache: true,
-  });
-  const row = check.find(
-    (r) => String(r.Key || "").trim().toUpperCase() === lk.toUpperCase()
+    ],
+    year
   );
-  if (!row) return false;
-  if (String(row.UpdatedBy || "").trim() !== HOLDER) return false;
-  const exp2 = Number(row.CurrentNo) || 0;
-  return exp2 > now;
+  return token;
 }
 
-async function releaseSheetLock(
-  counterKey: string,
-  year: number | undefined
-): Promise<void> {
-  const lk = lockKeyFor(counterKey);
+/** Hết hạn vé (đường lỗi — đường thành công nhả cùng lúc ghi counter). */
+async function expireTicket(token: string, year: number | undefined): Promise<void> {
   try {
     await updateSheetRowByKey(
       SHEETS.COUNTER,
-      "Key",
-      lk,
-      {
-        CurrentNo: 0, // hết hạn ngay
-        UpdatedAt: "0",
-        UpdatedBy: "",
-      },
+      "UpdatedBy",
+      token,
+      { CurrentNo: 0, UpdatedAt: "0" },
       year
     );
   } catch {
-    /* best-effort */
+    /* best-effort — vé tự hết hạn sau TTL */
   }
 }
 
+export type CounterRequest = {
+  type: CounterType;
+  dateValue?: string | number | Date | null;
+  count?: number;
+};
+
 /**
- * Cấp `count` mã liên tiếp.
+ * Cấp mã cho NHIỀU loại/ngày trong 1 lần khóa (vd. CT + GH khi tạo đơn).
+ * Trả về mảng mã theo đúng thứ tự `requests`.
+ *
+ * Số lời gọi Sheets (không tranh chấp): append vé(1) + đọc(1) + [thêm dòng key mới(1)]
+ *   + ghi counter KÈM nhả vé(1) + đọc xác nhận(1) ≈ 4 — không phụ thuộc số loại mã
+ *   (trước đây ~10 lời gọi cho MỖI loại). Khi có người khác đang giữ khóa, mỗi lần chờ thêm 1 lần đọc.
+ */
+export async function nextCounterCodesMulti(
+  requests: CounterRequest[],
+  opts?: { email?: string; year?: number }
+): Promise<string[][]> {
+  const reqs = requests.map((r) => ({
+    type: r.type,
+    key: `${r.type}-${counterDateKey(r.dateValue)}`,
+    ymd: counterDateKey(r.dateValue),
+    count: Math.max(1, Math.floor(r.count ?? 1)),
+  }));
+
+  if (!isSheetsConfigured()) {
+    const base = Date.now() % 10000;
+    return reqs.map((r, ri) =>
+      Array.from(
+        { length: r.count },
+        (_, i) => `${r.type}-${r.ymd}-${pad4((base + ri * 100 + i) % 10000)}`
+      )
+    );
+  }
+
+  const y = opts?.year;
+  const email = opts?.email || "system";
+
+  return withProcessLock("COUNTER_ALL", async () => {
+    let lastErr: unknown;
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let token: string | null = null;
+      let released = true;
+      try {
+        // 1) Lấy vé (append nguyên tử)
+        token = await takeTicket(y);
+        released = false;
+
+        // 2) Chờ tới lượt: vé còn hạn đầu tiên là của mình
+        const deadline = Date.now() + TICKET_WAIT_MS;
+        let rows: Record<string, string>[] = [];
+        let myIdx = -1;
+        for (let poll = 0; ; poll++) {
+          rows = await readSheetAsObjects(SHEETS.COUNTER, {
+            year: y,
+            noCache: true,
+          });
+          const now = Date.now();
+          myIdx = rows.findIndex(
+            (r) => isTicket(r) && String(r.UpdatedBy || "").trim() === token
+          );
+          if (myIdx < 0 || !(Number(rows[myIdx].CurrentNo) > now)) {
+            // vé hết hạn / mất → lấy vé mới
+            token = await takeTicket(y);
+            released = false;
+            continue;
+          }
+          const first = rows.find((r) => isTicket(r) && Number(r.CurrentNo) > now);
+          if (first && String(first.UpdatedBy || "").trim() === token) break;
+          if (now > deadline) {
+            throw new Error("Hết thời gian chờ khóa cấp mã (counter).");
+          }
+          await sleep(Math.min(300, 80 + poll * 40));
+        }
+
+        // 3) Đang giữ khóa → cấp mã dựa trên bản đọc vừa rồi
+        const counterRowByKey = new Map<string, { a1Row: number; current: number }>();
+        rows.forEach((r, i) => {
+          if (isLockKey(r.Key)) return;
+          const k = upper(r.Key);
+          if (k && !counterRowByKey.has(k)) {
+            counterRowByKey.set(k, {
+              a1Row: i + 2,
+              current: Math.max(0, Number(r.CurrentNo) || 0),
+            });
+          }
+        });
+        const cursor = new Map<string, number>();
+        const results: string[][] = [];
+        for (const r of reqs) {
+          const ku = upper(r.key);
+          const base = cursor.get(ku) ?? counterRowByKey.get(ku)?.current ?? 0;
+          const codes: string[] = [];
+          for (let n = 1; n <= r.count; n++) codes.push(`${r.key}-${pad4(base + n)}`);
+          cursor.set(ku, base + r.count);
+          results.push(codes);
+        }
+
+        // Dọn vé hết hạn khi tích tụ nhiều (hiếm — 1 lời gọi). PHẢI làm khi còn giữ khóa
+        // và TRƯỚC khi ghi, vì xóa dòng làm dịch số dòng → quy đổi lại a1Row bên dưới.
+        let shift = (a1: number) => a1;
+        try {
+          const now2 = Date.now();
+          const staleIdx: number[] = [];
+          rows.forEach((r, i) => {
+            if (i !== myIdx && isTicket(r) && !(Number(r.CurrentNo) > now2)) staleIdx.push(i);
+          });
+          if (staleIdx.length >= TICKET_CLEAN_THRESHOLD) {
+            await deleteSheetRows(
+              SHEETS.COUNTER,
+              staleIdx.map((i) => i + 2),
+              y
+            );
+            const sorted = staleIdx.slice().sort((a, b) => a - b);
+            shift = (a1: number) => {
+              const idx = a1 - 2;
+              let n = 0;
+              for (const d of sorted) if (d < idx) n++;
+              return a1 - n;
+            };
+          }
+        } catch (e) {
+          console.warn("[counter] dọn vé lỗi (bỏ qua)", e);
+          shift = (a1: number) => a1; // xóa có thể chưa chạy → giữ nguyên số dòng
+        }
+
+        const iso = new Date().toISOString();
+        const updates: Array<{
+          a1Row: number;
+          patch: Record<string, string | number | boolean>;
+        }> = [];
+        const appends: Array<Record<string, string | number | boolean>> = [];
+        const keyCase = new Map(reqs.map((r) => [upper(r.key), r.key]));
+        for (const [ku, newCurrent] of cursor) {
+          const ex = counterRowByKey.get(ku);
+          const patch = { CurrentNo: newCurrent, UpdatedAt: iso, UpdatedBy: email };
+          if (ex) updates.push({ a1Row: shift(ex.a1Row), patch });
+          else appends.push({ Key: keyCase.get(ku) || ku, ...patch });
+        }
+        if (appends.length) await appendSheetRows(SHEETS.COUNTER, appends, y);
+        // ghi counter + NHẢ VÉ trong cùng 1 lần batchUpdate
+        updates.push({
+          a1Row: shift(myIdx + 2),
+          patch: { CurrentNo: 0, UpdatedAt: "0" },
+        });
+        await updateSheetRowsAt(SHEETS.COUNTER, updates, y);
+        released = true;
+
+        // 4) Xác nhận giá trị đã tăng (phát hiện ghi đè ngoài cơ chế khóa, vd. GAS)
+        const verify = await readSheetAsObjects(SHEETS.COUNTER, {
+          year: y,
+          noCache: true,
+        });
+        let ok = true;
+        for (const [ku, newCurrent] of cursor) {
+          const after = verify.find(
+            (r) => !isLockKey(r.Key) && upper(r.Key) === ku
+          );
+          if ((after ? Number(after.CurrentNo) || 0 : 0) < newCurrent) ok = false;
+        }
+        if (!ok) {
+          lastErr = new Error(`Counter verify fail ${reqs.map((r) => r.key).join(",")}`);
+          await sleep(50 + attempt * 60);
+          continue;
+        }
+        return results;
+      } catch (e) {
+        lastErr = e;
+        await sleep(50 + attempt * 80);
+      } finally {
+        if (token && !released) await expireTicket(token, y);
+      }
+    }
+
+    throw lastErr || new Error("Không cấp được counter");
+  });
+}
+
+/**
+ * Cấp `count` mã liên tiếp cho 1 loại.
  * dateValue: ngày nghiệp vụ (NgayDatHang / Ngaygiao / …)
  */
 export async function nextCounterCodes(
@@ -167,123 +302,11 @@ export async function nextCounterCodes(
   dateValue?: string | number | Date | null,
   opts?: { count?: number; email?: string; year?: number }
 ): Promise<string[]> {
-  const count = Math.max(1, Math.floor(opts?.count ?? 1));
-  if (!isSheetsConfigured()) {
-    const ymd = counterDateKey(dateValue);
-    const base = Date.now() % 10000;
-    return Array.from({ length: count }, (_, i) =>
-      `${type}-${ymd}-${pad4((base + i) % 10000)}`
-    );
-  }
-
-  const y = opts?.year;
-  const ymd = counterDateKey(dateValue);
-  const key = `${type}-${ymd}`;
-  const email = opts?.email || "system";
-
-  return withProcessLock(key, async () => {
-    let lastErr: unknown;
-
-    for (let attempt = 0; attempt < 6; attempt++) {
-      let gotSheetLock = false;
-      try {
-        // 1) Khóa sheet (cross-instance soft lock)
-        gotSheetLock = await tryAcquireSheetLock(key, y);
-        if (!gotSheetLock) {
-          await sleep(40 + attempt * 70 + Math.floor(Math.random() * 40));
-          continue;
-        }
-
-        // 2) Đọc counter — luôn noCache
-        const rows = await readSheetAsObjects(SHEETS.COUNTER, {
-          year: y,
-          noCache: true,
-        });
-        const found = rows.find(
-          (r) =>
-            String(r.Key || "").trim().toUpperCase() === key.toUpperCase() &&
-            !String(r.Key || "").startsWith(LOCK_PREFIX)
-        );
-        let current = found ? Number(found.CurrentNo) || 0 : 0;
-        if (!Number.isFinite(current) || current < 0) current = 0;
-
-        const codes: string[] = [];
-        for (let n = 1; n <= count; n++) {
-          codes.push(`${key}-${pad4(current + n)}`);
-        }
-        const newCurrent = current + count;
-        const now = new Date().toISOString();
-
-        if (found) {
-          const row = await updateSheetRowByKey(
-            SHEETS.COUNTER,
-            "Key",
-            String(found.Key || key),
-            {
-              CurrentNo: newCurrent,
-              UpdatedAt: now,
-              UpdatedBy: email,
-            },
-            y
-          );
-          if (row < 0) {
-            await appendSheetRow(
-              SHEETS.COUNTER,
-              {
-                Key: key,
-                CurrentNo: newCurrent,
-                UpdatedAt: now,
-                UpdatedBy: email,
-              },
-              y
-            );
-          }
-        } else {
-          await appendSheetRow(
-            SHEETS.COUNTER,
-            {
-              Key: key,
-              CurrentNo: newCurrent,
-              UpdatedAt: now,
-              UpdatedBy: email,
-            },
-            y
-          );
-        }
-
-        // 3) Xác nhận giá trị đã tăng (phát hiện ghi đè hiếm)
-        const verify = await readSheetAsObjects(SHEETS.COUNTER, {
-          year: y,
-          noCache: true,
-        });
-        const after = verify.find(
-          (r) =>
-            String(r.Key || "").trim().toUpperCase() === key.toUpperCase() &&
-            !String(r.Key || "").startsWith(LOCK_PREFIX)
-        );
-        const afterNo = after ? Number(after.CurrentNo) || 0 : 0;
-        if (afterNo < newCurrent) {
-          // Có vẻ bị ghi đè / race — thử lại
-          lastErr = new Error(
-            `Counter verify fail ${key}: expected>=${newCurrent} got=${afterNo}`
-          );
-          await sleep(50 + attempt * 60);
-          continue;
-        }
-
-        return codes;
-      } catch (e) {
-        lastErr = e;
-        await sleep(50 + attempt * 80);
-      } finally {
-        if (gotSheetLock) {
-          await releaseSheetLock(key, y);
-        }
-      }
-    }
-
-    throw lastErr || new Error(`Không cấp được counter ${key}`);
-  });
+  const out = await nextCounterCodesMulti(
+    [{ type, dateValue, count: opts?.count }],
+    { email: opts?.email, year: opts?.year }
+  );
+  return out[0];
 }
 
 export async function nextCounterCode(
