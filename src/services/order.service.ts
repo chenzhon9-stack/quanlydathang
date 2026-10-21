@@ -8,6 +8,8 @@ import {
 } from "@/lib/sheets/date";
 import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission, resolveScope } from "@/lib/auth";
+import { resolveAcghangOnSave } from "@/lib/default-plan-kh";
+import { assertOrderInScope, isThueNgoaiHtvt } from "@/lib/write-guards";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds, applyListScopeFilter } from "@/lib/scope";
@@ -731,6 +733,12 @@ export class OrderService {
           message: "Mỗi xe phải có ít nhất 1 dòng kế hoạch giao.",
         };
       }
+      if (isThueNgoaiHtvt(d.transportTypeId) && !String(d.carrierId || "").trim()) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Xe "${d.vehicleId}": hình thức Thuê ngoài bắt buộc chọn đơn vị vận tải.`,
+        };
+      }
       const product = hhById.get(String(d.productId).trim());
       const tlCH = Number(
         product?.TyleChiahet || product?.TyleChiaHet || 0
@@ -837,12 +845,8 @@ export class OrderService {
         y
       );
 
-      // DonHang_VanTai nếu thuê ngoài
-      if (
-        d.transportTypeId &&
-        String(d.transportTypeId).toUpperCase().includes("THUE") &&
-        d.carrierId
-      ) {
+      // DonHang_VanTai nếu thuê ngoài (lỗi ghi → báo lỗi, không nuốt)
+      if (isThueNgoaiHtvt(d.transportTypeId) && d.carrierId) {
         await appendSheetRow(
           SHEETS.CT_VT,
           {
@@ -853,9 +857,14 @@ export class OrderService {
             UpdatedBy: user.email,
           },
           y
-        ).catch(() => undefined);
+        );
       }
 
+      const phanLoaiCt = String(
+        hhById.get(String(d.productId).trim())?.PhanLoaiHH ||
+          hhById.get(String(d.productId).trim())?.PhanLoai ||
+          ""
+      );
       for (const dl of d.deliveries || []) {
         const idGh = deliveryIds[ghIndex++];
         await appendSheetRow(
@@ -863,7 +872,7 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: dl.customerId,
+            MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,
@@ -957,6 +966,13 @@ export class OrderService {
     if (!order) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
     }
+
+    await assertOrderInScope(
+      orderId,
+      user,
+      y,
+      "Đơn ngoài phạm vi quản lý — không được thêm xe."
+    );
 
     const st = String(order.status || "");
     const stU = st.toUpperCase();
@@ -1085,6 +1101,12 @@ export class OrderService {
           message: "Mỗi xe cần ≥1 dòng kế hoạch giao.",
         };
       }
+      if (isThueNgoaiHtvt(d.transportTypeId) && !String(d.carrierId || "").trim()) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: `Xe "${d.vehicleId}": hình thức Thuê ngoài bắt buộc chọn đơn vị vận tải.`,
+        };
+      }
       const product = hhById.get(String(d.productId).trim());
       const tlCH =
         Number(product?.TyleChiahet || product?.TyleChiaHet || 0) || 0;
@@ -1167,6 +1189,26 @@ export class OrderService {
       );
       createdCt.push(idCt);
 
+      // DonHang_VanTai nếu thuê ngoài (parity createOrder / GAS)
+      if (isThueNgoaiHtvt(d.transportTypeId) && d.carrierId) {
+        await appendSheetRow(
+          SHEETS.CT_VT,
+          {
+            ID_Chitiet: idCt,
+            MaXe: d.vehicleId,
+            MaDVT: d.carrierId,
+            UpdatedAt: now,
+            UpdatedBy: user.email,
+          },
+          y
+        );
+      }
+
+      const phanLoaiCt = String(
+        hhById.get(String(d.productId).trim())?.PhanLoaiHH ||
+          hhById.get(String(d.productId).trim())?.PhanLoai ||
+          ""
+      );
       for (const dl of d.deliveries || []) {
         const idGh = deliveryIds[ghIndex++];
         await appendSheetRow(
@@ -1174,7 +1216,7 @@ export class OrderService {
           {
             ID_Giaohang: idGh,
             ID_Chitiet: idCt,
-            MaKh: dl.customerId,
+            MaKh: resolveAcghangOnSave(dl.customerId, phanLoaiCt),
             ChitietKh: dl.customerDetail || "",
             KHgiao: qty3(Number(dl.plannedQty) || 0),
             ThucGiao: 0,

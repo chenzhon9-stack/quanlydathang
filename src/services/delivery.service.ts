@@ -39,9 +39,14 @@ import {
 import {
   defaultPlanKhFromPhanLoai,
   isAcghangBufferKh,
-  isAcghangId,
   resolveAcghangOnSave,
 } from "@/lib/default-plan-kh";
+import {
+  assertOrderInScope,
+  isVirtualCustomerId,
+  loadVirtualCustomerSet,
+  VIRTUAL_CUSTOMER_REAL_MSG,
+} from "@/lib/write-guards";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -565,6 +570,15 @@ export class DeliveryService {
       }
     }
 
+    // Khách ảo (VIRTUAL / acghang*) không được thực giao > 0 (parity saveReal / GAS)
+    if (qty > 0) {
+      const targetKh = String(payload.customerId || current.customerId || "").trim();
+      const virtualKh = await loadVirtualCustomerSet();
+      if (isVirtualCustomerId(targetKh, virtualKh)) {
+        throw { code: "VALIDATION_ERROR", message: VIRTUAL_CUSTOMER_REAL_MSG };
+      }
+    }
+
     // D7: tổng TG sau update vs ThucNhan
     const thucNhan = qty3(Number(ct.actualReceived) || 0);
     const othersTg = allGh
@@ -756,6 +770,13 @@ export class DeliveryService {
       /* optional */
     }
 
+    await assertOrderInScope(
+      orderIdForAudit,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
+    );
+
     const existing = await DeliveryRepository.findMany({
       year: y,
       detailId,
@@ -768,10 +789,6 @@ export class DeliveryService {
     let deleted = 0;
 
     const now = new Date();
-    const ymd =
-      String(now.getFullYear()).slice(2) +
-      String(now.getMonth() + 1).padStart(2, "0") +
-      String(now.getDate()).padStart(2, "0");
 
     for (const r of rows) {
       if (r._delete && r.deliveryId) {
@@ -1011,6 +1028,13 @@ export class DeliveryService {
       };
     }
 
+    await assertOrderInScope(
+      ct.orderId,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi — không được lưu giao hàng."
+    );
+
     const thucNhan = qty3(Number(ct.actualReceived) || 0);
     if (!(thucNhan > 0)) {
       throw {
@@ -1079,32 +1103,15 @@ export class DeliveryService {
     }
 
     // Khách ảo: LoaiKhach=VIRTUAL (DM_KhachHang) hoặc khách đệm acghang/acghangB/acghangR
-    const virtualKh = new Set<string>();
-    try {
-      const khRows = await readSheetAsObjects(SHEETS.KH, {});
-      for (const r of khRows) {
-        if (String(r.LoaiKhach || "").trim().toUpperCase() === "VIRTUAL") {
-          virtualKh.add(String(r.MaKh || r.MaKH || "").trim().toLowerCase());
-        }
-      }
-    } catch {
-      /* optional */
-    }
+    const virtualKh = await loadVirtualCustomerSet();
 
     // Validate từng dòng TG > 0
     for (const item of list) {
       if (!item.customerId) {
         throw { code: "VALIDATION_ERROR", message: "Dòng giao hàng thiếu khách hàng." };
       }
-      if (
-        item.actualQty > 0 &&
-        (isAcghangId(item.customerId) ||
-          virtualKh.has(item.customerId.trim().toLowerCase()))
-      ) {
-        throw {
-          code: "VALIDATION_ERROR",
-          message: "Không được giao hàng thực tế cho khách ảo.",
-        };
+      if (item.actualQty > 0 && isVirtualCustomerId(item.customerId, virtualKh)) {
+        throw { code: "VALIDATION_ERROR", message: VIRTUAL_CUSTOMER_REAL_MSG };
       }
       if (item.actualQty > 0) {
         const dateCheck = validateDeliveryDate({

@@ -25,6 +25,7 @@ import {
 } from "@/lib/business-rules";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { reallocatePlanOnReceive } from "@/lib/plan-reallocate";
+import { assertOrderInScope, isThueNgoaiHtvt } from "@/lib/write-guards";
 import { syncOrderStatusByDetailId } from "@/lib/sync-order-status";
 import {
   diffDetailMasterFields,
@@ -190,6 +191,13 @@ export class DetailService {
     if (!ct) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
     }
+
+    await assertOrderInScope(
+      ct.orderId,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi — không được nhận hàng."
+    );
 
     const st = String(ct.status || "").toUpperCase();
     // status domain enum or VN
@@ -599,6 +607,34 @@ export class DetailService {
       }
     }
 
+    await assertOrderInScope(
+      oldCt.orderId,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi — không được sửa."
+    );
+
+    // THUE_NGOAI bắt buộc có ĐVT (kể cả xe cũ) — parity GAS, kiểm tra phía server
+    {
+      const htvtNext = String(
+        payload.transportTypeId ?? oldCt.transportTypeId ?? ""
+      );
+      const carrierNext =
+        payload.carrierId !== undefined
+          ? String(payload.carrierId || "").trim()
+          : oldCarrierId;
+      if (
+        isThueNgoaiHtvt(htvtNext) &&
+        !carrierNext &&
+        (payload.transportTypeId !== undefined || payload.carrierId !== undefined)
+      ) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message: "Hình thức Thuê ngoài bắt buộc chọn đơn vị vận tải.",
+        };
+      }
+    }
+
     const patch: Record<string, string | number | boolean> = {
       TimeChange: formatDateTimeVN(),
       User: user.email,
@@ -655,8 +691,7 @@ export class DetailService {
       payload.carrierId !== undefined
         ? String(payload.carrierId || "").trim()
         : oldCarrierId;
-    const isThue =
-      nextHtvt === "THUE_NGOAI" || nextHtvt.includes("THUE");
+    const isThue = nextHtvt === "THUE_NGOAI" || isThueNgoaiHtvt(nextHtvt);
     try {
       const { appendSheetRow } = await import("@/lib/sheets/dal");
       if (isThue && nextCarrier) {
@@ -704,7 +739,12 @@ export class DetailService {
         ).catch(() => -1);
       }
     } catch (e) {
-      console.warn("[DetailService.updateDetail] CT_VT sync failed", e);
+      console.error("[DetailService.updateDetail] CT_VT sync failed", e);
+      throw {
+        code: "PARTIAL_WRITE",
+        message:
+          "Đã lưu chi tiết xe nhưng ghi DonHang_VanTai (ĐVT) thất bại. Vui lòng lưu lại.",
+      };
     }
 
     let resendMarked = false;

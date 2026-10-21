@@ -5,6 +5,11 @@ import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
 import { stepErrorMsg, parseTyleChiahet } from "@/lib/business-rules";
+import {
+  defaultPlanKhFromPhanLoai,
+  isAcghangBufferKh,
+  phanLoaiFromMasterRaw,
+} from "@/lib/default-plan-kh";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
 type GhRow = {
@@ -828,20 +833,32 @@ export function OrderManageModal({
                         displayName={b.productName}
                         supplierId={order?.supplierId}
                         disabled={!editable || lockedRecv}
-                        onChange={(id, name, raw) =>
+                        onChange={(id, name, raw) => {
+                          // KH mặc định theo PhanLoaiHH: Bao→acghangB, Rời→acghangR
+                          const defKh = defaultPlanKhFromPhanLoai(
+                            phanLoaiFromMasterRaw(raw)
+                          );
                           setBlocks((rows) =>
-                            rows.map((x, i) =>
-                              i === bi
-                                ? {
-                                    ...x,
-                                    productId: id,
-                                    productName: name,
-                                    tyleChiahet: parseTyleChiahet(raw),
-                                  }
-                                : x
-                            )
-                          )
-                        }
+                            rows.map((x, i) => {
+                              if (i !== bi) return x;
+                              return {
+                                ...x,
+                                productId: id,
+                                productName: name,
+                                tyleChiahet: parseTyleChiahet(raw),
+                                deliveries: x.deliveries.map((g, gi) =>
+                                  gi === 0 && isAcghangBufferKh(g.customerId)
+                                    ? {
+                                        ...g,
+                                        customerId: defKh.id,
+                                        customerName: defKh.name,
+                                      }
+                                    : g
+                                ),
+                              };
+                            })
+                          );
+                        }}
                       />
                     </div>
                     <div>
