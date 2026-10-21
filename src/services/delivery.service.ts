@@ -14,7 +14,6 @@ import { MasterRepository } from "@/repositories/master.repository";
 import { ReportRepository } from "@/repositories/report.repository";
 import { updateSheetRowByKey, appendSheetRow, readSheetAsObjects } from "@/lib/sheets/dal";
 import {
-  EPS,
   qty3,
   validateStep,
   validateDeliveryDate,
@@ -38,15 +37,18 @@ import {
 } from "@/lib/order-resend";
 import {
   defaultPlanKhFromPhanLoai,
-  isAcghangBufferKh,
   resolveAcghangOnSave,
 } from "@/lib/default-plan-kh";
 import {
   assertOrderInScope,
+  customerAllowed,
   isVirtualCustomerId,
+  loadNonRealCustomerSet,
   loadVirtualCustomerSet,
+  salesOnlyAllowedCustomers,
   VIRTUAL_CUSTOMER_REAL_MSG,
 } from "@/lib/write-guards";
+import { adjustRealList } from "@/lib/delivery-real-adjust";
 
 export class DeliveryService {
   static async listDeliveries(
@@ -749,6 +751,9 @@ export class DeliveryService {
     let thucNhan = 0;
     try {
       const ct = await DetailRepository.findById(detailId, y);
+      if (!ct) {
+        throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
+      }
       orderIdForAudit = ct?.orderId || "";
       orderDateForId =
         ymdDate(ct?.orderDate) || String(ct?.orderDate || "").slice(0, 10) || "";
@@ -766,8 +771,29 @@ export class DeliveryService {
           tenHH = String(hh.TenHangHoa || ct.productId);
         }
       }
-    } catch {
+    } catch (e) {
+      if ((e as { code?: string })?.code === "NOT_FOUND") throw e;
       /* optional */
+    }
+
+    // V21 saveDeliveryData: chỉ sửa kế hoạch khi CT = Mới tạo / Đặt hàng.
+    // Đã nhận / đang giao → dùng "Giao" (saveReal); Hoàn thành / Hủy / Xóa → từ chối.
+    {
+      const stRaw = String(oldStatus || "").trim();
+      const stU = stRaw.toUpperCase();
+      const planEditable =
+        stRaw === STATUS_CT.NEW ||
+        stRaw === STATUS_CT.ORDERED ||
+        stU === "NEW" ||
+        stU === "ORDERED";
+      if (!planEditable) {
+        throw {
+          code: "VALIDATION_ERROR",
+          message:
+            `Chi tiết đang ở trạng thái "${stRaw || "?"}": chỉ sửa kế hoạch khi Mới tạo / Đặt hàng. ` +
+            `Sau khi nhận hàng hãy dùng chức năng Giao hàng.`,
+        };
+      }
     }
 
     await assertOrderInScope(
@@ -776,6 +802,21 @@ export class DeliveryService {
       y,
       "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
     );
+    // Sales-only: chỉ lưu dòng khách thuộc nhóm mình quản lý (parity GAS)
+    const allowedKhPlan = await salesOnlyAllowedCustomers(user);
+    if (allowedKhPlan) {
+      for (const r of rows) {
+        if (r._delete) continue;
+        if (!customerAllowed(r.customerId, allowedKhPlan)) {
+          throw {
+            code: "PERMISSION_DENIED",
+            message:
+              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
+              String(r.customerId || ""),
+          };
+        }
+      }
+    }
 
     const existing = await DeliveryRepository.findMany({
       year: y,
@@ -832,6 +873,8 @@ export class DeliveryService {
             MaKh: maKh,
             ChitietKh: r.customerDetail || "",
             KHgiao: khg,
+            ThucGiao: 0,
+            Ngaygiao: "",
             Ghichu: r.note || "",
           },
           y
@@ -871,6 +914,8 @@ export class DeliveryService {
 
     // Soft-delete existing not in keepIds (khi client gửi full list)
     for (const e of existing) {
+      // Sales-only: không xóa GH của khách ngoài nhóm quản lý
+      if (allowedKhPlan && !customerAllowed(e.customerId, allowedKhPlan)) continue;
       if (!keepIds.has(e.deliveryId) && !rows.some((r) => r._delete && r.deliveryId === e.deliveryId)) {
         // only auto-delete if client sent at least one keep row or empty intentional
         // Skip auto-delete if rows empty? safer: auto-delete orphans when full replace
@@ -1067,11 +1112,6 @@ export class DeliveryService {
     }
     const tlHH = normalizeHaohut(tyleHaohut);
 
-    const roundStep = (v: number) => {
-      if (tyleChiahet > EPS) return qty3(Math.round(v / tyleChiahet) * tyleChiahet);
-      return qty3(v);
-    };
-
     // Working list
     type RowW = {
       deliveryId: string;
@@ -1083,7 +1123,7 @@ export class DeliveryService {
       note: string;
       isNew: boolean;
     };
-    const list: RowW[] = (rows || []).map((r) => {
+    let list: RowW[] = (rows || []).map((r) => {
       const id = String(r.deliveryId || "").trim();
       const isNew = !id || isTempClientId(id) || id.startsWith("NEW-");
       return {
@@ -1139,24 +1179,6 @@ export class DeliveryService {
     });
     const existingById = new Map(existing.map((e) => [e.deliveryId, e]));
 
-    // Tìm dòng đang thay đổi (delta |TG − KHgiao cũ| lớn nhất)
-    let changed: RowW | null = null;
-    let oldKhGiao = 0;
-    let maxDelta = 0;
-    for (const item of list) {
-      if (!(item.actualQty > 0)) continue;
-      let oldKh = item.plannedQty;
-      if (!item.isNew && existingById.has(item.deliveryId)) {
-        oldKh = qty3(Number(existingById.get(item.deliveryId)!.plannedQty) || 0);
-      }
-      const delta = Math.abs(item.actualQty - oldKh);
-      if (delta > 0.0001 && delta > maxDelta) {
-        maxDelta = delta;
-        changed = item;
-        oldKhGiao = oldKh;
-      }
-    }
-
     const delivered = list.filter((x) => x.actualQty > 0);
     const totalThucGiaoAfter = qty3(
       delivered.reduce((s, x) => s + x.actualQty, 0)
@@ -1210,104 +1232,38 @@ export class DeliveryService {
       }
     }
 
-    // Điều chỉnh KHgiao khi TG ≠ KHgiao cũ (V21 under/over per-line)
-    if (changed) {
-      const newThuc = changed.actualQty;
-      const delta = qty3(newThuc - oldKhGiao);
-      const perLineRatio = Math.abs(delta) / thucNhan;
-      const isSmall = perLineRatio <= tlHH + 1e-9;
-
-      const pullFromPending = (amount: number): number => {
-        let remaining = amount;
-        let pulled = 0;
-        // 1. buffer acghang / acghangB / acghangR (ưu tiên khớp phân loại HH)
-        const preferId = defaultPlanKhFromPhanLoai(phanLoaiHH).id.toLowerCase();
-        const buffers = list.filter((x) => isAcghangBufferKh(x.customerId));
-        buffers.sort((a, b) => {
-          const aa = String(a.customerId || "").toLowerCase() === preferId ? 0 : 1;
-          const bb = String(b.customerId || "").toLowerCase() === preferId ? 0 : 1;
-          return aa - bb;
-        });
-        for (const acg of buffers) {
-          if (remaining <= 0.0001) break;
-          const avail = acg.plannedQty;
-          if (avail > 0) {
-            const take = Math.min(avail, remaining);
-            const newKh = Math.max(0, roundStep(avail - take));
-            const actuallyTaken = qty3(avail - newKh);
-            acg.plannedQty = newKh;
-            pulled += actuallyTaken;
-            remaining -= actuallyTaken;
-          }
+    // Sales-only: dòng của khách ngoài nhóm quản lý giữ nguyên (không sửa / không xóa) — parity GAS
+    const allowedKhReal = await salesOnlyAllowedCustomers(user);
+    if (allowedKhReal) {
+      for (const item of list) {
+        if (!customerAllowed(item.customerId, allowedKhReal)) {
+          throw {
+            code: "PERMISSION_DENIED",
+            message:
+              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
+              item.customerId,
+          };
         }
-        // 2. pending khác (TG=0, không phải buffer)
-        if (remaining > 0.0001) {
-          for (const p of list) {
-            if (remaining <= 0.0001) break;
-            if (p.actualQty > 0) continue;
-            if (isAcghangBufferKh(p.customerId)) continue;
-            const avail = p.plannedQty;
-            if (avail <= 0) continue;
-            const take = Math.min(avail, remaining);
-            const newKh = Math.max(0, roundStep(avail - take));
-            const actuallyTaken = qty3(avail - newKh);
-            p.plannedQty = newKh;
-            pulled += actuallyTaken;
-            remaining -= actuallyTaken;
-          }
-        }
-        return qty3(pulled);
-      };
-
-      const pushToPending = (amount: number) => {
-        if (amount <= 0.0001) return;
-        const prefer = defaultPlanKhFromPhanLoai(phanLoaiHH);
-        const acg =
-          list.find(
-            (x) =>
-              String(x.customerId || "").toLowerCase() ===
-              prefer.id.toLowerCase()
-          ) || list.find((x) => isAcghangBufferKh(x.customerId));
-        if (acg) {
-          acg.plannedQty = roundStep(acg.plannedQty + amount);
-          return;
-        }
-        const pending = list.filter(
-          (item) => item.actualQty === 0 && !isAcghangBufferKh(item.customerId)
-        );
-        if (pending.length > 0) {
-          pending[0].plannedQty = roundStep(pending[0].plannedQty + amount);
-          return;
-        }
-        // Tạo dòng buffer theo phân loại HH (Bao→B, Rời→R)
-        list.push({
-          deliveryId: `NEW-acg-${Date.now()}`,
-          customerId: prefer.id,
-          customerDetail: "",
-          plannedQty: roundStep(amount),
-          actualQty: 0,
-          deliveryDate: "",
-          note: "Điều chỉnh kế hoạch",
-          isNew: true,
-        });
-      };
-
-      if (delta > 0) {
-        // over: TG > KHgiao cũ → rút từ pending
-        if (!isSmall || totalThucGiaoAfter >= thucNhan - 0.0001) {
-          const pulled = pullFromPending(delta);
-          changed.plannedQty = roundStep(oldKhGiao + pulled);
-        }
-      } else if (delta < -0.0001) {
-        // under: TG < KHgiao cũ
-        const freed = qty3(oldKhGiao - newThuc);
-        if (!isSmall) {
-          changed.plannedQty = roundStep(newThuc);
-          pushToPending(freed);
-        }
-        // isSmall: giữ KHgiao, không điều chỉnh (V21)
       }
     }
+
+    // V21 saveDeliveryData realMode: điều chỉnh KHgiao (over/under + xác nhận từng dòng),
+    // gom dòng pending nhỏ, bù sai số Σ KHgiao = ThucNhan, lọc dòng rỗng.
+    const nonRealKh = await loadNonRealCustomerSet();
+    const oldKhById = new Map<string, number>(
+      existing.map((e) => [e.deliveryId, qty3(Number(e.plannedQty) || 0)])
+    );
+    list = adjustRealList(list, {
+      thucNhan,
+      step: tyleChiahet,
+      tlHH,
+      oldKhById,
+      preferBufferId: defaultPlanKhFromPhanLoai(phanLoaiHH).id,
+      nonRealSet: nonRealKh,
+      confirmFinish: !!opts.confirmFinish,
+      adminOverride: !!opts.adminOverride,
+      isAdmin,
+    });
 
     // Ghi sheet
     let updated = 0;
@@ -1370,6 +1326,28 @@ export class DeliveryService {
       }
     }
 
+    // V21: GH đang hoạt động mà không còn trong danh sách gửi lên → xóa mềm
+    // (sales-only: chỉ xóa GH của khách thuộc nhóm mình quản lý)
+    let softDeleted = 0;
+    {
+      const keptIds = new Set(
+        list.filter((x) => !x.isNew && x.deliveryId).map((x) => x.deliveryId)
+      );
+      const delNow = formatDateTimeVN();
+      for (const e of existing) {
+        if (keptIds.has(e.deliveryId)) continue;
+        if (!customerAllowed(e.customerId, allowedKhReal)) continue;
+        const r = await updateSheetRowByKey(
+          SHEETS.GH,
+          "ID_Giaohang",
+          e.deliveryId,
+          { Deleted: true, DeletedAt: delNow, DeletedBy: user.email },
+          y
+        );
+        if (r > 0) softDeleted++;
+      }
+    }
+
     // Sync status CT
     const totalTg = qty3(
       list.reduce((s, x) => s + (Number(x.actualQty) || 0), 0)
@@ -1415,6 +1393,7 @@ export class DeliveryService {
         sumKh,
         updated,
         created,
+        softDeleted,
       },
       lyDo: "Lưu thực giao batch (saveReal)",
       year: y,
