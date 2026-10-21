@@ -1349,11 +1349,22 @@ export class DeliveryService {
     }
 
     // Sync status CT
+    // Sales-only: GH của khách ngoài nhóm quản lý không bị sửa/xóa nhưng vẫn tính vào
+    // SoLuong CT và tổng thực giao (parity GAS: finalList = untouchedRows + list)
+    const untouchedOut = allowedKhReal
+      ? existing.filter((e) => !customerAllowed(e.customerId, allowedKhReal))
+      : [];
+    const extraTg = qty3(
+      untouchedOut.reduce((s, e) => s + (Number(e.actualQty) || 0), 0)
+    );
+    const extraKh = qty3(
+      untouchedOut.reduce((s, e) => s + (Number(e.plannedQty) || 0), 0)
+    );
     const totalTg = qty3(
-      list.reduce((s, x) => s + (Number(x.actualQty) || 0), 0)
+      list.reduce((s, x) => s + (Number(x.actualQty) || 0), 0) + extraTg
     );
     const sumKh = qty3(
-      list.reduce((s, x) => s + (Number(x.plannedQty) || 0), 0)
+      list.reduce((s, x) => s + (Number(x.plannedQty) || 0), 0) + extraKh
     );
     const newStatus = computeDetailStatus({
       currentStatus: st,
