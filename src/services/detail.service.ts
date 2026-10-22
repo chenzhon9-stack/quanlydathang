@@ -330,6 +330,7 @@ export class DetailService {
 
     // 1 lô ghi GH (thay cho mỗi GH 2 lời gọi)
     let redistributed = 0;
+    let redistributeFailed = false;
     if (plan && plan.size > 0) {
       try {
         await updateSheetRowsByKey(
@@ -344,6 +345,7 @@ export class DetailService {
         redistributed = plan.size;
       } catch (e) {
         console.error("[receiveDetail] redistribute GH", e);
+        redistributeFailed = true;
       }
     }
 
@@ -367,6 +369,14 @@ export class DetailService {
         : "Nhận hàng",
       year: y,
     });
+
+    if (redistributeFailed) {
+      throw {
+        code: "PARTIAL_WRITE",
+        message:
+          "Đã lưu thực nhận nhưng phân bổ lại kế hoạch giao (GH) thất bại. Vui lòng bấm lưu nhận hàng lại.",
+      };
+    }
 
     return {
       detailId,

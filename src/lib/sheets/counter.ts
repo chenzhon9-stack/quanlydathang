@@ -67,8 +67,12 @@ const LOCK_PREFIX = "__LOCK__";
  * không thể có 2 instance cùng giữ khóa (trước đây có thể cấp trùng mã khi lưu đồng thời).
  */
 const TICKET_KEY = `${LOCK_PREFIX}Q`;
-const TICKET_TTL_MS = 20_000;
+const TICKET_TTL_MS = 30_000;
+/** Còn ít hơn mức này thì KHÔNG được ghi counter nữa (vé sắp hết hạn → người khác có thể vào) → hủy, lấy vé mới. */
+const TICKET_SAFE_MARGIN_MS = 10_000;
 const TICKET_WAIT_MS = 15_000;
+/** Phải bắt đầu ghi counter trước (hạn vé − mốc này). */
+const TICKET_SAFETY_MS = 6_000;
 const TICKET_CLEAN_THRESHOLD = 25;
 /** Unique per process — KHÔNG dùng mỗi VERCEL_REGION (mọi instance cùng region trùng nhau). */
 const HOLDER = [
@@ -213,6 +217,22 @@ export async function nextCounterCodesMulti(
           results.push(codes);
         }
 
+        // Kiểm tra lease: vé phải còn đủ hạn cho các lời gọi ghi phía sau.
+        // (Nếu holder bị treo > TTL, người sau có thể vào → tuyệt đối không ghi nữa.)
+        if (Number(rows[myIdx].CurrentNo) - Date.now() < TICKET_SAFE_MARGIN_MS) {
+          throw new Error("Vé khóa counter sắp hết hạn — hủy và thử lại.");
+        }
+
+        // Rào hạn khóa: nếu đã giữ quá lâu (API chậm) thì vé sắp/đã hết hạn → người khác có thể
+        // đã vào. Bỏ lượt và thử lại, TUYỆT ĐỐI không ghi counter khi không còn chắc quyền giữ.
+        const ticketExpiry = Number(rows[myIdx].CurrentNo) || 0;
+        const assertStillHeld = () => {
+          if (Date.now() > ticketExpiry - TICKET_SAFETY_MS) {
+            throw new Error("Khóa cấp mã sắp hết hạn — bỏ lượt, thử lại.");
+          }
+        };
+        assertStillHeld();
+
         // Dọn vé hết hạn khi tích tụ nhiều (hiếm — 1 lời gọi). PHẢI làm khi còn giữ khóa
         // và TRƯỚC khi ghi, vì xóa dòng làm dịch số dòng → quy đổi lại a1Row bên dưới.
         let shift = (a1: number) => a1;
@@ -254,7 +274,12 @@ export async function nextCounterCodesMulti(
           if (ex) updates.push({ a1Row: shift(ex.a1Row), patch });
           else appends.push({ Key: keyCase.get(ku) || ku, ...patch });
         }
+        assertStillHeld();
         if (appends.length) await appendSheetRows(SHEETS.COUNTER, appends, y);
+        assertStillHeld();
+        if (Number(rows[myIdx].CurrentNo) - Date.now() < 3_000) {
+          throw new Error("Vé khóa counter hết hạn trước khi ghi — hủy và thử lại.");
+        }
         // ghi counter + NHẢ VÉ trong cùng 1 lần batchUpdate
         updates.push({
           a1Row: shift(myIdx + 2),

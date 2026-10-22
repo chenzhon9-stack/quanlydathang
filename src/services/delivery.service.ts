@@ -1390,6 +1390,7 @@ export class DeliveryService {
       totalThucGiao: totalTg,
       tlHaohut: tyleHaohut,
     });
+    let ctSyncFailed = false;
     try {
       await updateSheetRowByKey(
         SHEETS.CT,
@@ -1405,6 +1406,7 @@ export class DeliveryService {
       );
     } catch (e) {
       console.error("[saveReal] sync CT", e);
+      ctSyncFailed = true;
     }
     await syncOrderStatusByDetailId(detailId, y).catch(() => null);
 
@@ -1427,6 +1429,14 @@ export class DeliveryService {
       lyDo: "Lưu thực giao batch (saveReal)",
       year: y,
     }).catch(() => {});
+
+    if (ctSyncFailed) {
+      throw {
+        code: "PARTIAL_WRITE",
+        message:
+          "Đã lưu giao hàng (GH) nhưng cập nhật SoLuong/trạng thái chi tiết xe thất bại. Vui lòng bấm lưu lại.",
+      };
+    }
 
     return {
       detailId,
