@@ -1408,7 +1408,13 @@ export class DeliveryService {
       console.error("[saveReal] sync CT", e);
       ctSyncFailed = true;
     }
-    await syncOrderStatusByDetailId(detailId, y).catch(() => null);
+    // Không tính trạng thái đơn dựa trên CT cũ khi đồng bộ CT đã lỗi
+    if (!ctSyncFailed) {
+      await syncOrderStatusByDetailId(detailId, y).catch((e) => {
+        console.error("[saveReal] sync order status", e);
+        return null;
+      });
+    }
 
     await writeAudit({
       email: user.email,
@@ -1434,7 +1440,7 @@ export class DeliveryService {
       throw {
         code: "PARTIAL_WRITE",
         message:
-          "Đã lưu giao hàng (GH) nhưng cập nhật SoLuong/trạng thái chi tiết xe thất bại. Vui lòng bấm lưu lại.",
+          "Đã lưu các dòng giao hàng (GH) nhưng cập nhật SoLuong/trạng thái chi tiết xe thất bại. Vui lòng TẢI LẠI chi tiết xe và kiểm tra, không bấm lưu lại từ form cũ (dòng mới sẽ bị tạo trùng).",
       };
     }
 
