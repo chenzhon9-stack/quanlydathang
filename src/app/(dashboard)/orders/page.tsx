@@ -99,7 +99,9 @@ function OrderActions({
   const canUpdate = clientHasAny(user, [...ACTION.orderUpdate]);
   const canSend = clientHasAny(user, [...ACTION.orderSend]);
   const canCancel = clientHasAny(user, [...ACTION.orderCancel]);
-  // Reset: API đã gắn o.canReset (ngày + còn xe chưa nhận); quyền admin/purchase
+  /** Write-scope từ API — ẩn nút ghi trên đơn chỉ-đọc (vd DISPATCHER+VIEWER xem Quanly) */
+  const canWrite = o.canWrite !== false;
+  // Reset: API đã gắn o.canReset (đã AND write-scope); quyền admin/purchase/dispatcher
   const canResetBtn =
     clientHasAny(user, [...ACTION.orderUpdate, ...ACTION.orderCancel]) &&
     Boolean(o.canReset);
@@ -267,8 +269,8 @@ function OrderActions({
 
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
-      {/* V21: chưa gửi → Thêm (openOrderFlow / OrderManage) */}
-      {neverSent && canUpdate && (
+      {/* V21: chưa gửi → Thêm — cần ORDER_UPDATE + canWrite (write-scope) */}
+      {neverSent && canUpdate && canWrite && (
         <button
           type="button"
           onClick={() => onManageOrder?.(o)}
@@ -278,8 +280,8 @@ function OrderActions({
         </button>
       )}
 
-      {/* Gửi — ORDER_SEND · LanGui=0 · có ≥1 CT */}
-      {neverSent && canSend && (
+      {/* Gửi — ORDER_SEND · LanGui=0 · canWrite · có ≥1 CT */}
+      {neverSent && canSend && canWrite && (
         <button
           type="button"
           disabled={!hasDetails}
@@ -293,8 +295,12 @@ function OrderActions({
         </button>
       )}
 
-      {/* Xóa — ORDER_CANCEL · chưa gửi · không terminal · canCancelOrder (V21 D112) */}
-      {!terminal && neverSent && canCancel && o.canCancelOrder !== false && (
+      {/* Xóa — ORDER_CANCEL · canWrite · chưa gửi · canCancelOrder (V21 D112) */}
+      {!terminal &&
+        neverSent &&
+        canCancel &&
+        canWrite &&
+        o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Xóa")}
@@ -303,8 +309,12 @@ function OrderActions({
           Xóa
         </button>
       )}
-      {/* Hủy — ORDER_CANCEL · đã gửi · ẩn terminal / đã nhận (V21 D112; BE enforce) */}
-      {!terminal && !neverSent && canCancel && o.canCancelOrder !== false && (
+      {/* Hủy — ORDER_CANCEL · canWrite · đã gửi · ẩn terminal / đã nhận */}
+      {!terminal &&
+        !neverSent &&
+        canCancel &&
+        canWrite &&
+        o.canCancelOrder !== false && (
         <button
           type="button"
           onClick={() => cancelOrder("Hủy")}
@@ -344,8 +354,8 @@ function OrderActions({
         </button>
       )}
 
-      {/* Gửi lại — ORDER_SEND · GuiLaimail */}
-      {Boolean(o.resendMail) && canSend && (
+      {/* Gửi lại — ORDER_SEND · canWrite · GuiLaimail */}
+      {Boolean(o.resendMail) && canSend && canWrite && (
         <button
           type="button"
           onClick={() => sendOrder(true)}

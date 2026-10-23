@@ -248,6 +248,30 @@ export class OrderService {
       );
     };
 
+    // Write-scope flags — list đọc có thể rộng hơn ghi (DISPATCHER+VIEWER)
+    const writeScope = resolveWriteScope(user);
+    let writableIds = new Set<string>();
+    if (writeScope.scopeType === "ALL") {
+      for (const o of items) {
+        const id = String(o.orderId || "").trim().toUpperCase();
+        if (id) writableIds.add(id);
+      }
+    } else {
+      try {
+        const writable = await applyListScopeFilter(
+          items,
+          writeScope,
+          filter.year
+        );
+        writableIds = new Set(
+          writable.map((o) => String(o.orderId || "").trim().toUpperCase())
+        );
+      } catch (e) {
+        console.error("[listOrders] write-scope filter", e);
+        writableIds = new Set(); // fail-closed: không gắn canWrite
+      }
+    }
+
     items = items.map((o) => {
       const reset = canResetOrder({
         status: o.status,
@@ -262,7 +286,14 @@ export class OrderService {
         ctMetaOk &&
         !isTerminalOrder(String(o.status || "")) &&
         hasReceived.get(o.orderId) !== true;
-      return { ...o, canReset: reset.ok, canCancelOrder };
+      const oid = String(o.orderId || "").trim().toUpperCase();
+      const canWrite = writableIds.has(oid);
+      return {
+        ...o,
+        canReset: reset.ok && canWrite,
+        canCancelOrder,
+        canWrite,
+      };
     });
 
     return {
@@ -292,42 +323,11 @@ export class OrderService {
       throw { code: "ORDER_NOT_FOUND", message: "Không tìm thấy đơn hàng" };
     }
 
-    // V21.07 multi-role: pass nếu BẤT KỲ nhánh scope match (union)
+    // Đọc: applyListScopeFilter (OWNER ∪ MANAGEMENT ∪ OWN_CUSTOMER)
+    const y = year ?? currentYearVN();
     if (scope.scopeType !== "ALL") {
-      const allowOwner =
-        scope.scopeType === "OWNER" ||
-        scope.scopeType === "UNION" ||
-        !!scope.allowOwner;
-      const allowMgmt =
-        scope.scopeType === "MANAGEMENT" ||
-        scope.scopeType === "UNION" ||
-        !!scope.allowManagement;
-      let ok = false;
-      if (
-        allowOwner &&
-        scope.ownerEmail &&
-        (order.createdBy || "").toLowerCase() ===
-          scope.ownerEmail.toLowerCase()
-      ) {
-        ok = true;
-      }
-      if (!ok && allowMgmt) {
-        const allowed = await resolveAllowedSupplierIds({
-          ...scope,
-          scopeType: "MANAGEMENT",
-        });
-        // null = quanly all → mọi NCC
-        if (allowed === null) {
-          ok = true;
-        } else if (
-          order.supplierId &&
-          (allowed.has(order.supplierId) ||
-            allowed.has(String(order.supplierId).toUpperCase()))
-        ) {
-          ok = true;
-        }
-      }
-      if (!ok) {
+      const visible = await applyListScopeFilter([order], scope, y);
+      if (!visible.length) {
         throw {
           code: "SCOPE_DENIED",
           message: "Không thuộc phạm vi dữ liệu của bạn",
@@ -335,10 +335,19 @@ export class OrderService {
       }
     }
 
+    // Ghi: cờ canWrite theo resolveWriteScope (UI modal/list)
+    const writeScope = resolveWriteScope(user);
+    let canWrite = writeScope.scopeType === "ALL";
+    if (!canWrite) {
+      const writable = await applyListScopeFilter([order], writeScope, y);
+      canWrite = writable.length > 0;
+    }
+
     const nccMap = await MasterRepository.nccNames();
     const nccSend = await MasterRepository.nccSendMethods();
     return {
       ...order,
+      canWrite,
       supplierName:
         order.supplierName || nccMap[order.supplierId] || order.supplierId,
       sendMethod:

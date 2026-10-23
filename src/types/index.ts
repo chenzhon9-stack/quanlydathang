@@ -80,6 +80,12 @@ export interface Order {
    * BE cancelOrder vẫn enforce lại.
    */
   canCancelOrder?: boolean;
+  /**
+   * Đơn nằm trong resolveWriteScope của user (OWNER / MANAGEMENT / OWN_CUSTOMER / UNION ghi).
+   * UI chỉ hiện Thêm/Gửi/Xóa/Hủy/Reset khi true (+ permission tương ứng).
+   * List vẫn có thể hiện đơn chỉ-đọc (DISPATCHER+VIEWER xem theo Quanly).
+   */
+  canWrite?: boolean;
 }
 
 export interface OrderDetail {
