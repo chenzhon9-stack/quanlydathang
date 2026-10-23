@@ -756,6 +756,95 @@ export function resolveScope(user: UserContext): AccessScope {
   };
 }
 
+/**
+ * Scope **ghi** (sửa/gửi/thêm xe/plan/real/reset/hủy) — tách khỏi resolveScope (đọc).
+ *
+ * Rule (B2, 2026-10-22):
+ * - DISPATCHER (+ VIEWER/SALES…): ghi chỉ OWNER (đơn DonHang.User = email).
+ *   VIEWER chỉ nới **đọc** theo Quanly — không được sửa/gửi đơn người khác.
+ * - DISPATCHER + PURCHASE: UNION OWNER ∪ MANAGEMENT (ghi theo đơn mình + NCC Quanly).
+ * - Thuần PURCHASE / SALES / …: giống resolveScope (không có nhánh OWNER).
+ * - ADMIN / MANAGER: ALL (MANAGER thường không có ORDER_UPDATE — chặn ở perm).
+ */
+export function resolveWriteScope(user: UserContext): AccessScope {
+  const roles = (user.roles && user.roles.length
+    ? user.roles
+    : [user.role]
+  ).map((r) => r);
+  const base = {
+    role: user.role,
+    roles,
+    quanly: user.quanly,
+    ownerEmail: user.email,
+  };
+
+  if (isAdminRole(user) || userHasRole(user, "ADMIN")) {
+    return { ...base, scopeType: "ALL" };
+  }
+  if (userHasRole(user, "MANAGER")) {
+    return { ...base, scopeType: "ALL" };
+  }
+
+  const allowOwner = userHasRole(user, "DISPATCHER");
+  const allowManagement = userHasRole(user, "PURCHASE");
+  // VIEWER / SALES không mở rộng ghi khi đã có DISPATCHER
+  const allowOwnCustomer =
+    !allowOwner &&
+    userHasAnyRole(user, [
+      "SALES",
+      "VIEWER",
+      "ACCOUNTANT",
+      "CUSTOMER_ACCOUNTANT",
+      "ACCOUNT",
+      "KT_KH",
+    ]);
+
+  const n =
+    (allowOwner ? 1 : 0) +
+    (allowManagement ? 1 : 0) +
+    (allowOwnCustomer ? 1 : 0);
+
+  if (n >= 2) {
+    return {
+      ...base,
+      scopeType: "UNION",
+      allowOwner,
+      allowManagement,
+      allowOwnCustomer,
+    };
+  }
+  if (allowOwner) {
+    return {
+      ...base,
+      scopeType: "OWNER",
+      ownerEmail: user.email,
+      allowOwner: true,
+    };
+  }
+  if (allowManagement) {
+    return {
+      ...base,
+      scopeType: "MANAGEMENT",
+      quanly: user.quanly,
+      allowManagement: true,
+    };
+  }
+  if (allowOwnCustomer) {
+    return {
+      ...base,
+      scopeType: "OWN_CUSTOMER",
+      quanly: user.quanly,
+      allowOwnCustomer: true,
+    };
+  }
+  return {
+    ...base,
+    scopeType: "MANAGEMENT",
+    quanly: user.quanly,
+    allowManagement: true,
+  };
+}
+
 export function hasPermission(user: UserContext, permission: string): boolean {
   if (user.permissions.includes("*")) return true;
   return user.permissions.includes(permission);

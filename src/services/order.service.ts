@@ -7,7 +7,7 @@ import {
   ymdDate,
 } from "@/lib/sheets/date";
 import type { AccessScope, Order, UserContext } from "@/types";
-import { hasPermission, resolveScope } from "@/lib/auth";
+import { hasPermission, resolveScope, resolveWriteScope } from "@/lib/auth";
 import { resolveAcghangOnSave } from "@/lib/default-plan-kh";
 import { assertOrderInScope, isThueNgoaiHtvt } from "@/lib/write-guards";
 import {
@@ -384,9 +384,9 @@ export class OrderService {
     if (!order) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
     }
-    // P0: scope / OWNER — không hủy đơn ngoài phạm vi
+    // P0: write scope — không hủy đơn ngoài phạm vi ghi
     {
-      const scope = resolveScope(user);
+      const scope = resolveWriteScope(user);
       const visible = await applyListScopeFilter([order], scope, y);
       if (!visible.length) {
         throw {
@@ -1368,9 +1368,9 @@ export class OrderService {
         throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
       }
 
-      // Phạm vi — parity _canAccessOrder_
+      // Phạm vi ghi — DISPATCHER chỉ gửi đơn OWNER (VIEWER không nới gửi)
       {
-        const scope = resolveScope(user);
+        const scope = resolveWriteScope(user);
         const visible = await applyListScopeFilter([orderApp], scope, y);
         if (!visible.length) {
           throw {
@@ -2047,9 +2047,9 @@ export class OrderService {
     if (String(order.status).toUpperCase() === "CANCEL") {
       throw { code: "INVALID_STATE", message: "Đơn đã hủy, không thể reset." };
     }
-    // Phạm vi — parity _canAccessOrder_
+    // Phạm vi ghi — parity _canAccessOrder_ (write scope)
     {
-      const scope = resolveScope(user);
+      const scope = resolveWriteScope(user);
       const visible = await applyListScopeFilter([order], scope, y);
       if (!visible.length) {
         throw {

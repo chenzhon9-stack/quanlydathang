@@ -403,6 +403,8 @@ export async function applyListScopeFilter<
       { ...scope, scopeType: "OWNER", allowOwner: true },
       year
     );
+    // null = thiếu ownerEmail / không resolve được → fail-closed (không trả full list)
+    if (!set) return [];
     return filterByOwnerOrderIds(rows, set);
   }
 

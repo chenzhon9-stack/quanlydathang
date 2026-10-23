@@ -43,17 +43,19 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "PLAN_VIEW",
     "PLAN_UPDATE",
   ],
+  /** Điều phối: đủ thêm/sửa/gửi/xóa/hủy trên đơn OWNER (scope ghi); không nhận hàng / không kế hoạch */
   DISPATCHER: [
     "ORDER_VIEW",
     "ORDER_CREATE",
     "ORDER_UPDATE",
     "ORDER_SEND",
+    "ORDER_CANCEL",
     "DELIVERY_VIEW",
     "DELIVERY_UPDATE",
     "DELIVERY_VIEW_ACTUAL_RECEIVE",
     "DELIVERY_VIEW_ACTUAL_DELIVER",
     "REPORT_VIEW",
-    // không PLAN_VIEW / KHSL_VIEW — ẩn tab Kế hoạch
+    // không ORDER_RECEIVE / PLAN_* / KHSL_* — nhận hàng & kế hoạch thuộc PURCHASE
   ],
   SALES: [
     "DELIVERY_VIEW",

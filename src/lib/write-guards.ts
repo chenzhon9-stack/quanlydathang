@@ -1,14 +1,14 @@
 import type { UserContext } from "@/types";
-import { resolveScope } from "@/lib/auth";
+import { resolveWriteScope } from "@/lib/auth";
 import { applyListScopeFilter, resolveAllowedCustomerIds } from "@/lib/scope";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isAcghangId } from "@/lib/default-plan-kh";
 
 /**
- * Pipeline: Auth → Permission → **Scope** → Business Rule.
- * Kiểm tra đơn cha nằm trong phạm vi user (parity _canAccessOrder_) trước khi ghi.
- * Đơn không tìm thấy → bỏ qua (service gọi sẽ tự báo NOT_FOUND).
+ * Pipeline: Auth → Permission → **Write Scope** → Business Rule.
+ * resolveWriteScope: DISPATCHER+VIEWER xem theo Quanly nhưng chỉ ghi đơn OWNER.
+ * Đơn không tìm thấy → DENY (fail-closed).
  */
 export async function assertOrderInScope(
   orderId: string | undefined | null,
@@ -17,12 +17,19 @@ export async function assertOrderInScope(
   message: string
 ): Promise<void> {
   const id = String(orderId || "").trim();
-  if (!id) return;
-  const scope = resolveScope(user);
+  if (!id) {
+    throw { code: "PERMISSION_DENIED", message: message || "Thiếu mã đơn." };
+  }
+  const scope = resolveWriteScope(user);
   if (scope.scopeType === "ALL") return;
   const { OrderRepository } = await import("@/repositories/order.repository");
   const order = await OrderRepository.findById(id, year).catch(() => null);
-  if (!order) return;
+  if (!order) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || "Không tìm thấy đơn hoặc ngoài phạm vi ghi.",
+    };
+  }
   const visible = await applyListScopeFilter([order], scope, year);
   if (!visible.length) {
     throw { code: "PERMISSION_DENIED", message };
