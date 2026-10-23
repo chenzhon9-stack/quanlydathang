@@ -323,12 +323,33 @@ export class DeliveryService {
       });
     }
 
+    const attachCanWrite = async (list: typeof rows) => {
+      try {
+        const {
+          resolveWritableOrderIdSet,
+          orderIdWritable,
+        } = await import("@/lib/order-write-flags");
+        const writable = await resolveWritableOrderIdSet(
+          user,
+          filter.year ?? currentYearVN()
+        );
+        return list.map((d) => ({
+          ...d,
+          canWrite: orderIdWritable(d.orderId, writable),
+        }));
+      } catch (e) {
+        console.error("[listDeliveries] canWrite", e);
+        return list.map((d) => ({ ...d, canWrite: false }));
+      }
+    };
+
     if (filter.all) {
+      const items = await attachCanWrite(rows);
       return {
-        items: rows,
+        items,
         page: 1,
-        pageSize: rows.length,
-        total: rows.length,
+        pageSize: items.length,
+        total: items.length,
         hasMore: false,
       };
     }
@@ -336,7 +357,7 @@ export class DeliveryService {
     const pageSize = Math.min(500, Math.max(1, filter.pageSize ?? 100));
     const total = rows.length;
     const start = (page - 1) * pageSize;
-    const items = rows.slice(start, start + pageSize);
+    const items = await attachCanWrite(rows.slice(start, start + pageSize));
     return {
       items,
       page,

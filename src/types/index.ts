@@ -119,6 +119,11 @@ export interface OrderDetail {
   tyleChiahet?: number;
   /** Link PDF đơn (từ DonHang.FileDonhang) */
   orderFile?: string;
+  /**
+   * Đơn cha nằm trong write-scope của user.
+   * UI ẩn Nhận/Hủy/Sửa KH/Giao khi false (vẫn xem được nếu trong read-scope).
+   */
+  canWrite?: boolean;
 }
 
 /**
@@ -175,6 +180,10 @@ export interface Delivery {
    * Email | Zalo | APP …
    */
   sendMethod?: string;
+  /**
+   * Đơn cha nằm trong write-scope — UI khóa Sửa KH / Giao khi false.
+   */
+  canWrite?: boolean;
 }
 
 export interface ProductionPlan {

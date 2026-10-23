@@ -142,7 +142,9 @@ function modeFromDelivery(
   d: Delivery,
   canUpdate = true
 ): DeliveryModalMode {
-  const label = canUpdate ? actionLabel(d) : "Xem";
+  // Permission DELIVERY_UPDATE + write-scope đơn cha
+  const allowWrite = canUpdate && d.canWrite !== false;
+  const label = allowWrite ? actionLabel(d) : "Xem";
   if (label === "Xem") return "view";
   if (label === "Sửa") return "plan";
   return "real";

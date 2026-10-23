@@ -285,8 +285,10 @@ function DetailActions({
   const btn =
     "min-h-[30px] px-2.5 py-1 text-xs font-semibold rounded-md border whitespace-nowrap active:opacity-80";
   const guiLai = !!(d as { guiLaimail?: boolean }).guiLaimail;
+  /** Write-scope đơn cha — chỉ-đọc khi false (vd DISPATCHER xem đơn Quanly) */
+  const canWrite = d.canWrite !== false;
 
-  if (st === "CANCEL" || st === "DELETE" || st === "DONE") {
+  if (st === "CANCEL" || st === "DELETE" || st === "DONE" || !canWrite) {
     return (
       <div className="flex flex-wrap gap-1 justify-end">
         <button

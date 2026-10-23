@@ -149,7 +149,27 @@ export class DetailService {
     const pageSize = Math.min(100, Math.max(1, filter.pageSize ?? 50));
     const total = rows.length;
     const start = (page - 1) * pageSize;
-    const items = rows.slice(start, start + pageSize);
+    let items = rows.slice(start, start + pageSize);
+
+    // canWrite theo write-scope đơn cha — khóa Nhận/Hủy/Sửa trên UI
+    try {
+      const {
+        resolveWritableOrderIdSet,
+        orderIdWritable,
+      } = await import("@/lib/order-write-flags");
+      const writable = await resolveWritableOrderIdSet(
+        user,
+        filter.year ?? currentYearVN()
+      );
+      items = items.map((d) => ({
+        ...d,
+        canWrite: orderIdWritable(d.orderId, writable),
+      }));
+    } catch (e) {
+      console.error("[listDetails] canWrite", e);
+      items = items.map((d) => ({ ...d, canWrite: false }));
+    }
+
     return {
       items,
       page,

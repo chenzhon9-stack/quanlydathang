@@ -288,6 +288,8 @@ export function OrderManageModal({
 
   const editable = useMemo(() => {
     if (!order) return false;
+    // Write-scope: getOrder gắn canWrite — chỉ xem khi false
+    if (order.canWrite === false) return false;
     const st = String(order.status || "");
     return (
       st === "NEW" ||
@@ -299,6 +301,10 @@ export function OrderManageModal({
 
   async function saveAll() {
     if (!order || !orderId) return;
+    if (order.canWrite === false) {
+      setErr("Đơn ngoài phạm vi ghi — chỉ xem, không được lưu.");
+      return;
+    }
     setErr(null);
 
     // Trùng xe + hàng (parity V21 Frontend)
