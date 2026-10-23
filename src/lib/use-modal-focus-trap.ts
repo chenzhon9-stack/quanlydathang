@@ -42,7 +42,9 @@ export function useModalFocusTrap(
     // Đợi 1 frame — nội dung modal (picker) có thể mount sau
     const t = window.setTimeout(() => {
       const nodes = listFocusable(panel);
-      if (nodes.length > 0) {
+      const prefer = panel.querySelector<HTMLElement>("[data-initial-focus]");
+      if (prefer) prefer.focus();
+	else if (nodes.length > 0) {
         nodes[0]!.focus();
       } else {
         panel.focus();

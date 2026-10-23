@@ -389,6 +389,7 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
             </div>
             <MasterPicker
               type="NCC"
+		autoFocus
               value={supplierId}
               displayName={supplierName}
               disabled={details.some((d) => !!d.productId)}
