@@ -1,7 +1,7 @@
 import { writeAudit } from "@/lib/sheets/audit";
 import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, UserContext } from "@/types";
-import { hasPermission , resolveScope} from "@/lib/auth";
+import { hasPermission, resolveWriteScope } from "@/lib/auth";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
@@ -439,7 +439,7 @@ export class DetailService {
         () => null
       );
       if (order) {
-        const scope = resolveScope(user);
+        const scope = resolveWriteScope(user);
         const visible = await applyListScopeFilter([order], scope, y);
         if (!visible.length) {
           throw {
