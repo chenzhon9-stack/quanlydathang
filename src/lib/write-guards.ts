@@ -1,5 +1,5 @@
 import type { UserContext } from "@/types";
-import { resolveWriteScope } from "@/lib/auth";
+import { resolveScope, resolveWriteScope } from "@/lib/auth";
 import { applyListScopeFilter, resolveAllowedCustomerIds } from "@/lib/scope";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
