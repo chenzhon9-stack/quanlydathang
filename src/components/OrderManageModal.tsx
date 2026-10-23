@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
@@ -10,6 +10,7 @@ import {
   isAcghangBufferKh,
   phanLoaiFromMasterRaw,
 } from "@/lib/default-plan-kh";
+import { useModalFocusTrap } from "@/lib/use-modal-focus-trap";
 import type { Order, OrderDetail, Delivery } from "@/types";
 
 type GhRow = {
@@ -124,6 +125,8 @@ export function OrderManageModal({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap(!!orderId, panelRef);
 
   const load = useCallback(async () => {
     if (!orderId) return;
@@ -586,12 +589,17 @@ export function OrderManageModal({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col border"
+        aria-labelledby="manage-order-title"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[94vh] flex flex-col border outline-none"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="font-bold text-slate-800 text-sm sm:text-base">
+          <h3
+            id="manage-order-title"
+            className="font-bold text-slate-800 text-sm sm:text-base"
+          >
             Quản lý Đơn: {orderId}
           </h3>
           <button

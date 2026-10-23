@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { MasterPicker } from "@/components/MasterPicker";
 import { DecimalInput, parseDecimalVN, formatDecimalVN } from "@/components/DecimalInput";
 import { apiPost } from "@/components/ActionPrompt";
@@ -10,6 +10,7 @@ import {
   isAcghangBufferKh,
   phanLoaiFromMasterRaw,
 } from "@/lib/default-plan-kh";
+import { useModalFocusTrap } from "@/lib/use-modal-focus-trap";
 
 /** datetime-local value from Date (local) */
 function toDatetimeLocalValue(d = new Date()): string {
@@ -103,6 +104,8 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
   const [details, setDetails] = useState<DetailRow[]>([emptyDetail()]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap(open, panelRef);
 
   // Mỗi lần mở modal: reset form + dòng KH mặc định acghang
   useEffect(() => {
@@ -341,12 +344,16 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col border border-slate-200"
+        aria-labelledby="create-order-title"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col border border-slate-200 outline-none"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b">
-          <h3 className="font-bold text-slate-800">+ Tạo đơn hàng mới</h3>
+          <h3 id="create-order-title" className="font-bold text-slate-800">
+            + Tạo đơn hàng mới
+          </h3>
           <button
             type="button"
             onClick={() => !busy && onClose()}
