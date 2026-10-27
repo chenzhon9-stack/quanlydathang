@@ -12,18 +12,26 @@ import {
 } from "@/lib/default-plan-kh";
 import { useModalFocusTrap } from "@/lib/use-modal-focus-trap";
 
-/** datetime-local value from Date (local) */
+/** datetime-local value from Date (local) — đủ giây (parity GAS / MaDon HHmmss) */
 function toDatetimeLocalValue(d = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/** ISO-ish local string for API: yyyy-MM-ddTHH:mm:ss */
+/**
+ * ISO-ish local string for API: yyyy-MM-ddTHH:mm:ss
+ * Browser datetime-local thường chỉ trả HH:mm — không gắn :00 cố định (dễ trùng MaDon),
+ * mà lấy giây hiện tại lúc bấm Lưu (gần parity GAS _nowHcm_).
+ */
 function toApiDateTime(local: string): string {
   if (!local) return "";
-  // datetime-local → append :00 if no seconds
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local)) return local + ":00";
-  return local;
+  const s = String(local).trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(s)) return s.slice(0, 19);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${s}:${pad(new Date().getSeconds())}`;
+  }
+  return s;
 }
 
 type DeliveryRow = {

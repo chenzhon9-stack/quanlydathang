@@ -706,12 +706,24 @@ export class OrderService {
     const { qty3, validateStep } = await import("@/lib/business-rules");
 
     // API/logic: yyyy-MM-dd hoặc datetime local; DAL ghi Sheet → serial Date (V21)
-    const ngayDatRaw = String(payload.orderDate || "").trim();
+    // Đủ giây cho MaDon (HHmmss). Không ép :00 — thiếu giây thì lấy giây HCM lúc tạo (parity GAS).
+    const ngayDatRaw = String(payload.orderDate || "").trim().replace(" ", "T");
     let ngayDat = "";
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(ngayDatRaw)) {
-      ngayDat = ngayDatRaw.length === 16 ? ngayDatRaw + ":00" : ngayDatRaw.slice(0, 19);
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(ngayDatRaw)) {
+      ngayDat = ngayDatRaw.slice(0, 19);
+    } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(ngayDatRaw)) {
+      const { formatDateTimeVN } = await import("@/lib/sheets/date");
+      const ss = formatDateTimeVN(new Date()).slice(-2); // HH:mm:ss → ss
+      ngayDat = `${ngayDatRaw}:${ss}`;
     } else {
-      ngayDat = ymdDate(ngayDatRaw) || ymdDate(new Date()) || "";
+      const ymd = ymdDate(ngayDatRaw);
+      if (ymd && ymd === ngayDatRaw.slice(0, 10) && ngayDatRaw.length <= 10) {
+        // Chỉ ngày — gắn full time HCM hiện tại (tránh MaDon …-000000)
+        const { formatDateTimeVN } = await import("@/lib/sheets/date");
+        ngayDat = formatDateTimeVN(new Date()).replace(" ", "T");
+      } else {
+        ngayDat = ymd || ymdDate(new Date()) || "";
+      }
     }
     const y =
       payload.year ??
