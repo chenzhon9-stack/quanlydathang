@@ -367,12 +367,6 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
         </div>
 
         <div className="p-4 overflow-y-auto flex-1 space-y-4">
-          {err && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {err}
-            </div>
-          )}
-
           <div>
             <div className="text-[12px] font-bold text-slate-600 mb-1">
               Ngày đặt hàng
@@ -820,7 +814,15 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
           )}
         </div>
 
-        <div className="px-4 py-3 border-t space-y-1">
+        <div className="px-4 py-3 border-t space-y-2">
+          {err && (
+            <div
+              role="alert"
+              className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium"
+            >
+              {err}
+            </div>
+          )}
           <button
             type="button"
             disabled={busy}

@@ -639,11 +639,6 @@ export function OrderManageModal({
           {loading && (
             <div className="text-center text-slate-500 py-8">Đang tải…</div>
           )}
-          {err && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {err}
-            </div>
-          )}
 
           {!loading &&
             blocks.map((b, bi) => {
@@ -1121,41 +1116,51 @@ export function OrderManageModal({
             })}
         </div>
 
-        <div className="px-4 py-3 border-t flex flex-wrap gap-2 justify-end">
-          {editable && blocks.length < 6 && (
+        <div className="px-4 py-3 border-t space-y-2">
+          {err && (
+            <div
+              role="alert"
+              className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 font-medium"
+            >
+              {err}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 justify-end">
+            {editable && blocks.length < 6 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setBlocks((rows) => [...rows, emptyBlock()])}
+                className="px-3 py-2 text-sm font-semibold rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+              >
+                + Thêm xe
+              </button>
+            )}
+            {editable && (
+              <button
+                type="button"
+                disabled={busy || loading}
+                onClick={saveAll}
+                title="Shift+S hoặc Ctrl+Enter — lưu · Ctrl+D — copy khối xe cuối"
+                className="px-4 py-2 text-sm font-bold rounded-xl bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-50"
+              >
+                {busy ? "Đang lưu…" : "💾 LƯU THAY ĐỔI"}
+                {!busy && (
+                  <span className="ml-2 text-[11px] font-semibold opacity-80">
+                    ⇧S
+                  </span>
+                )}
+              </button>
+            )}
             <button
               type="button"
               disabled={busy}
-              onClick={() => setBlocks((rows) => [...rows, emptyBlock()])}
-              className="px-3 py-2 text-sm font-semibold rounded-xl border border-slate-300 bg-white hover:bg-slate-50"
+              onClick={onClose}
+              className="px-3 py-2 text-sm font-semibold rounded-xl bg-slate-200 text-slate-700"
             >
-              + Thêm xe
+              Đóng
             </button>
-          )}
-          {editable && (
-            <button
-              type="button"
-              disabled={busy || loading}
-              onClick={saveAll}
-              title="Shift+S hoặc Ctrl+Enter — lưu · Ctrl+D — copy khối xe cuối"
-              className="px-4 py-2 text-sm font-bold rounded-xl bg-sky-500 text-white hover:bg-sky-400 disabled:opacity-50"
-            >
-              {busy ? "Đang lưu…" : "💾 LƯU THAY ĐỔI"}
-              {!busy && (
-                <span className="ml-2 text-[11px] font-semibold opacity-80">
-                  ⇧S
-                </span>
-              )}
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onClose}
-            className="px-3 py-2 text-sm font-semibold rounded-xl bg-slate-200 text-slate-700"
-          >
-            Đóng
-          </button>
+          </div>
         </div>
       </div>
     </div>
