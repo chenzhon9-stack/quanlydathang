@@ -310,15 +310,16 @@ export function OrderManageModal({
     }
     setErr(null);
 
-    // Trùng xe + hàng (parity V21 Frontend)
+    // Trùng xe + hàng + khu vực — cùng xe/hàng được nếu khác KV/công trình
     const pairs = new Set<string>();
     for (const b of blocks) {
       const vid = String(b.vehicleId || "").trim().toUpperCase();
       const pid = String(b.productId || "").trim().toUpperCase();
-      if (vid && pid) {
-        const k = `${vid}|${pid}`;
+      const rid = String(b.regionId || "").trim().toUpperCase();
+      if (vid && pid && rid) {
+        const k = `${vid}|${pid}|${rid}`;
         if (pairs.has(k)) {
-          const msg = `Xe "${b.vehicleName || b.vehicleId}" và hàng "${b.productName || b.productId}" xuất hiện 2 lần`;
+          const msg = `Xe "${b.vehicleName || b.vehicleId}", hàng "${b.productName || b.productId}" và khu vực "${b.regionName || b.regionId}" xuất hiện 2 lần`;
           setErr(msg);
           alert("Lỗi: " + msg);
           return;

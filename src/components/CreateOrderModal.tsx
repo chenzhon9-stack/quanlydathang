@@ -180,14 +180,17 @@ export function CreateOrderModal({ open, onClose, onCreated }: Props) {
       setErr("Tối đa 6 xe / đơn");
       return;
     }
-    // Không trùng (xe + hàng) trong cùng đơn — V21
+    // Không trùng (xe + hàng + khu vực) — cùng xe/hàng được nếu khác KV/công trình
     const pairSeen = new Set<string>();
     for (const d of details) {
-      const pair = `${String(d.vehicleId).trim()}|${String(d.productId).trim()}`;
-      if (d.vehicleId && d.productId) {
+      const vid = String(d.vehicleId || "").trim().toUpperCase();
+      const pid = String(d.productId || "").trim().toUpperCase();
+      const rid = String(d.regionId || "").trim().toUpperCase();
+      if (vid && pid && rid) {
+        const pair = `${vid}|${pid}|${rid}`;
         if (pairSeen.has(pair)) {
           setErr(
-            `Trùng biển số xe + hàng hóa trong đơn: ${d.vehicleName || d.vehicleId} / ${d.productName || d.productId}`
+            `Trùng xe + hàng + khu vực trong đơn: ${d.vehicleName || d.vehicleId} / ${d.productName || d.productId} / ${d.regionName || d.regionId}`
           );
           return;
         }

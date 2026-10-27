@@ -679,16 +679,19 @@ export class OrderService {
       };
     }
 
-    // Trùng xe + hàng trong payload (tạo đơn mới — chưa có CT cũ)
-    const pairKey = (v: string, p: string) =>
-      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
+    // Trùng xe + hàng + khu vực trong payload (cùng xe/hàng được nếu khác KV)
+    const tripleKey = (v: string, p: string, r: string) =>
+      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}|${String(r || "").trim().toUpperCase()}`;
     const seen = new Set<string>();
     for (const d of details) {
-      const key = pairKey(d.vehicleId, d.productId);
+      const key = tripleKey(d.vehicleId, d.productId, d.regionId || "");
+      if (!String(d.vehicleId || "").trim() || !String(d.productId || "").trim()) {
+        continue;
+      }
       if (seen.has(key)) {
         throw {
           code: "VALIDATION_ERROR",
-          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
+          message: `Xe "${d.vehicleId}", hàng "${d.productId}" và khu vực "${d.regionId || ""}" xuất hiện 2 lần`,
         };
       }
       seen.add(key);
@@ -1022,19 +1025,25 @@ export class OrderService {
       };
     }
 
-    // Trùng xe+hàng với active hiện có
-    // Trùng xe + hàng với CT active + trong payload (V21, không phân biệt hoa thường)
-    const pairKey = (v: string, p: string) =>
-      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}`;
+    // Trùng xe + hàng + khu vực với CT active + trong payload
+    const tripleKey = (v: string, p: string, r: string) =>
+      `${String(v || "").trim().toUpperCase()}|${String(p || "").trim().toUpperCase()}|${String(r || "").trim().toUpperCase()}`;
     const seen = new Set(
-      active.map((d) => pairKey(d.vehicleId || "", d.productId || "")).filter((k) => k !== "|")
+      active
+        .map((d) =>
+          tripleKey(d.vehicleId || "", d.productId || "", d.regionId || "")
+        )
+        .filter((k) => {
+          const parts = k.split("|");
+          return parts[0] && parts[1]; // có xe + hàng
+        })
     );
     for (const d of details) {
-      const key = pairKey(d.vehicleId, d.productId);
+      const key = tripleKey(d.vehicleId, d.productId, d.regionId || "");
       if (seen.has(key)) {
         throw {
           code: "VALIDATION_ERROR",
-          message: `Xe "${d.vehicleId}" và hàng "${d.productId}" xuất hiện 2 lần`,
+          message: `Xe "${d.vehicleId}", hàng "${d.productId}" và khu vực "${d.regionId || ""}" xuất hiện 2 lần`,
         };
       }
       seen.add(key);
