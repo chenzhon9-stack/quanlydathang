@@ -1,7 +1,7 @@
 import { writeAudit } from "@/lib/sheets/audit";
 import { formatDateTimeVN, ymdDate, todayYmdVN, currentYearVN } from "@/lib/sheets/date";
 import type { AccessScope, UserContext } from "@/types";
-import { hasPermission, resolveWriteScope } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
@@ -450,25 +450,13 @@ export class DetailService {
     if (!ct) {
       throw { code: "NOT_FOUND", message: "Không tìm thấy chi tiết " + detailId };
     }
-    // P0: scope trên đơn cha trước khi hủy/xóa xe
-    {
-      const { OrderRepository } = await import(
-        "@/repositories/order.repository"
-      );
-      const order = await OrderRepository.findById(ct.orderId, y).catch(
-        () => null
-      );
-      if (order) {
-        const scope = resolveWriteScope(user);
-        const visible = await applyListScopeFilter([order], scope, y);
-        if (!visible.length) {
-          throw {
-            code: "PERMISSION_DENIED",
-            message: "Chi tiết thuộc đơn ngoài phạm vi — không được hủy/xóa.",
-          };
-        }
-      }
-    }
+    // Write-scope fail-closed (không bỏ qua khi không đọc được đơn cha)
+    await assertOrderInScope(
+      ct.orderId,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi — không được hủy/xóa."
+    );
     if ((Number(ct.actualReceived) || 0) > 0) {
       throw {
         code: "VALIDATION_ERROR",

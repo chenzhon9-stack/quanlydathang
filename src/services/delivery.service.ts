@@ -1,6 +1,6 @@
 import { writeAudit } from "@/lib/sheets/audit";
 import type { AccessScope, Delivery, UserContext } from "@/types";
-import { hasPermission, resolveScope, isAdminRole } from "@/lib/auth";
+import { hasPermission, isAdminRole } from "@/lib/auth";
 import {
   resolveAllowedSupplierIds,
   resolveAllowedCustomerIds,
@@ -498,9 +498,18 @@ export class DeliveryService {
       };
     }
 
-    // P0: Data Scope trên bản ghi GH / CT / KH
+    // Write-scope đơn cha (fail-closed) — không dùng resolveScope đọc
+    await assertOrderInScope(
+      ct.orderId,
+      user,
+      y,
+      "Chi tiết thuộc đơn ngoài phạm vi ghi — không được cập nhật giao hàng."
+    );
+
+    // Data Scope KH / NCC trên bản ghi GH (lớp bổ sung, dùng write-scope)
     {
-      const scope = resolveScope(user);
+      const { resolveWriteScope } = await import("@/lib/auth");
+      const scope = resolveWriteScope(user);
       if (scope.scopeType !== "ALL") {
         const khAllowed = await resolveAllowedCustomerIds(scope);
         const targetKh = String(
@@ -529,31 +538,6 @@ export class DeliveryService {
             throw {
               code: "PERMISSION_DENIED",
               message: "NCC ngoài phạm vi quản lý — không được cập nhật GH.",
-            };
-          }
-        }
-        // OWNER-only: chỉ đơn do mình tạo
-        if (
-          (scope.scopeType === "OWNER" || !!scope.allowOwner) &&
-          !scope.allowManagement &&
-          scope.scopeType !== "UNION"
-        ) {
-          const { OrderRepository } = await import(
-            "@/repositories/order.repository"
-          );
-          const order = await OrderRepository.findById(ct.orderId, y).catch(
-            () => null
-          );
-          const em = String(scope.ownerEmail || user.email || "")
-            .toLowerCase()
-            .trim();
-          const by = String(order?.createdBy || "")
-            .toLowerCase()
-            .trim();
-          if (em && by && by !== em) {
-            throw {
-              code: "PERMISSION_DENIED",
-              message: "Chỉ thao tác giao hàng trên đơn do mình tạo.",
             };
           }
         }
