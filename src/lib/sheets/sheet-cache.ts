@@ -8,6 +8,8 @@
  * Vẫn giảm mạnh quota Sheets khi user lướt tab / reload liên tiếp.
  */
 
+import { resolveSheetYear } from "./client";
+
 type CacheEntry = {
   at: number;
   rows: Record<string, string>[];
@@ -27,7 +29,8 @@ function ttlMs(): number {
 }
 
 export function sheetCacheKey(sheetName: string, year?: number): string {
-  return `${year ?? "default"}|${sheetName}`;
+  // undefined và năm hiện tại cùng 1 khóa (tránh cache đôi)
+  return `${resolveSheetYear(year)}|${sheetName}`;
 }
 
 export function getSheetCache(

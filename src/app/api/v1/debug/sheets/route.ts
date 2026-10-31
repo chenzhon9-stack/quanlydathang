@@ -4,6 +4,7 @@ import {
   isSheetsConfigured,
   getSpreadsheetId,
   getSheetsClient,
+  listConfiguredYears,
 } from "@/lib/sheets/client";
 import { SHEETS } from "@/lib/sheets/constants";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
@@ -53,6 +54,7 @@ export async function GET(req: NextRequest) {
         ? String(process.env.GOOGLE_SHEETS_SPREADSHEET_ID_2025).slice(0, 12) +
           "…"
         : null,
+      configuredYears: listConfiguredYears(),
       hasPrivateKey: Boolean(process.env.GOOGLE_PRIVATE_KEY),
       privateKeyLooksValid: Boolean(
         process.env.GOOGLE_PRIVATE_KEY?.includes("BEGIN")
