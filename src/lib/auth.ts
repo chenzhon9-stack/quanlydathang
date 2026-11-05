@@ -765,7 +765,7 @@ export function resolveScope(user: UserContext): AccessScope {
  * - DISPATCHER + SALES: UNION OWNER ∪ khách mình quản lý (SALES vẫn ghi giao khách của mình).
  * - DISPATCHER + PURCHASE: UNION OWNER ∪ MANAGEMENT (ghi theo đơn mình + NCC Quanly).
  * - Thuần PURCHASE / SALES / …: giống resolveScope (không có nhánh OWNER).
- * - ADMIN / MANAGER: ALL (MANAGER thường không có ORDER_UPDATE — chặn ở perm).
+ * - ADMIN: ALL. MANAGER thuần: write-scope rỗng (chỉ đọc qua resolveScope ALL).
  */
 export function resolveWriteScope(user: UserContext): AccessScope {
   const roles = (user.roles && user.roles.length
@@ -782,9 +782,7 @@ export function resolveWriteScope(user: UserContext): AccessScope {
   if (isAdminRole(user) || userHasRole(user, "ADMIN")) {
     return { ...base, scopeType: "ALL" };
   }
-  if (userHasRole(user, "MANAGER")) {
-    return { ...base, scopeType: "ALL" };
-  }
+  // MANAGER chỉ nới ĐỌC (resolveScope = ALL). Không gán write-scope ALL.
 
   const allowOwner = userHasRole(user, "DISPATCHER");
   const allowManagement = userHasRole(user, "PURCHASE");
@@ -839,11 +837,12 @@ export function resolveWriteScope(user: UserContext): AccessScope {
       allowOwnCustomer: true,
     };
   }
+  // MANAGER thuần / không role ghi: write-scope rỗng (không khớp đơn)
   return {
     ...base,
-    scopeType: "MANAGEMENT",
-    quanly: user.quanly,
-    allowManagement: true,
+    scopeType: "OWNER",
+    ownerEmail: "__manager_readonly__",
+    allowOwner: true,
   };
 }
 

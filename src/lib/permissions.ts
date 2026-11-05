@@ -226,7 +226,29 @@ export async function resolvePermissionsFromSheets(
   const sheetMap = await loadRolePermissionMap();
   const perms = new Set<string>();
   let fromSheet = false;
+  /** MANAGER baseline read-only — sheet không được nâng quyền ghi cho role MANAGER */
+  const WRITE_PERMS = new Set([
+    "ORDER_CREATE",
+    "ORDER_UPDATE",
+    "ORDER_SEND",
+    "ORDER_CANCEL",
+    "ORDER_RECEIVE",
+    "DELIVERY_UPDATE",
+    "PLAN_UPDATE",
+    "KHSL_UPDATE",
+    "PAYABLE_CREATE",
+    "PAYABLE_CANCEL",
+    "PURCHASE_PRICE_UPDATE",
+    "MASTER_UPDATE",
+    "MASTER_CREATE",
+    "USER_UPDATE",
+    "*",
+  ]);
   for (const role of roles) {
+    if (role === "MANAGER") {
+      permissionsForRole("MANAGER").forEach((p) => perms.add(p));
+      continue;
+    }
     const list = sheetMap[role];
     if (list && list.length) {
       fromSheet = true;
@@ -236,6 +258,26 @@ export async function resolvePermissionsFromSheets(
     }
   }
   if (primary === "ADMIN") perms.add("*");
+
+  const canWriteRole = roles.some((r) =>
+    (
+      [
+        "ADMIN",
+        "PURCHASE",
+        "DISPATCHER",
+        "SALES",
+        "ACCOUNTANT",
+        "CUSTOMER_ACCOUNTANT",
+        "ACCOUNT",
+        "KT_KH",
+      ] as Role[]
+    ).includes(r)
+  );
+  if (!canWriteRole) {
+    for (const p of [...perms]) {
+      if (WRITE_PERMS.has(p)) perms.delete(p);
+    }
+  }
 
   return {
     role: primary,
