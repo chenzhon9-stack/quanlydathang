@@ -22,7 +22,8 @@ function canQuickAdd(user: UserContext): boolean {
     hasPermission(user, "*") ||
     hasPermission(user, "MASTER_UPDATE") ||
     hasPermission(user, "ORDER_UPDATE") ||
-    ["ADMIN", "MANAGER", "PURCHASE", "DISPATCHER"].includes(
+    // MANAGER read-only — không quick-add theo tên role (P1)
+    ["ADMIN", "PURCHASE", "DISPATCHER"].includes(
       String(user.role || "").toUpperCase()
     )
   );

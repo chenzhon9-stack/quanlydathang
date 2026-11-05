@@ -668,6 +668,16 @@ export class OrderService {
     if (!maNcc) {
       throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp." };
     }
+    // PURCHASE / UNION+PURCHASE: chỉ tạo đơn NCC trong Quanly
+    {
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        maNcc,
+        user,
+        "NCC ngoài phạm vi quản lý — không được tạo đơn.",
+        { write: true }
+      );
+    }
     const details = payload.details || [];
     if (!details.length) {
       throw { code: "VALIDATION_ERROR", message: "Chưa có chi tiết đơn hàng." };
@@ -1331,6 +1341,13 @@ export class OrderService {
     }
 
     const y = year ?? currentYearVN();
+    // Write-scope trước MỌI kênh (APP / Email / Zalo / Sheet-only) — P1
+    await assertOrderInScope(
+      orderId,
+      user,
+      y,
+      "Không có quyền gửi đơn này (ngoài phạm vi)."
+    );
     const action = String(sendAction || "").trim();
     const gasUrl =
       process.env.GAS_SEND_ORDER_URL || process.env.GAS_WEBHOOK_URL || "";
@@ -1397,18 +1414,7 @@ export class OrderService {
       if (!orderApp) {
         throw { code: "NOT_FOUND", message: `Không tìm thấy đơn ${orderId}` };
       }
-
-      // Phạm vi ghi — DISPATCHER chỉ gửi đơn OWNER (VIEWER không nới gửi)
-      {
-        const scope = resolveWriteScope(user);
-        const visible = await applyListScopeFilter([orderApp], scope, y);
-        if (!visible.length) {
-          throw {
-            code: "PERMISSION_DENIED",
-            message: "Không có quyền gửi đơn này (ngoài phạm vi).",
-          };
-        }
-      }
+      // Write-scope đã kiểm tra đầu sendOrder (mọi kênh)
 
       const tenNcc =
         String(orderApp.supplierName || orderApp.supplierId || "").trim() ||

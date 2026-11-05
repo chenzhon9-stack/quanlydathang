@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     const supplierId = req.nextUrl.searchParams.get("supplierId") || "";
     if (!supplierId)
       return jsonResponse(error("VALIDATION_ERROR", "Thiếu supplierId"), 400);
-    const items = await PlanningService.productsForSupplier(supplierId);
+    const items = await PlanningService.productsForSupplier(supplierId, user);
     return jsonResponse(success({ items }));
   } catch (e) {
     console.error(e);

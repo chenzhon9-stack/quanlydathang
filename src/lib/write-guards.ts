@@ -1,14 +1,27 @@
-import type { UserContext } from "@/types";
+import type { AccessScope, UserContext } from "@/types";
 import { resolveScope, resolveWriteScope } from "@/lib/auth";
-import { applyListScopeFilter, resolveAllowedCustomerIds } from "@/lib/scope";
+import {
+  applyListScopeFilter,
+  resolveAllowedCustomerIds,
+  resolveAllowedSupplierIds,
+} from "@/lib/scope";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { isAcghangId } from "@/lib/default-plan-kh";
+
+/** Scope có nhánh lọc theo NCC (MANAGEMENT hoặc UNION+PURCHASE). */
+export function scopeIncludesManagement(scope: AccessScope): boolean {
+  return (
+    scope.scopeType === "MANAGEMENT" ||
+    (scope.scopeType === "UNION" && !!scope.allowManagement)
+  );
+}
 
 /**
  * Pipeline: Auth → Permission → **Write Scope** → Business Rule.
  * resolveWriteScope: DISPATCHER+VIEWER xem theo Quanly nhưng chỉ ghi đơn OWNER.
  * Đơn không tìm thấy → DENY (fail-closed).
+ * OWN_CUSTOMER: Order không có MaKh — fallback GH/CT của đơn.
  */
 export async function assertOrderInScope(
   orderId: string | undefined | null,
@@ -31,8 +44,74 @@ export async function assertOrderInScope(
     };
   }
   const visible = await applyListScopeFilter([order], scope, year);
-  if (!visible.length) {
-    throw { code: "PERMISSION_DENIED", message };
+  if (visible.length) return;
+
+  // SALES / OWN_CUSTOMER: đơn cha không mang customerId — kiểm tra GH thuộc đơn
+  const needCust =
+    scope.scopeType === "OWN_CUSTOMER" || !!scope.allowOwnCustomer;
+  if (needCust) {
+    try {
+      const { DetailRepository } = await import(
+        "@/repositories/detail.repository"
+      );
+      const { DeliveryRepository } = await import(
+        "@/repositories/delivery.repository"
+      );
+      const details = await DetailRepository.findMany({
+        year,
+        orderId: id,
+      });
+      const detailIds = new Set(
+        details.map((d) => String(d.detailId || "").trim()).filter(Boolean)
+      );
+      if (detailIds.size) {
+        const ghs = await DeliveryRepository.findMany({
+          year,
+          includeDeleted: false,
+        });
+        const orderGhs = ghs.filter((g) =>
+          detailIds.has(String(g.detailId || "").trim())
+        );
+        const ok = await applyListScopeFilter(orderGhs, scope, year);
+        if (ok.length) return;
+      }
+    } catch {
+      /* fail-closed below */
+    }
+  }
+
+  throw { code: "PERMISSION_DENIED", message };
+}
+
+/**
+ * NCC thuộc write/read scope (PURCHASE / UNION+PURCHASE).
+ * OWNER-only (DISPATCHER thuần): không siết NCC.
+ * OWN_CUSTOMER thuần: không siết NCC (nghiệp vụ theo KH).
+ */
+export async function assertSupplierInScope(
+  supplierId: string | undefined | null,
+  user: UserContext,
+  message: string,
+  opts?: { write?: boolean }
+): Promise<void> {
+  const sid = String(supplierId || "").trim();
+  if (!sid) {
+    throw { code: "VALIDATION_ERROR", message: "Thiếu mã NCC." };
+  }
+  const scope = opts?.write === false ? resolveScope(user) : resolveWriteScope(user);
+  if (scope.scopeType === "ALL") return;
+  if (!scopeIncludesManagement(scope)) return;
+
+  const allowed = await resolveAllowedSupplierIds({
+    ...scope,
+    scopeType: "MANAGEMENT",
+  });
+  if (!allowed) return;
+  if (!allowed.has(sid) && !allowed.has(sid.toUpperCase())) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || "NCC ngoài phạm vi quản lý.",
+    };
   }
 }
 

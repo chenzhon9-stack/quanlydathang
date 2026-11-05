@@ -12,6 +12,7 @@ import { hasPermission } from "@/lib/auth";
 import { filterBySupplierIds, resolveAllowedSupplierIds, filterByCustomerIds, resolveAllowedCustomerIds,
   resolveOwnerOrderIdSet,
   filterByOwnerOrderIds, applyListScopeFilter } from "@/lib/scope";
+import { scopeIncludesManagement } from "@/lib/write-guards";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { isSheetsConfigured } from "@/lib/sheets/client";
@@ -276,8 +277,11 @@ export class ReportService {
       openingsScoped = [];
       payables = [];
     }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    if (scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       openingsScoped = filterBySupplierIds(openingsScoped, allowed);
       detailsScoped = filterBySupplierIds(detailsScoped, allowed);
       payables = filterBySupplierIds(payables, allowed);

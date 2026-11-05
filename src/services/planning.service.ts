@@ -227,11 +227,28 @@ export class PlanningService {
     );
     if (!p) throw { code: "NOT_FOUND", message: "Không tìm thấy kế hoạch" };
 
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
-      if (allowed && !allowed.has(p.supplierId)) {
+    // MANAGEMENT hoặc UNION+PURCHASE; OWN_CUSTOMER không xem KHSL theo NCC
+    if (scope.scopeType === "OWN_CUSTOMER" && !scope.allowManagement) {
+      throw { code: "PERMISSION_DENIED", message: "Ngoài phạm vi quản lý" };
+    }
+    if (
+      scope.scopeType === "MANAGEMENT" ||
+      (scope.scopeType === "UNION" && scope.allowManagement) ||
+      scope.allowManagement
+    ) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
+      if (
+        allowed &&
+        !allowed.has(p.supplierId) &&
+        !allowed.has(String(p.supplierId || "").toUpperCase())
+      ) {
         throw { code: "PERMISSION_DENIED", message: "Ngoài phạm vi quản lý" };
       }
+    } else if (scope.scopeType === "OWNER" && !scope.allowManagement) {
+      throw { code: "PERMISSION_DENIED", message: "Ngoài phạm vi quản lý" };
     }
 
     const nccMap = await MasterRepository.nccNames();
@@ -440,11 +457,28 @@ export class PlanningService {
     return { id, status: "Hủy" };
   }
 
-  static async productsForSupplier(supplierId: string): Promise<
-    Array<{ id: string; name: string }>
-  > {
+  static async productsForSupplier(
+    supplierId: string,
+    user?: UserContext
+  ): Promise<Array<{ id: string; name: string }>> {
+    if (user) {
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        supplierId,
+        user,
+        "NCC ngoài phạm vi — không xem hàng theo NCC.",
+        { write: false }
+      );
+    }
     const hhMap = await MasterRepository.hhNames();
     if (!isSheetsConfigured()) {
+      // Không Sheets: không fallback full HH khi đã có user (tránh lộ danh mục)
+      if (user) {
+        throw {
+          code: "SHEETS_NOT_CONFIGURED",
+          message: "Chưa cấu hình Google Sheets",
+        };
+      }
       return Object.entries(hhMap).map(([id, name]) => ({ id, name }));
     }
     try {
@@ -464,9 +498,14 @@ export class PlanningService {
           name: MasterRepository.resolveName(hhMap, id) || id,
         }));
       }
-    } catch {
-      /* fallthrough */
+    } catch (e) {
+      console.warn("[productsForSupplier] NCC_HH", e);
+      throw {
+        code: "SHEETS_ERROR",
+        message: "Không đọc được mapping NCC-HH",
+      };
     }
-    return Object.entries(hhMap).map(([id, name]) => ({ id, name }));
+    // Không có mapping → trả rỗng (không fallback toàn bộ HH)
+    return [];
   }
 }

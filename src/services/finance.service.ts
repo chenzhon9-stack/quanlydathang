@@ -11,6 +11,7 @@ import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
 } from "@/lib/scope";
+import { scopeIncludesManagement } from "@/lib/write-guards";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { SHEETS } from "@/lib/sheets/constants";
 import {
@@ -116,8 +117,11 @@ export class FinanceService {
       items = items.filter((x) => x.active);
     }
 
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    if (scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       if (allowed) {
         items = items.filter((x) => allowed.has(x.maNcc));
       }
@@ -809,8 +813,11 @@ export class FinanceService {
       throw { code: "VALIDATION_ERROR", message: "Số tiền phải ≠ 0" };
     }
 
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    if (scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       if (allowed && !allowed.has(maNcc)) {
         throw { code: "SCOPE_DENIED", message: "NCC ngoài phạm vi quản lý" };
       }
@@ -922,8 +929,11 @@ export class FinanceService {
         return d >= from && d <= to;
       });
     }
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    if (scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       if (allowed) {
         rows = rows.filter((r) => allowed.has(String(r.MaNCC || "").trim()));
       }
@@ -1027,8 +1037,11 @@ export class FinanceService {
       }))
       .filter((x) => x.supplierId);
 
-    if (scope.scopeType === "MANAGEMENT") {
-      const allowed = await resolveAllowedSupplierIds(scope);
+    if (scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: "MANAGEMENT",
+      });
       items = filterBySupplierIds(items, allowed);
     }
     return { items, year, total: items.length };
@@ -1064,6 +1077,15 @@ export class FinanceService {
     if (!maNcc) throw { code: "VALIDATION_ERROR", message: "Thiếu MaNCC" };
     if (!Number.isFinite(soDuDau)) {
       throw { code: "VALIDATION_ERROR", message: "Số dư không hợp lệ" };
+    }
+    {
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        maNcc,
+        user,
+        "NCC ngoài phạm vi quản lý — không ghi dư đầu năm.",
+        { write: true }
+      );
     }
 
     const rows = await readSheetAsObjects(SHEETS.DD, { year: nam });
