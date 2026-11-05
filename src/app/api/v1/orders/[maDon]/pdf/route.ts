@@ -5,6 +5,7 @@ import { gasCreateOrderPdf } from "@/lib/gas-pdf";
 import { updateSheetRowByKey } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
 import { currentYearVN } from "@/lib/sheets/date";
+import { assertOrderInWriteScopeStrict } from "@/lib/write-guards";
 
 type Ctx = { params: Promise<{ maDon: string }> };
 
@@ -42,6 +43,12 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     }
 
     const year = currentYearVN();
+    await assertOrderInWriteScopeStrict(
+      maDon,
+      user,
+      year,
+      "Đơn ngoài phạm vi ghi — không được tạo PDF / ghi FileDonhang."
+    );
     const pdf = await gasCreateOrderPdf(maDon, { year });
     if (!pdf.ok) {
       return jsonResponse(

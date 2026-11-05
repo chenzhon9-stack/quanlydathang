@@ -88,6 +88,60 @@ export async function assertOrderInScope(
  * OWNER-only (DISPATCHER thuần): không siết NCC.
  * OWN_CUSTOMER thuần: không siết NCC (nghiệp vụ theo KH).
  */
+
+/**
+ * Ghi cấp ĐƠN (gửi / PDF / thêm xe / hủy đơn): OWNER ∪ MANAGEMENT ∪ ADMIN.
+ * Không mở quyền cả đơn chỉ vì có 1 GH thuộc KH (SALES).
+ * DISPATCHER+SALES: chỉ đơn OWNER hoặc NCC (nếu có PURCHASE).
+ */
+export async function assertOrderInWriteScopeStrict(
+  orderId: string | undefined | null,
+  user: UserContext,
+  year: number,
+  message: string
+): Promise<void> {
+  const id = String(orderId || "").trim();
+  if (!id) {
+    throw { code: "PERMISSION_DENIED", message: message || "Thiếu mã đơn." };
+  }
+  const scope = resolveWriteScope(user);
+  if (scope.scopeType === "ALL") return;
+
+  const { OrderRepository } = await import("@/repositories/order.repository");
+  const order = await OrderRepository.findById(id, year).catch(() => null);
+  if (!order) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || "Không tìm thấy đơn hoặc ngoài phạm vi ghi.",
+    };
+  }
+
+  // OWNER: đơn do mình tạo
+  if (scope.scopeType === "OWNER" || scope.allowOwner) {
+    const em = String(scope.ownerEmail || user.email || "")
+      .toLowerCase()
+      .trim();
+    const by = String(order.createdBy || "")
+      .toLowerCase()
+      .trim();
+    if (em && by && by === em) return;
+  }
+
+  // MANAGEMENT / UNION+PURCHASE: theo NCC
+  if (scopeIncludesManagement(scope)) {
+    const allowed = await resolveAllowedSupplierIds({
+      ...scope,
+      scopeType: "MANAGEMENT",
+    });
+    if (!allowed) return; // null = mọi NCC trong nhánh management
+    const sid = String(order.supplierId || "").trim();
+    if (sid && (allowed.has(sid) || allowed.has(sid.toUpperCase()))) return;
+  }
+
+  // OWN_CUSTOMER thuần hoặc chỉ khớp KH — không đủ cho gửi/PDF/thêm xe
+  throw { code: "PERMISSION_DENIED", message };
+}
+
 export async function assertSupplierInScope(
   supplierId: string | undefined | null,
   user: UserContext,
@@ -102,6 +156,41 @@ export async function assertSupplierInScope(
   if (scope.scopeType === "ALL") return;
   if (!scopeIncludesManagement(scope)) return;
 
+  const allowed = await resolveAllowedSupplierIds({
+    ...scope,
+    scopeType: "MANAGEMENT",
+  });
+  if (!allowed) return;
+  if (!allowed.has(sid) && !allowed.has(sid.toUpperCase())) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || "NCC ngoài phạm vi quản lý.",
+    };
+  }
+}
+
+
+/**
+ * Công nợ / giá / dư đầu: chỉ ALL hoặc MANAGEMENT (NCC Quanly).
+ * OWN_CUSTOMER (ACCOUNTANT/SALES) → từ chối (policy: không CN theo mọi NCC).
+ */
+export async function assertFinanceSupplierScope(
+  supplierId: string | undefined | null,
+  user: UserContext,
+  message: string
+): Promise<void> {
+  const sid = String(supplierId || "").trim();
+  if (!sid) {
+    throw { code: "VALIDATION_ERROR", message: "Thiếu mã NCC." };
+  }
+  const scope = resolveWriteScope(user);
+  if (scope.scopeType === "ALL") return;
+  if (!scopeIncludesManagement(scope)) {
+    throw {
+      code: "PERMISSION_DENIED",
+      message: message || "Không có quyền thao tác công nợ/giá theo NCC.",
+    };
+  }
   const allowed = await resolveAllowedSupplierIds({
     ...scope,
     scopeType: "MANAGEMENT",

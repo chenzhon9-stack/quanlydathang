@@ -9,7 +9,7 @@ import {
 import type { AccessScope, Order, UserContext } from "@/types";
 import { hasPermission, resolveScope, resolveWriteScope } from "@/lib/auth";
 import { resolveAcghangOnSave } from "@/lib/default-plan-kh";
-import { assertOrderInScope, isThueNgoaiHtvt } from "@/lib/write-guards";
+import { assertOrderInScope, assertOrderInWriteScopeStrict, isThueNgoaiHtvt } from "@/lib/write-guards";
 import {
   filterBySupplierIds,
   resolveAllowedSupplierIds, applyListScopeFilter } from "@/lib/scope";
@@ -999,7 +999,7 @@ export class OrderService {
       throw { code: "NOT_FOUND", message: "Không tìm thấy đơn " + orderId };
     }
 
-    await assertOrderInScope(
+    await assertOrderInWriteScopeStrict(
       orderId,
       user,
       y,
@@ -1342,7 +1342,7 @@ export class OrderService {
 
     const y = year ?? currentYearVN();
     // Write-scope trước MỌI kênh (APP / Email / Zalo / Sheet-only) — P1
-    await assertOrderInScope(
+    await assertOrderInWriteScopeStrict(
       orderId,
       user,
       y,

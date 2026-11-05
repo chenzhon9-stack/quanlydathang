@@ -11,7 +11,7 @@ import {
   filterBySupplierIds,
   resolveAllowedSupplierIds,
 } from "@/lib/scope";
-import { scopeIncludesManagement } from "@/lib/write-guards";
+import { scopeIncludesManagement, assertFinanceSupplierScope } from "@/lib/write-guards";
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { SHEETS } from "@/lib/sheets/constants";
 import {
@@ -125,6 +125,9 @@ export class FinanceService {
       if (allowed) {
         items = items.filter((x) => allowed.has(x.maNcc));
       }
+    } else if (scope.scopeType !== "ALL") {
+      // ACCOUNTANT/SALES/OWN_CUSTOMER: không xem giá mua mọi NCC
+      items = [];
     }
 
     // Sort: Từ ngày DESC → NCC ASC → Hàng hóa ASC → Khu vực ASC
@@ -813,15 +816,11 @@ export class FinanceService {
       throw { code: "VALIDATION_ERROR", message: "Số tiền phải ≠ 0" };
     }
 
-    if (scopeIncludesManagement(scope)) {
-      const allowed = await resolveAllowedSupplierIds({
-        ...scope,
-        scopeType: "MANAGEMENT",
-      });
-      if (allowed && !allowed.has(maNcc)) {
-        throw { code: "SCOPE_DENIED", message: "NCC ngoài phạm vi quản lý" };
-      }
-    }
+    await assertFinanceSupplierScope(
+      maNcc,
+      user,
+      "NCC ngoài phạm vi — không ghi chứng từ công nợ."
+    );
 
     const ngayCT = ymdDate(input.ngayCT) || ymdDate(new Date()) || "";
     const y = input.year ?? (Number(ngayCT.slice(0, 4)) || currentYearVN());
@@ -937,6 +936,8 @@ export class FinanceService {
       if (allowed) {
         rows = rows.filter((r) => allowed.has(String(r.MaNCC || "").trim()));
       }
+    } else if (scope.scopeType !== "ALL") {
+      rows = [];
     }
 
     const items = rows
@@ -1043,6 +1044,8 @@ export class FinanceService {
         scopeType: "MANAGEMENT",
       });
       items = filterBySupplierIds(items, allowed);
+    } else if (scope.scopeType !== "ALL") {
+      items = [];
     }
     return { items, year, total: items.length };
   }
@@ -1079,12 +1082,10 @@ export class FinanceService {
       throw { code: "VALIDATION_ERROR", message: "Số dư không hợp lệ" };
     }
     {
-      const { assertSupplierInScope } = await import("@/lib/write-guards");
-      await assertSupplierInScope(
+      await assertFinanceSupplierScope(
         maNcc,
         user,
-        "NCC ngoài phạm vi quản lý — không ghi dư đầu năm.",
-        { write: true }
+        "NCC ngoài phạm vi quản lý — không ghi dư đầu năm."
       );
     }
 

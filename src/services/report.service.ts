@@ -184,9 +184,16 @@ export class ReportService {
     const year = filter.year ?? new Date().getFullYear();
     let plans = await ReportRepository.getPlans(year);
 
-    // P0: Data Scope — không tin supplierId client là phạm vi được cấp
-    const allowed = await resolveAllowedSupplierIds(scope);
-    plans = filterBySupplierIds(plans, allowed);
+    // P0: KHSL theo NCC — chỉ ALL / MANAGEMENT; OWN_CUSTOMER/OWNER → rỗng
+    if (scope.scopeType === "ALL" || scopeIncludesManagement(scope)) {
+      const allowed = await resolveAllowedSupplierIds({
+        ...scope,
+        scopeType: scope.scopeType === "ALL" ? "ALL" : "MANAGEMENT",
+      });
+      plans = filterBySupplierIds(plans, allowed);
+    } else {
+      plans = [];
+    }
 
     if (filter.supplierId) {
       const sid = String(filter.supplierId).trim();
@@ -485,6 +492,11 @@ export class ReportService {
     ) {
       throw { code: "PERMISSION_DENIED", message: "Không có quyền xem công nợ" };
     }
+    await assertFinanceSupplierScope(
+      supplierId,
+      user,
+      "NCC ngoài phạm vi — không xem chi tiết công nợ."
+    );
     const yearHint = filter.year ?? new Date().getFullYear();
     const fromDate = (filter.fromDate || `${yearHint}-01-01`).slice(0, 10);
     const toDate = (filter.toDate || `${yearHint}-12-31`).slice(0, 10);

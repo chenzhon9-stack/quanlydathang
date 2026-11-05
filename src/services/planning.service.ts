@@ -285,6 +285,15 @@ export class PlanningService {
       throw { code: "VALIDATION_ERROR", message: "Thiếu tên chương trình" };
     if (!supplierId)
       throw { code: "VALIDATION_ERROR", message: "Thiếu nhà cung cấp" };
+    {
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        supplierId,
+        user,
+        "NCC ngoài phạm vi — không tạo kế hoạch.",
+        { write: true }
+      );
+    }
     if (!productIds.length)
       throw { code: "VALIDATION_ERROR", message: "Chọn ít nhất 1 hàng hóa" };
     if (!fromDate || !toDate)
@@ -367,6 +376,23 @@ export class PlanningService {
       (x) => String(x.id).toUpperCase() === String(id).trim().toUpperCase()
     );
     if (!found) throw { code: "NOT_FOUND", message: "Không tìm thấy kế hoạch" };
+    {
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        found.supplierId,
+        user,
+        "NCC ngoài phạm vi — không sửa kế hoạch.",
+        { write: true }
+      );
+      if (input.supplierId != null && String(input.supplierId).trim()) {
+        await assertSupplierInScope(
+          String(input.supplierId).trim(),
+          user,
+          "NCC mới ngoài phạm vi — không chuyển kế hoạch.",
+          { write: true }
+        );
+      }
+    }
     if (isPlanCancelled(found.status)) {
       throw { code: "INVALID_STATE", message: "Kế hoạch đã hủy, không sửa được." };
     }
@@ -436,6 +462,20 @@ export class PlanningService {
       throw { code: "SHEETS_NOT_CONFIGURED", message: "Chưa cấu hình Sheets" };
     }
     const y = year ?? currentYearVN();
+    {
+      const existing = await ReportRepository.getPlans(y);
+      const found = existing.find(
+        (x) => String(x.id).toUpperCase() === String(id).trim().toUpperCase()
+      );
+      if (!found) throw { code: "NOT_FOUND", message: "Không tìm thấy kế hoạch" };
+      const { assertSupplierInScope } = await import("@/lib/write-guards");
+      await assertSupplierInScope(
+        found.supplierId,
+        user,
+        "NCC ngoài phạm vi — không hủy kế hoạch.",
+        { write: true }
+      );
+    }
     await updateSheetRowByKey(
       SHEETS.KHSL,
       "ID_KeHoach",
@@ -462,13 +502,26 @@ export class PlanningService {
     user?: UserContext
   ): Promise<Array<{ id: string; name: string }>> {
     if (user) {
-      const { assertSupplierInScope } = await import("@/lib/write-guards");
-      await assertSupplierInScope(
-        supplierId,
-        user,
-        "NCC ngoài phạm vi — không xem hàng theo NCC.",
-        { write: false }
+      const { resolveScope } = await import("@/lib/auth");
+      const { scopeIncludesManagement, assertSupplierInScope } = await import(
+        "@/lib/write-guards"
       );
+      const scope = resolveScope(user);
+      if (scope.scopeType === "ALL" || scopeIncludesManagement(scope)) {
+        await assertSupplierInScope(
+          supplierId,
+          user,
+          "NCC ngoài phạm vi — không xem hàng theo NCC.",
+          { write: false }
+        );
+      } else if (scope.scopeType === "OWNER" || scope.allowOwner) {
+        // DISPATCHER tạo đơn: được tra HH theo NCC
+      } else {
+        throw {
+          code: "PERMISSION_DENIED",
+          message: "Không có quyền xem hàng hóa theo NCC.",
+        };
+      }
     }
     const hhMap = await MasterRepository.hhNames();
     if (!isSheetsConfigured()) {

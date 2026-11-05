@@ -252,12 +252,20 @@ export async function resolvePermissionsFromSheets(
     const list = sheetMap[role];
     if (list && list.length) {
       fromSheet = true;
-      list.forEach((p) => perms.add(p));
+      for (const perm of list) {
+        // Chỉ ADMIN được *; sheet không được nâng role khác thành admin
+        if (perm === "*" && role !== "ADMIN") continue;
+        perms.add(perm);
+      }
     } else {
-      permissionsForRole(role).forEach((p) => perms.add(p));
+      permissionsForRole(role).forEach((p) => {
+        if (p === "*" && role !== "ADMIN") return;
+        perms.add(p);
+      });
     }
   }
-  if (primary === "ADMIN") perms.add("*");
+  if (primary === "ADMIN" || roles.includes("ADMIN" as Role)) perms.add("*");
+  else perms.delete("*");
 
   const canWriteRole = roles.some((r) =>
     (
