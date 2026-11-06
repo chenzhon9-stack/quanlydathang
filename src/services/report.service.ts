@@ -12,7 +12,10 @@ import { hasPermission } from "@/lib/auth";
 import { filterBySupplierIds, resolveAllowedSupplierIds, filterByCustomerIds, resolveAllowedCustomerIds,
   resolveOwnerOrderIdSet,
   filterByOwnerOrderIds, applyListScopeFilter } from "@/lib/scope";
-import { scopeIncludesManagement } from "@/lib/write-guards";
+import {
+  scopeIncludesManagement,
+  assertFinanceSupplierScope,
+} from "@/lib/write-guards";
 import { ReportRepository } from "@/repositories/report.repository";
 import { MasterRepository } from "@/repositories/master.repository";
 import { isSheetsConfigured } from "@/lib/sheets/client";
@@ -196,19 +199,12 @@ export class ReportService {
     }
 
     if (filter.supplierId) {
-      const sid = String(filter.supplierId).trim();
-      // Chỉ giữ nếu nằm trong scope (allowed null = ALL)
-      if (
-        allowed &&
-        !allowed.has(sid) &&
-        !allowed.has(sid.toUpperCase())
-      ) {
-        plans = [];
-      } else {
-        plans = plans.filter(
-          (p: ProductionPlan) => p.supplierId === filter.supplierId
-        );
-      }
+      const sid = String(filter.supplierId).trim().toUpperCase();
+
+      plans = plans.filter(
+        (p: ProductionPlan) =>
+          String(p.supplierId || "").trim().toUpperCase() === sid
+      );
     }
 
     return applyPagination(plans, filter.page, filter.pageSize);
