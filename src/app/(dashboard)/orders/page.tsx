@@ -123,6 +123,12 @@ function OrderActions({
   const hasDetails = (Number(o.detailCount) || 0) > 0;
   const terminal = isCancel || isDone;
 
+  /**
+   * GuiLaimail — vẫn hiện Gửi lại kể cả đơn đã Hủy (sau hủy xe đã gửi NCC).
+   * Đơn bị sync thành «Hủy đơn» sau khi hủy xe cuối, nhưng vẫn cần báo NCC.
+   */
+  const showResend = Boolean(o.resendMail) && canSend && canWrite;
+
   /** Năm sheet theo ngày đặt đơn — không hard-code năm máy */
   const orderYear =
     yearOfDate(String(o.orderDateTime || o.orderDate || "")) ||
@@ -263,14 +269,15 @@ function OrderActions({
     await refreshList(data?.via || ch);
   }
 
-  if (terminal) {
+  // Chỉ ẩn hết nút khi terminal VÀ không còn nhu cầu gửi lại (GuiLaimail)
+  if (terminal && !showResend) {
     return <span className="text-[11px] text-slate-400">—</span>;
   }
 
   return (
     <div className="flex flex-wrap gap-1.5 justify-end">
       {/* V21: chưa gửi → Thêm — cần ORDER_UPDATE + canWrite (write-scope) */}
-      {neverSent && canUpdate && canWrite && (
+      {!terminal && neverSent && canUpdate && canWrite && (
         <button
           type="button"
           onClick={() => onManageOrder?.(o)}
@@ -281,7 +288,7 @@ function OrderActions({
       )}
 
       {/* Gửi — ORDER_SEND · LanGui=0 · canWrite · có ≥1 CT */}
-      {neverSent && canSend && canWrite && (
+      {!terminal && neverSent && canSend && canWrite && (
         <button
           type="button"
           disabled={!hasDetails}
@@ -325,7 +332,7 @@ function OrderActions({
       )}
 
       {/* Reset — quá hạn ngày + còn xe chưa nhận (o.canReset từ API) */}
-      {canResetBtn && (
+      {!terminal && canResetBtn && (
         <button
           type="button"
           onClick={async () => {
@@ -354,12 +361,17 @@ function OrderActions({
         </button>
       )}
 
-      {/* Gửi lại — ORDER_SEND · canWrite · GuiLaimail */}
-      {Boolean(o.resendMail) && canSend && canWrite && (
+      {/* Gửi lại — ORDER_SEND · canWrite · GuiLaimail (kể cả đơn đã Hủy) */}
+      {showResend && (
         <button
           type="button"
           onClick={() => sendOrder(true)}
           className="px-2.5 py-1 text-[11px] font-medium rounded bg-violet-600 text-white hover:bg-violet-500"
+          title={
+            isCancel
+              ? "Gửi thông báo hủy / cập nhật đơn cho NCC"
+              : "Gửi lại đơn cho NCC"
+          }
         >
           Gửi lại
         </button>
@@ -936,4 +948,3 @@ export default function OrdersPage() {
     </div>
   );
 }
-
