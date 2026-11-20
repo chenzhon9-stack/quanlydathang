@@ -1105,12 +1105,28 @@ export class DeliveryService {
       };
     }
 
-    await assertOrderInScope(
-      ct.orderId,
-      user,
-      y,
-      "Chi tiết thuộc đơn ngoài phạm vi — không được lưu giao hàng."
-    );
+    // SALES-only: cho phép lưu giao hàng theo KH thuộc scope, kể cả GH đầu tiên
+    // chưa tồn tại để assertOrderInScope có thể dựa vào. Không cấp quyền ghi đơn cha.
+    const allowedKhReal = await salesOnlyAllowedCustomers(user);
+    if (allowedKhReal) {
+      for (const r of rows || []) {
+        if (!customerAllowed(r.customerId, allowedKhReal)) {
+          throw {
+            code: "PERMISSION_DENIED",
+            message:
+              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
+              String(r.customerId || ""),
+          };
+        }
+      }
+    } else {
+      await assertOrderInScope(
+        ct.orderId,
+        user,
+        y,
+        "Chi tiết thuộc đơn ngoài phạm vi — không được lưu giao hàng."
+      );
+    }
 
     const thucNhan = qty3(Number(ct.actualReceived) || 0);
     if (!(thucNhan > 0)) {
@@ -1264,20 +1280,8 @@ export class DeliveryService {
       }
     }
 
-    // Sales-only: dòng của khách ngoài nhóm quản lý giữ nguyên (không sửa / không xóa) — parity GAS
-    const allowedKhReal = await salesOnlyAllowedCustomers(user);
-    if (allowedKhReal) {
-      for (const item of list) {
-        if (!customerAllowed(item.customerId, allowedKhReal)) {
-          throw {
-            code: "PERMISSION_DENIED",
-            message:
-              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
-              item.customerId,
-          };
-        }
-      }
-    }
+    // Sales scope đã kiểm tra toàn bộ rows trước assertOrderInScope ở đầu hàm.
+    // Giữ allowedKhReal để bảo toàn GH ngoài scope trong các bước cập nhật/xóa/tính tổng.
 
     // V21 saveDeliveryData realMode: điều chỉnh KHgiao (over/under + xác nhận từng dòng),
     // gom dòng pending nhỏ, bù sai số Σ KHgiao = ThucNhan, lọc dòng rỗng.
