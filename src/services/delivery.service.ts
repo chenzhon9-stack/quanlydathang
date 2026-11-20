@@ -325,6 +325,22 @@ export class DeliveryService {
 
     const attachCanWrite = async (list: typeof rows) => {
       try {
+        // SALES ghi giao hàng theo KH được quản lý, không theo quyền ghi đơn cha.
+        // Fail-closed: nếu không tải được danh sách KH, không bật thao tác.
+        if (String(user.role || "").trim().toUpperCase() === "SALES") {
+          const allowedCustomers = await resolveAllowedCustomerIds(scope);
+          return list.map((d) => {
+            const customerId = String(d.customerId || "").trim().toUpperCase();
+            const canWriteCustomer =
+              allowedCustomers instanceof Set &&
+              customerId.length > 0 &&
+              [...allowedCustomers].some(
+                (id) => String(id || "").trim().toUpperCase() === customerId
+              );
+            return { ...d, canWrite: canWriteCustomer };
+          });
+        }
+
         const {
           resolveWritableOrderIdSet,
           orderIdWritable,
@@ -806,13 +822,8 @@ export class DeliveryService {
       }
     }
 
-    await assertOrderInScope(
-      orderIdForAudit,
-      user,
-      y,
-      "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
-    );
-    // Sales-only: chỉ lưu dòng khách thuộc nhóm mình quản lý (parity GAS)
+    // SALES-only: cho phép cập nhật kế hoạch theo KH thuộc scope, không cần GH cũ
+    // làm bằng chứng scope đơn. Không cấp quyền ghi toàn bộ đơn cha.
     const allowedKhPlan = await salesOnlyAllowedCustomers(user);
     if (allowedKhPlan) {
       for (const r of rows) {
@@ -826,6 +837,13 @@ export class DeliveryService {
           };
         }
       }
+    } else {
+      await assertOrderInScope(
+        orderIdForAudit,
+        user,
+        y,
+        "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
+      );
     }
 
     const existing = await DeliveryRepository.findMany({
@@ -1089,12 +1107,28 @@ export class DeliveryService {
       };
     }
 
-    await assertOrderInScope(
-      ct.orderId,
-      user,
-      y,
-      "Chi tiết thuộc đơn ngoài phạm vi — không được lưu giao hàng."
-    );
+    // SALES-only: cho phép lưu giao hàng theo KH thuộc scope, kể cả GH đầu tiên
+    // chưa tồn tại để assertOrderInScope có thể dựa vào. Không cấp quyền ghi đơn cha.
+    const allowedKhReal = await salesOnlyAllowedCustomers(user);
+    if (allowedKhReal) {
+      for (const r of rows || []) {
+        if (!customerAllowed(r.customerId, allowedKhReal)) {
+          throw {
+            code: "PERMISSION_DENIED",
+            message:
+              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
+              String(r.customerId || ""),
+          };
+        }
+      }
+    } else {
+      await assertOrderInScope(
+        ct.orderId,
+        user,
+        y,
+        "Chi tiết thuộc đơn ngoài phạm vi — không được lưu giao hàng."
+      );
+    }
 
     const thucNhan = qty3(Number(ct.actualReceived) || 0);
     if (!(thucNhan > 0)) {
@@ -1248,20 +1282,8 @@ export class DeliveryService {
       }
     }
 
-    // Sales-only: dòng của khách ngoài nhóm quản lý giữ nguyên (không sửa / không xóa) — parity GAS
-    const allowedKhReal = await salesOnlyAllowedCustomers(user);
-    if (allowedKhReal) {
-      for (const item of list) {
-        if (!customerAllowed(item.customerId, allowedKhReal)) {
-          throw {
-            code: "PERMISSION_DENIED",
-            message:
-              "Bạn chỉ được lưu giao hàng cho khách hàng thuộc nhóm mình quản lý: " +
-              item.customerId,
-          };
-        }
-      }
-    }
+    // Sales scope đã kiểm tra toàn bộ rows trước assertOrderInScope ở đầu hàm.
+    // Giữ allowedKhReal để bảo toàn GH ngoài scope trong các bước cập nhật/xóa/tính tổng.
 
     // V21 saveDeliveryData realMode: điều chỉnh KHgiao (over/under + xác nhận từng dòng),
     // gom dòng pending nhỏ, bù sai số Σ KHgiao = ThucNhan, lọc dòng rỗng.
