@@ -325,6 +325,22 @@ export class DeliveryService {
 
     const attachCanWrite = async (list: typeof rows) => {
       try {
+        // SALES ghi giao hàng theo KH được quản lý, không theo quyền ghi đơn cha.
+        // Fail-closed: nếu không tải được danh sách KH, không bật thao tác.
+        if (String(user.role || "").trim().toUpperCase() === "SALES") {
+          const allowedCustomers = await resolveAllowedCustomerIds(scope);
+          return list.map((d) => {
+            const customerId = String(d.customerId || "").trim().toUpperCase();
+            const canWriteCustomer =
+              allowedCustomers instanceof Set &&
+              customerId.length > 0 &&
+              [...allowedCustomers].some(
+                (id) => String(id || "").trim().toUpperCase() === customerId
+              );
+            return { ...d, canWrite: canWriteCustomer };
+          });
+        }
+
         const {
           resolveWritableOrderIdSet,
           orderIdWritable,
