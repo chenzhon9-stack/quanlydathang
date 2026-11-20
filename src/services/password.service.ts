@@ -13,7 +13,7 @@ import {
   updateSheetRowByKey,
 } from "@/lib/sheets/dal";
 import { writeAudit } from "@/lib/sheets/audit";
-import { invalidateUserRowCache } from "@/lib/auth";
+import { invalidateUserRowCache, isBlockedAuthEmail } from "@/lib/auth";
 
 const OTP_TTL_MS = 15 * 60 * 1000;
 const PURPOSE_RESET = "reset_password";
@@ -202,6 +202,9 @@ export async function requestPasswordReset(emailRaw: string): Promise<{
   if (!email || !email.includes("@")) {
     return { success: false, message: "", error: "Email không hợp lệ." };
   }
+  if (isBlockedAuthEmail(email)) {
+    return { success: true, message: "Nếu email tồn tại, mã OTP đã được gửi (hiệu lực 15 phút)." };
+  }
 
   // Lớp 1: memory — chặn mọi email (kể cả không tồn tại) → TC09 / anti-spam
   const memErr = checkOtpRateLimitMemory(email);
@@ -283,6 +286,7 @@ export async function resetPasswordWithOtp(input: {
   const confirmPassword = String(input.confirmPassword || "");
 
   if (!email || !otp) return { success: false, error: "Thiếu email hoặc mã OTP." };
+  if (isBlockedAuthEmail(email)) return { success: false, error: "Email này không được phép truy cập ứng dụng." };
   if (newPassword !== confirmPassword) {
     return { success: false, error: "Mật khẩu xác nhận không khớp." };
   }
