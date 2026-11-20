@@ -16,6 +16,7 @@ import {
 import { SHEETS } from "@/lib/sheets/constants";
 import { writeAudit } from "@/lib/sheets/audit";
 import { passwordStrengthError } from "@/services/password.service";
+import { isBlockedAuthEmail } from "@/lib/auth";
 
 const PURPOSE_REGISTER = "register";
 const OTP_TTL_MS = 15 * 60 * 1000;
@@ -183,6 +184,9 @@ export async function requestRegisterOtp(input: {
   if (!email || !isSafeEmail(email)) {
     return { success: false, error: "Email không hợp lệ." };
   }
+  if (isBlockedAuthEmail(email)) {
+    return { success: false, error: "Email này không được phép đăng ký tài khoản." };
+  }
   if (password !== confirm) {
     return { success: false, error: "Mật khẩu xác nhận không khớp." };
   }
@@ -262,6 +266,9 @@ export async function resendRegisterOtp(emailRaw: string): Promise<{
   const email = String(emailRaw || "").trim().toLowerCase();
   if (!email || !isSafeEmail(email)) {
     return { success: false, error: "Email không hợp lệ." };
+  }
+  if (isBlockedAuthEmail(email)) {
+    return { success: false, error: "Email này không được phép đăng ký tài khoản." };
   }
   if (await emailExists(email)) {
     return { success: false, error: "Email này đã tồn tại trong hệ thống." };
@@ -360,6 +367,9 @@ export async function verifyRegisterOtp(input: {
   const otp = String(input.otp || "").trim();
   if (!email || !otp) {
     return { success: false, error: "Thiếu email hoặc mã OTP." };
+  }
+  if (isBlockedAuthEmail(email)) {
+    return { success: false, error: "Email này không được phép đăng ký tài khoản." };
   }
 
   if (await emailExists(email)) {

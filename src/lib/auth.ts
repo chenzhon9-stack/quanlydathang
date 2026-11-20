@@ -5,6 +5,15 @@ import { normalizeRole, permissionsForRole, resolvePermissionsFromSheets } from 
 import { isSheetsConfigured } from "@/lib/sheets/client";
 import { readSheetAsObjects } from "@/lib/sheets/dal";
 import { SHEETS } from "@/lib/sheets/constants";
+/** Email bị cấm truy cập ứng dụng (đăng ký, đăng nhập và xác thực session). */
+const BLOCKED_AUTH_EMAILS = new Set([
+  "dvviethai@gmail.com",
+  "viethai2999@gmail.com",
+]);
+export function isBlockedAuthEmail(email: string): boolean {
+  return BLOCKED_AUTH_EMAILS.has(String(email || "").trim().toLowerCase());
+}
+
 
 /**
  * Stateless session token — bắt buộc trên Vercel serverless.
