@@ -822,13 +822,8 @@ export class DeliveryService {
       }
     }
 
-    await assertOrderInScope(
-      orderIdForAudit,
-      user,
-      y,
-      "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
-    );
-    // Sales-only: chỉ lưu dòng khách thuộc nhóm mình quản lý (parity GAS)
+    // SALES-only: cho phép cập nhật kế hoạch theo KH thuộc scope, không cần GH cũ
+    // làm bằng chứng scope đơn. Không cấp quyền ghi toàn bộ đơn cha.
     const allowedKhPlan = await salesOnlyAllowedCustomers(user);
     if (allowedKhPlan) {
       for (const r of rows) {
@@ -842,6 +837,13 @@ export class DeliveryService {
           };
         }
       }
+    } else {
+      await assertOrderInScope(
+        orderIdForAudit,
+        user,
+        y,
+        "Chi tiết thuộc đơn ngoài phạm vi — không được sửa kế hoạch giao."
+      );
     }
 
     const existing = await DeliveryRepository.findMany({
